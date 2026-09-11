@@ -1,730 +1,717 @@
-<!DOCTYPE html>
-<html lang="en" class="h-full bg-slate-100">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ITE Digital Class Record & Student Portal - Colegio de Kidapawan</title>
+<!doctype html>
+<html lang="en" class="h-full bg-slate-950">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ITE Digital Class Record & Portal - Colegio de Kidapawan Inc.</title>
 
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Inter Font -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- Firebase Compatibility SDKs -->
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-  
-  <!-- SheetJS -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Custom External Stylesheet -->
+    <link rel="stylesheet" href="style.css" />
 
-  <style>
-    body { font-family: 'Inter', sans-serif; }
-  </style>
-</head>
-<body class="h-full antialiased text-slate-800">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
 
-  <!-- Unauthenticated View: Auth Screen -->
-  <div id="authContainer" class="min-h-screen flex items-center justify-center bg-slate-900 px-4 py-12 sm:px-6 lg:px-8">
-    <div class="max-w-md w-full space-y-8 bg-white p-8 rounded-2xl shadow-2xl border border-slate-800">
-      <div class="text-center">
-        <div class="inline-flex p-3 bg-indigo-50 rounded-xl mb-3">
-          <i data-lucide="graduation-cap" class="w-10 h-10 text-indigo-600"></i>
-        </div>
-        <h2 class="text-2xl font-bold text-slate-900 tracking-tight">Colegio de Kidapawan</h2>
-        <p class="text-xs text-slate-500 font-medium uppercase tracking-wider mt-1">ITE Class Record & Portal v2.0</p>
-      </div>
+    <!-- Firebase Compatibility SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
-      <!-- Auth Tabs -->
-      <div class="flex p-1 bg-slate-100 rounded-xl text-xs font-semibold">
-        <button onclick="switchAuthTab('login')" id="tabBtnLogin" class="flex-1 py-2 rounded-lg bg-white shadow text-indigo-600 font-bold transition-all">Sign In</button>
-        <button onclick="switchAuthTab('register')" id="tabBtnRegister" class="flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-900 transition-all">Student Register</button>
-      </div>
-
-      <!-- Login Form -->
-      <form id="formLogin" onsubmit="event.preventDefault(); handleLogin();" class="space-y-4">
-        <div>
-          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Email Address</label>
-          <input type="email" id="loginEmail" required placeholder="user@cdk.edu.ph" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all" />
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Password</label>
-          <input type="password" id="loginPassword" required placeholder="••••••••" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all" />
-        </div>
-        <button type="submit" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm shadow-md transition-all flex items-center justify-center space-x-2">
-          <span>Sign In to Dashboard</span>
-          <i data-lucide="arrow-right" class="w-4 h-4"></i>
-        </button>
-      </form>
-
-      <!-- Student Register Form -->
-      <form id="formRegister" onsubmit="event.preventDefault(); handleStudentRegister();" class="hidden space-y-3">
-        <div>
-          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Full Name</label>
-          <input type="text" id="regFullName" required placeholder="Alcantara, Albert Marquez" class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500" />
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Student ID</label>
-          <input type="text" id="regStudentId" required placeholder="2026-0001" class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500" />
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">School Email</label>
-          <input type="email" id="regEmail" required placeholder="albert@cdk.edu.ph" class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500" />
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Password</label>
-          <input type="password" id="regPassword" required placeholder="••••••••" class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500" />
-        </div>
-        <button type="submit" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-sm shadow-md transition-all">
-          Register Student Account
-        </button>
-      </form>
-
-      <p id="authError" class="text-xs font-medium text-rose-600 text-center min-h-[1rem]"></p>
-    </div>
-  </div>
-
-  <!-- Authenticated Main Dashboard Workspace -->
-  <div id="mainDashboard" class="hidden min-h-screen flex flex-col lg:flex-row">
-
-    <!-- Sidebar Navigation -->
-    <aside class="w-full lg:w-64 bg-slate-900 text-slate-300 flex flex-col justify-between p-4 flex-shrink-0">
-      <div class="space-y-6">
-        <div class="flex items-center space-x-3 px-2">
-          <div class="p-2 bg-indigo-600 text-white rounded-xl">
-            <i data-lucide="layout-dashboard" class="w-5 h-5"></i>
-          </div>
+    <!-- SheetJS for Excel Processing -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  </head>
+  <body
+    class="h-full antialiased text-slate-200 bg-slate-950 flex flex-col min-h-screen"
+  >
+    <!-- Split-Screen Login View -->
+    <div
+      id="authContainer"
+      class="min-h-screen w-full flex flex-col lg:flex-row bg-slate-950"
+    >
+      <!-- Left Hero Image Section -->
+      <div
+        class="lg:w-7/12 relative overflow-hidden bg-slate-900 p-6 sm:p-12 flex flex-col justify-between border-r border-slate-800"
+      >
+        <!-- Top Branding Header -->
+        <div class="flex items-center space-x-4 z-10">
+          <img
+            src="ITELogo.jpg"
+            alt="ITE Seal"
+            class="w-12 h-12 rounded-full border border-emerald-400/50 shadow-lg object-cover"
+          />
           <div>
-            <h1 class="font-bold text-white text-base leading-tight">ITE Workspace</h1>
-            <span id="roleBadge" class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-indigo-900 text-indigo-300 rounded-full">User</span>
+            <h1
+              class="text-sm font-extrabold text-white tracking-wide uppercase"
+            >
+              Colegio de Kidapawan Inc.
+            </h1>
+            <p
+              class="text-xs text-emerald-400 font-bold uppercase tracking-wider"
+            >
+              Information Technology Education Department
+            </p>
           </div>
         </div>
 
-        <nav class="space-y-1">
-          <a href="#" class="flex items-center space-x-3 px-3 py-2.5 rounded-xl bg-indigo-600 text-white font-medium text-sm">
-            <i data-lucide="grid" class="w-4 h-4"></i>
-            <span>Overview Dashboard</span>
-          </a>
-        </nav>
+        <!-- Center Unstretched Faculty Image Container -->
+        <div class="my-auto py-6 banner-aspect-container">
+          <div
+            class="w-full max-w-2xl bg-slate-950 p-2 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden"
+          >
+            <img
+              src="ITEStaff.png"
+              alt="ITE Department Faculty"
+              class="responsive-full-img rounded-xl"
+            />
+          </div>
+        </div>
+
+        <!-- Bottom Portal Badge -->
+        <div class="z-10 pt-4 border-t border-slate-800/80">
+          <span
+            class="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 rounded-md"
+            >Digital Portal v3.0</span
+          >
+          <h2 class="text-xl sm:text-2xl font-black text-white mt-2">
+            Empowering Digital Class Records & Student Services
+          </h2>
+        </div>
       </div>
 
-      <div class="border-t border-slate-800 pt-4 space-y-3 px-2">
-        <div class="flex items-center space-x-3">
-          <div class="w-8 h-8 rounded-full bg-indigo-500 text-white font-bold text-xs flex items-center justify-center" id="userAvatar">U</div>
-          <div class="truncate text-xs">
-            <div id="displayEmail" class="font-semibold text-white truncate">user@cdk.edu.ph</div>
-            <div class="text-slate-500">Active Session</div>
+      <!-- Right Login Form Panel -->
+      <div
+        class="lg:w-5/12 p-8 sm:p-16 flex items-center justify-center bg-slate-900"
+      >
+        <div class="w-full max-w-md space-y-6">
+          <div>
+            <h2 class="text-2xl font-bold text-white">
+              Department Access Portal
+            </h2>
+            <p class="text-xs text-slate-400 mt-1">
+              Sign in with your school credentials or register as a student.
+            </p>
           </div>
+
+          <!-- Auth Mode Tabs (Login / Register) -->
+          <div
+            class="flex p-1 bg-slate-950 border border-slate-800 rounded-xl text-xs font-semibold"
+          >
+            <button
+              type="button"
+              onclick="switchAuthTab('login')"
+              id="tabBtnLogin"
+              class="flex-1 py-2.5 rounded-lg bg-emerald-500 text-slate-950 font-bold transition-all"
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onclick="switchAuthTab('register')"
+              id="tabBtnRegister"
+              class="flex-1 py-2.5 rounded-lg text-slate-400 hover:text-white transition-all"
+            >
+              Student Register
+            </button>
+          </div>
+
+          <!-- Login Form -->
+          <form
+            id="formLogin"
+            onsubmit="
+              event.preventDefault();
+              handleLogin();
+            "
+            class="space-y-4"
+          >
+            <div>
+              <label
+                class="block text-xs font-bold text-slate-300 uppercase mb-1"
+                >School Email</label
+              >
+              <input
+                type="email"
+                id="loginEmail"
+                required
+                placeholder="user@cdk.edu.ph"
+                class="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label
+                class="block text-xs font-bold text-slate-300 uppercase mb-1"
+                >Password</label
+              >
+              <input
+                type="password"
+                id="loginPassword"
+                required
+                placeholder="••••••••"
+                class="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+            <button
+              type="submit"
+              class="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-sm shadow-lg transition-all flex items-center justify-center space-x-2"
+            >
+              <span>Sign In to Portal</span>
+              <i data-lucide="arrow-right" class="w-4 h-4"></i>
+            </button>
+          </form>
+
+          <!-- Student Register Form -->
+          <form
+            id="formRegister"
+            onsubmit="
+              event.preventDefault();
+              handleStudentRegister();
+            "
+            class="hidden space-y-3"
+          >
+            <div>
+              <label
+                class="block text-xs font-bold text-slate-300 uppercase mb-1"
+                >Full Name</label
+              >
+              <input
+                type="text"
+                id="regFullName"
+                required
+                placeholder="Family name, First name, Middle name"
+                class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label
+                class="block text-xs font-bold text-slate-300 uppercase mb-1"
+                >Student ID</label
+              >
+              <input
+                type="text"
+                id="regStudentId"
+                required
+                placeholder="Enter your student ID (e.g. 2026-0001)"
+                class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label
+                class="block text-xs font-bold text-slate-300 uppercase mb-1"
+                >School Email</label
+              >
+              <input
+                type="email"
+                id="regEmail"
+                required
+                placeholder="Enter your school email"
+                class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label
+                class="block text-xs font-bold text-slate-300 uppercase mb-1"
+                >Password</label
+              >
+              <input
+                type="password"
+                id="regPassword"
+                required
+                placeholder="••••••••"
+                class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+            <button
+              type="submit"
+              class="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-sm shadow-lg transition-all"
+            >
+              Register Student Account
+            </button>
+          </form>
+
+          <p
+            id="authError"
+            class="text-xs font-semibold text-rose-500 text-center min-h-[1rem]"
+          ></p>
         </div>
-        <button onclick="handleLogout()" class="w-full py-2 bg-slate-800 hover:bg-rose-600 hover:text-white text-slate-300 font-medium text-xs rounded-xl transition-all flex items-center justify-center space-x-2">
-          <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
-          <span>Sign Out</span>
-        </button>
       </div>
-    </aside>
+    </div>
 
-    <!-- Main Content Work Area -->
-    <main class="flex-1 p-6 lg:p-10 space-y-8 overflow-y-auto">
-
-      <!-- Admin View Module -->
-      <div id="adminView" class="hidden space-y-8">
-        <div>
-          <h2 class="text-2xl font-bold text-slate-900 tracking-tight">Department Administration</h2>
-          <p class="text-sm text-slate-500">Manage faculty status, subject assignments, system activity logs, and semester reports.</p>
-        </div>
-
-        <!-- Metric Stat Cards (Live Firestore Queries) -->
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-5">
-          <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-4">
-            <div class="p-3 bg-indigo-50 text-indigo-600 rounded-xl"><i data-lucide="users" class="w-6 h-6"></i></div>
+    <!-- Authenticated Workspace Area -->
+    <div
+      id="mainDashboard"
+      class="hidden flex-1 flex flex-col min-h-screen bg-slate-950"
+    >
+      <!-- Navigation Header -->
+      <header
+        class="bg-slate-900 border-b border-emerald-500/30 sticky top-0 z-50 shadow-lg"
+      >
+        <div
+          class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between"
+        >
+          <div class="flex items-center space-x-4">
+            <img
+              src="ITELogo.jpg"
+              alt="ITE Logo"
+              class="w-12 h-12 rounded-full border border-emerald-400/50 shadow-md object-cover"
+            />
             <div>
-              <div id="facultyCountDisplay" class="text-2xl font-bold text-slate-900">0</div>
-              <div class="text-xs font-semibold text-slate-500 uppercase">Faculty Accounts</div>
+              <h1
+                class="font-extrabold text-sm sm:text-base text-white tracking-wide uppercase"
+              >
+                Colegio de Kidapawan Inc.
+              </h1>
+              <p
+                class="text-xs text-emerald-400 font-bold tracking-wider uppercase"
+              >
+                Information Technology Education Department
+              </p>
             </div>
           </div>
-          <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-4">
-            <div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl"><i data-lucide="book-check" class="w-6 h-6"></i></div>
-            <div>
-              <div id="subjectsCountDisplay" class="text-2xl font-bold text-slate-900">0</div>
-              <div class="text-xs font-semibold text-slate-500 uppercase">Active Subjects</div>
+
+          <div id="userInfo" class="flex items-center space-x-4"></div>
+        </div>
+      </header>
+
+      <main class="max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-8 flex-1">
+        <!-- INSTRUCTOR DASHBOARD VIEW -->
+        <div
+          id="instructorView"
+          class="hidden grid grid-cols-1 lg:grid-cols-12 gap-8"
+        >
+          <!-- Left Sidebar: Dynamic Assigned Subjects & Drag and Drop Excel Upload -->
+          <div class="lg:col-span-4 space-y-6">
+            <!-- Assigned Subjects Container -->
+            <div
+              class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
+            >
+              <h3
+                class="font-bold text-white text-xs uppercase tracking-wider border-b border-slate-800 pb-3 flex items-center space-x-2"
+              >
+                <i data-lucide="book-open" class="w-4 h-4 text-emerald-400"></i>
+                <span>Department Active Subjects</span>
+              </h3>
+
+              <div id="assignedClassesList" class="space-y-3">
+                <div
+                  class="p-4 rounded-xl border border-slate-800 bg-slate-950 text-center text-xs text-slate-500 animate-pulse"
+                >
+                  Loading subjects from Firebase...
+                </div>
+              </div>
+            </div>
+
+            <!-- Excel Upload Drag & Drop Widget -->
+            <div
+              class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
+            >
+              <h3
+                class="font-bold text-white text-xs uppercase tracking-wider border-b border-slate-800 pb-2 flex items-center space-x-2"
+              >
+                <i
+                  data-lucide="file-spreadsheet"
+                  class="w-4 h-4 text-emerald-400"
+                ></i>
+                <span>Excel Class Record Importer</span>
+              </h3>
+              <p class="text-xs text-slate-400">
+                Upload official department .xlsx template to auto-fill grades.
+              </p>
+
+              <label
+                class="border-2 border-dashed border-emerald-500/40 hover:border-emerald-400 rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer bg-slate-950/60 transition-all text-center group"
+              >
+                <i
+                  data-lucide="folder-up"
+                  class="w-10 h-10 text-emerald-400 mb-2 group-hover:scale-110 transition-transform"
+                ></i>
+                <span class="text-xs font-bold text-emerald-400"
+                  >Drag & Drop Excel Sheet Here</span
+                >
+                <span class="text-[10px] text-slate-500 mt-1"
+                  >or click to browse local files (.xlsx, .xls)</span
+                >
+                <input
+                  type="file"
+                  id="excelFile"
+                  accept=".xlsx, .xls"
+                  class="hidden"
+                  onchange="processExcel()"
+                />
+              </label>
+
+              <button
+                onclick="processExcel()"
+                class="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs shadow-lg transition-all flex items-center justify-center space-x-2"
+              >
+                <i data-lucide="play" class="w-4 h-4"></i>
+                <span>Parse & Load Grade Sheet</span>
+              </button>
             </div>
           </div>
-          <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-4">
-            <div class="p-3 bg-amber-50 text-amber-600 rounded-xl"><i data-lucide="shield-check" class="w-6 h-6"></i></div>
-            <div>
-              <div id="logsCountDisplay" class="text-2xl font-bold text-slate-900">0</div>
-              <div class="text-xs font-semibold text-slate-500 uppercase">Logged Actions</div>
+
+          <!-- Right Main Panel: Live Interactive Spreadsheet Workspace -->
+          <div
+            class="lg:col-span-8 bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-6"
+          >
+            <div
+              class="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-4 gap-3"
+            >
+              <div>
+                <h3 id="currentClassTitle" class="text-lg font-bold text-white">
+                  Select a subject...
+                </h3>
+                <p id="currentClassMeta" class="text-xs text-slate-400">
+                  Awaiting class selection
+                </p>
+              </div>
+              <div class="flex items-center space-x-3">
+                <button
+                  onclick="saveDraftGrades()"
+                  class="px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-bold rounded-xl text-xs transition-all"
+                >
+                  Save Draft
+                </button>
+                <button
+                  onclick="releaseGrades()"
+                  class="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs transition-all"
+                >
+                  Release Grades
+                </button>
+              </div>
+            </div>
+
+            <!-- Grade Grid Table -->
+            <div class="overflow-x-auto rounded-xl border border-slate-800">
+              <table class="w-full text-xs text-left">
+                <thead
+                  class="uppercase bg-slate-950 text-slate-400 border-b border-slate-800 font-semibold"
+                >
+                  <tr>
+                    <th class="px-4 py-3.5">Student ID</th>
+                    <th class="px-4 py-3.5">Full Name</th>
+                    <th class="px-4 py-3.5">Prelim</th>
+                    <th class="px-4 py-3.5">Midterm</th>
+                    <th class="px-4 py-3.5">Finals</th>
+                    <th class="px-4 py-3.5">Average</th>
+                    <th class="px-4 py-3.5">Status</th>
+                  </tr>
+                </thead>
+                <tbody
+                  id="previewBody"
+                  class="divide-y divide-slate-800 bg-slate-900"
+                >
+                  <tr>
+                    <td
+                      colspan="7"
+                      class="px-4 py-12 text-center text-slate-500 italic"
+                    >
+                      No grade sheet parsed yet. Select an assigned class and
+                      import an Excel file to view grades.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
 
-        <!-- Faculty Management Table (Enable / Disable Accounts) -->
-        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <h3 class="font-bold text-slate-900 text-sm uppercase tracking-wider border-b pb-3 flex items-center space-x-2">
-            <i data-lucide="users" class="w-4 h-4 text-indigo-600"></i>
-            <span>Faculty Account Directory & Access Control</span>
-          </h3>
-          <div class="overflow-x-auto rounded-xl border border-slate-200">
-            <table class="w-full text-sm text-left">
-              <thead class="text-xs uppercase bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold">
-                <tr>
-                  <th class="px-5 py-3">Instructor Email</th>
-                  <th class="px-5 py-3">Status</th>
-                  <th class="px-5 py-3">Action</th>
-                </tr>
-              </thead>
-              <tbody id="facultyTableBody" class="divide-y divide-slate-100 bg-white"></tbody>
-            </table>
+        <!-- Admin View Module -->
+        <div id="adminView" class="hidden space-y-8">
+          <!-- Metrics Row -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-5">
+            <div
+              class="bg-slate-900 p-5 rounded-2xl border border-slate-800 flex items-center space-x-4"
+            >
+              <div
+                class="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20"
+              >
+                <i data-lucide="users" class="w-6 h-6"></i>
+              </div>
+              <div>
+                <div
+                  id="facultyCountDisplay"
+                  class="text-2xl font-bold text-white"
+                >
+                  0
+                </div>
+                <div
+                  class="text-xs font-semibold text-slate-400 uppercase tracking-wider"
+                >
+                  Faculty Instructors
+                </div>
+              </div>
+            </div>
+            <div
+              class="bg-slate-900 p-5 rounded-2xl border border-slate-800 flex items-center space-x-4"
+            >
+              <div
+                class="p-3 bg-sky-500/10 text-sky-400 rounded-xl border border-sky-500/20"
+              >
+                <i data-lucide="book-check" class="w-6 h-6"></i>
+              </div>
+              <div>
+                <div
+                  id="subjectsCountDisplay"
+                  class="text-2xl font-bold text-white"
+                >
+                  0
+                </div>
+                <div
+                  class="text-xs font-semibold text-slate-400 uppercase tracking-wider"
+                >
+                  Active Subjects
+                </div>
+              </div>
+            </div>
+            <div
+              class="bg-slate-900 p-5 rounded-2xl border border-slate-800 flex items-center space-x-4"
+            >
+              <div
+                class="p-3 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20"
+              >
+                <i data-lucide="activity" class="w-6 h-6"></i>
+              </div>
+              <div>
+                <div
+                  id="logsCountDisplay"
+                  class="text-2xl font-bold text-white"
+                >
+                  0
+                </div>
+                <div
+                  class="text-xs font-semibold text-slate-400 uppercase tracking-wider"
+                >
+                  Logged System Actions
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
 
-        <!-- Forms: Create Faculty, Add Subject & Assign Subject -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-            <h3 class="font-bold text-slate-900 text-xs uppercase tracking-wider border-b pb-2">Create Faculty</h3>
-            <input type="email" id="instEmail" placeholder="faculty@cdk.edu.ph" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
-            <input type="password" id="instPassword" placeholder="Password" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
-            <button onclick="createInstructor()" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm">Create Account</button>
-          </div>
-
-          <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-            <h3 class="font-bold text-slate-900 text-xs uppercase tracking-wider border-b pb-2">Add Subject</h3>
-            <input type="text" id="subCode" placeholder="Code (e.g. IT211)" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
-            <input type="text" id="subName" placeholder="Subject Name" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
-            <input type="number" id="subUnits" placeholder="Units" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
-            <button onclick="addSubject()" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm">Save Subject</button>
-          </div>
-
-          <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-            <h3 class="font-bold text-slate-900 text-xs uppercase tracking-wider border-b pb-2">Assign Subject to Faculty</h3>
-            <select id="assignFacultySelect" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"></select>
-            <select id="assignSubjectSelect" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"></select>
-            <button onclick="assignSubjectToFaculty()" class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-sm">Assign Subject</button>
-          </div>
-        </div>
-
-        <!-- Semester-Based End-of-Term Department Report -->
-        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <div class="flex items-center justify-between border-b pb-3">
-            <h3 class="font-bold text-slate-900 text-sm uppercase tracking-wider flex items-center space-x-2">
-              <i data-lucide="file-spreadsheet" class="w-4 h-4 text-indigo-600"></i>
-              <span>Semester-Based Department Grade Report</span>
+          <div
+            class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
+          >
+            <h3
+              class="font-bold text-white text-sm uppercase tracking-wider border-b border-slate-800 pb-3 flex items-center space-x-2"
+            >
+              <i data-lucide="users" class="w-4 h-4 text-emerald-400"></i>
+              <span>Faculty Account Directory & Access Control</span>
             </h3>
-            <div class="flex items-center space-x-3">
-              <select id="reportSemesterSelect" class="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold">
-                <option value="1S">1st Semester (2026)</option>
-                <option value="2S">2nd Semester (2026)</option>
-              </select>
-              <button onclick="generateSemesterReport()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl">Generate Report</button>
+            <div class="overflow-x-auto rounded-xl border border-slate-800">
+              <table class="w-full text-sm text-left">
+                <thead
+                  class="text-xs uppercase bg-slate-950 text-slate-400 border-b border-slate-800 font-semibold"
+                >
+                  <tr>
+                    <th class="px-5 py-3">Instructor Email</th>
+                    <th class="px-5 py-3">Status</th>
+                    <th class="px-5 py-3">Action</th>
+                  </tr>
+                </thead>
+                <tbody
+                  id="facultyTableBody"
+                  class="divide-y divide-slate-800 bg-slate-900"
+                ></tbody>
+              </table>
             </div>
           </div>
-          <div id="reportSummaryOutput" class="text-xs text-slate-600 p-4 bg-slate-50 rounded-xl border border-slate-200">
-            <em>Select a semester and click "Generate Report" to calculate departmental standings.</em>
-          </div>
-        </div>
 
-        <!-- Instructor Activity Audit Logs -->
-        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <h3 class="font-bold text-slate-900 text-sm uppercase tracking-wider border-b pb-3 flex items-center space-x-2">
-            <i data-lucide="activity" class="w-4 h-4 text-indigo-600"></i>
-            <span>System Activity & Audit Logs</span>
-          </h3>
-          <div class="overflow-x-auto rounded-xl border border-slate-200">
-            <table class="w-full text-xs text-left">
-              <thead class="uppercase bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold">
-                <tr>
-                  <th class="px-4 py-3">Timestamp</th>
-                  <th class="px-4 py-3">User</th>
-                  <th class="px-4 py-3">Action Details</th>
-                </tr>
-              </thead>
-              <tbody id="logsTableBody" class="divide-y divide-slate-100 bg-white"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- Instructor View Module -->
-      <div id="instructorView" class="hidden space-y-8">
-        <div>
-          <h2 class="text-2xl font-bold text-slate-900 tracking-tight">Instructor Class Record Hub</h2>
-          <p class="text-sm text-slate-500">Upload excel spreadsheets, review staging data, and manage grade releases.</p>
-        </div>
-
-        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Select Assigned Subject Section</label>
-              <select id="classSelect" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium">
-                <option value="IT211_2026_1S">IT211 - Data Structures (1st Sem 2026)</option>
-              </select>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div
+              class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
+            >
+              <h3
+                class="font-bold text-white text-xs uppercase tracking-wider border-b border-slate-800 pb-2"
+              >
+                Create Faculty
+              </h3>
+              <input
+                type="email"
+                id="instEmail"
+                placeholder="faculty@cdk.edu.ph"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+              />
+              <input
+                type="password"
+                id="instPassword"
+                placeholder="Password"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+              />
+              <button
+                onclick="createInstructor()"
+                class="w-full py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-sm"
+              >
+                Provision Instructor
+              </button>
             </div>
-            <div>
-              <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Upload Grade Spreadsheet (.xlsx)</label>
-              <input type="file" id="excelFile" accept=".xlsx, .xls" class="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100" />
+
+            <div
+              class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
+            >
+              <h3
+                class="font-bold text-white text-xs uppercase tracking-wider border-b border-slate-800 pb-2"
+              >
+                Add Subject
+              </h3>
+              <input
+                type="text"
+                id="subCode"
+                placeholder="Code (e.g. IT211)"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+              />
+              <input
+                type="text"
+                id="subName"
+                placeholder="Subject Name"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+              />
+              <input
+                type="number"
+                id="subUnits"
+                placeholder="Units"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+              />
+              <button
+                onclick="addSubject()"
+                class="w-full py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-sm"
+              >
+                Save Subject Code
+              </button>
+            </div>
+
+            <div
+              class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
+            >
+              <h3
+                class="font-bold text-white text-xs uppercase tracking-wider border-b border-slate-800 pb-2"
+              >
+                Assign Subject
+              </h3>
+              <select
+                id="assignFacultySelect"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+              ></select>
+              <select
+                id="assignSubjectSelect"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+              ></select>
+              <button
+                onclick="assignSubjectToFaculty()"
+                class="w-full py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold rounded-xl text-sm"
+              >
+                Assign Subject
+              </button>
             </div>
           </div>
-          <button onclick="processExcel()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm shadow-sm flex items-center justify-center space-x-2 transition-all">
-            <i data-lucide="file-up" class="w-4 h-4"></i>
-            <span>Parse & Preview Excel Dataset</span>
-          </button>
-        </div>
 
-        <!-- Preview Staging Area -->
-        <div id="previewContainer" class="hidden bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
-          <div class="flex items-center justify-between">
-            <h3 class="font-bold text-slate-900 text-base">Grade Staging Table</h3>
-            <span class="text-xs font-semibold px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full">Draft Pending Release</span>
+          <div
+            class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
+          >
+            <div
+              class="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-3 gap-3"
+            >
+              <h3
+                class="font-bold text-white text-sm uppercase tracking-wider flex items-center space-x-2"
+              >
+                <i
+                  data-lucide="file-spreadsheet"
+                  class="w-4 h-4 text-emerald-400"
+                ></i>
+                <span>Semester-Based Department Grade Report</span>
+              </h3>
+              <div class="flex items-center space-x-3">
+                <select
+                  id="reportSemesterSelect"
+                  class="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs font-semibold text-white"
+                >
+                  <option value="1S">1st Semester (2026)</option>
+                  <option value="2S">2nd Semester (2026)</option>
+                </select>
+                <button
+                  onclick="generateSemesterReport()"
+                  class="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-xl"
+                >
+                  Generate Report
+                </button>
+              </div>
+            </div>
+            <div
+              id="reportSummaryOutput"
+              class="text-xs text-slate-400 p-4 bg-slate-950 rounded-xl border border-slate-800"
+            >
+              <em
+                >Select a semester and click "Generate Report" to calculate
+                departmental standings.</em
+              >
+            </div>
           </div>
 
-          <div class="overflow-x-auto rounded-xl border border-slate-200">
-            <table class="w-full text-sm text-left">
-              <thead class="text-xs uppercase bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold">
-                <tr>
-                  <th class="px-5 py-3.5">Student ID</th>
-                  <th class="px-5 py-3.5">Full Name</th>
-                  <th class="px-5 py-3.5">Prelim</th>
-                  <th class="px-5 py-3.5">Midterm</th>
-                  <th class="px-5 py-3.5">Finals</th>
-                </tr>
-              </thead>
-              <tbody id="previewBody" class="divide-y divide-slate-100 bg-white"></tbody>
-            </table>
-          </div>
-
-          <div class="flex flex-col sm:flex-row gap-3">
-            <button onclick="saveDraftGrades()" class="flex-1 py-3 bg-slate-800 hover:bg-slate-900 text-white font-semibold rounded-xl text-sm transition-all">
-              Save Draft (Keep Hidden)
-            </button>
-            <button onclick="releaseGrades()" class="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-sm shadow-md transition-all">
-              Release Official Grades
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Student View Module -->
-      <div id="studentView" class="hidden space-y-8">
-        <div>
-          <h2 class="text-2xl font-bold text-slate-900 tracking-tight">Student Academic Portal</h2>
-          <p class="text-sm text-slate-500">Track your current academic standings and official term performance.</p>
-        </div>
-
-        <div class="bg-indigo-50 border border-indigo-100 p-5 rounded-2xl flex items-start space-x-4">
-          <div class="p-2 bg-indigo-600 text-white rounded-xl"><i data-lucide="bell" class="w-5 h-5"></i></div>
-          <div class="flex-1">
-            <h4 class="font-bold text-indigo-900 text-sm">In-System Announcements</h4>
-            <div id="notificationsContainer" class="text-xs text-indigo-700 mt-1"><em>No unread notifications.</em></div>
+          <div
+            class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
+          >
+            <h3
+              class="font-bold text-white text-sm uppercase tracking-wider border-b border-slate-800 pb-3 flex items-center space-x-2"
+            >
+              <i data-lucide="activity" class="w-4 h-4 text-emerald-400"></i>
+              <span>System Activity & Audit Logs</span>
+            </h3>
+            <div class="overflow-x-auto rounded-xl border border-slate-800">
+              <table class="w-full text-xs text-left">
+                <thead
+                  class="uppercase bg-slate-950 text-slate-400 border-b border-slate-800 font-semibold"
+                >
+                  <tr>
+                    <th class="px-4 py-3">Timestamp</th>
+                    <th class="px-4 py-3">User</th>
+                    <th class="px-4 py-3">Action Details</th>
+                  </tr>
+                </thead>
+                <tbody
+                  id="logsTableBody"
+                  class="divide-y divide-slate-800 bg-slate-900"
+                ></tbody>
+              </table>
+            </div>
           </div>
         </div>
 
-        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <h3 class="font-bold text-slate-900 text-base">Enrolled Subjects & Published Grades</h3>
-          <div class="overflow-x-auto rounded-xl border border-slate-200">
-            <table class="w-full text-sm text-left">
-              <thead class="text-xs uppercase bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold">
-                <tr>
-                  <th class="px-5 py-3.5">Subject / Section</th>
-                  <th class="px-5 py-3.5">Prelim</th>
-                  <th class="px-5 py-3.5">Midterm</th>
-                  <th class="px-5 py-3.5">Finals</th>
-                  <th class="px-5 py-3.5">Term Average</th>
-                  <th class="px-5 py-3.5">Status</th>
-                </tr>
-              </thead>
-              <tbody id="studentGradesBody" class="divide-y divide-slate-100 bg-white"></tbody>
-            </table>
+        <!-- Student View -->
+        <div id="studentView" class="hidden space-y-8">
+          <div
+            class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
+          >
+            <h3 class="font-bold text-white text-base">
+              Enrolled Subjects & Published Grades
+            </h3>
+            <div class="overflow-x-auto rounded-xl border border-slate-800">
+              <table class="w-full text-sm text-left">
+                <thead
+                  class="text-xs uppercase bg-slate-950 text-slate-400 border-b border-slate-800 font-semibold"
+                >
+                  <tr>
+                    <th class="px-5 py-3.5">Subject / Section</th>
+                    <th class="px-5 py-3.5">Prelim</th>
+                    <th class="px-5 py-3.5">Midterm</th>
+                    <th class="px-5 py-3.5">Finals</th>
+                    <th class="px-5 py-3.5">Term Average</th>
+                    <th class="px-5 py-3.5">Status</th>
+                  </tr>
+                </thead>
+                <tbody
+                  id="studentGradesBody"
+                  class="divide-y divide-slate-800 bg-slate-900"
+                ></tbody>
+              </table>
+            </div>
           </div>
         </div>
-      </div>
+      </main>
+    </div>
 
-    </main>
-  </div>
-
-  <script>
-    const firebaseConfig = {
-      apiKey: "AIzaSyBLIWCNras1qdLks2wEqbtgX5TyeQryd1g",
-      authDomain: "capstone-project-b1502.firebaseapp.com",
-      projectId: "capstone-project-b1502",
-      storageBucket: "capstone-project-b1502.firebasestorage.app",
-      messagingSenderId: "75252869271",
-      appId: "1:75252869271:web:93297363c3854be93ca1d2"
-    };
-
-    firebase.initializeApp(firebaseConfig);
-    const auth = firebase.auth();
-    const db = firebase.firestore();
-
-    let parsedGradeData = [];
-    let currentUserEmail = '';
-    lucide.createIcons();
-
-    function switchAuthTab(tab) {
-      document.getElementById('authError').innerText = '';
-      if (tab === 'login') {
-        document.getElementById('formLogin').classList.remove('hidden');
-        document.getElementById('formRegister').classList.add('hidden');
-        document.getElementById('tabBtnLogin').className = "flex-1 py-2 rounded-lg bg-white shadow text-indigo-600 font-bold transition-all";
-        document.getElementById('tabBtnRegister').className = "flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-900 transition-all";
-      } else {
-        document.getElementById('formLogin').classList.add('hidden');
-        document.getElementById('formRegister').classList.remove('hidden');
-        document.getElementById('tabBtnRegister').className = "flex-1 py-2 rounded-lg bg-white shadow text-indigo-600 font-bold transition-all";
-        document.getElementById('tabBtnLogin').className = "flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-900 transition-all";
-      }
-    }
-
-    auth.onAuthStateChanged(async (user) => {
-      if (user) {
-        try {
-          const userDoc = await db.collection('users').doc(user.uid).get();
-          if (userDoc.exists) {
-            const data = userDoc.data();
-            
-            // Access Check: Block disabled accounts
-            if (data.status === 'disabled') {
-              alert("Your account has been disabled by the administrator.");
-              auth.signOut();
-              return;
-            }
-
-            currentUserEmail = user.email;
-            document.getElementById('authContainer').classList.add('hidden');
-            document.getElementById('mainDashboard').classList.remove('hidden');
-            document.getElementById('displayEmail').innerText = user.email;
-            document.getElementById('userAvatar').innerText = user.email.charAt(0).toUpperCase();
-            document.getElementById('roleBadge').innerText = data.role;
-
-            routeUserRole(data.role, data);
-          }
-        } catch (err) {
-          console.error(err);
-        }
-      } else {
-        document.getElementById('authContainer').classList.remove('hidden');
-        document.getElementById('mainDashboard').classList.add('hidden');
-      }
-    });
-
-    async function handleLogin() {
-      const email = document.getElementById('loginEmail').value.trim();
-      const password = document.getElementById('loginPassword').value.trim();
-      try {
-        await auth.signInWithEmailAndPassword(email, password);
-      } catch (err) {
-        document.getElementById('authError').innerText = err.message;
-      }
-    }
-
-    async function handleStudentRegister() {
-      const fullName = document.getElementById('regFullName').value.trim();
-      const studentId = document.getElementById('regStudentId').value.trim();
-      const email = document.getElementById('regEmail').value.trim();
-      const password = document.getElementById('regPassword').value.trim();
-
-      try {
-        const userCred = await auth.createUserWithEmailAndPassword(email, password);
-        await db.collection('users').doc(userCred.user.uid).set({
-          fullName, studentId, email, role: "student", status: "active",
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        await logActivity(email, `Registered student account (${studentId})`);
-        alert("Registration Successful!");
-      } catch (err) {
-        document.getElementById('authError').innerText = err.message;
-      }
-    }
-
-    function routeUserRole(role, userData) {
-      document.getElementById('adminView').classList.add('hidden');
-      document.getElementById('instructorView').classList.add('hidden');
-      document.getElementById('studentView').classList.add('hidden');
-
-      if (role === 'admin') {
-        document.getElementById('adminView').classList.remove('hidden');
-        loadAdminDashboardData();
-      }
-      if (role === 'instructor') {
-        document.getElementById('instructorView').classList.remove('hidden');
-      }
-      if (role === 'student') {
-        document.getElementById('studentView').classList.remove('hidden');
-        loadStudentDashboard(userData.studentId);
-      }
-    }
-
-    // --- ADMIN MODULE FUNCTIONS ---
-
-    async function loadAdminDashboardData() {
-      // 1. Fetch Faculty Directory
-      const facultySnapshot = await db.collection('users').where('role', '==', 'instructor').get();
-      document.getElementById('facultyCountDisplay').innerText = facultySnapshot.size;
-
-      const facultyTable = document.getElementById('facultyTableBody');
-      const assignFacultySelect = document.getElementById('assignFacultySelect');
-      facultyTable.innerHTML = '';
-      assignFacultySelect.innerHTML = '<option value="">Select Faculty...</option>';
-
-      facultySnapshot.forEach((doc) => {
-        const f = doc.data();
-        const tr = document.createElement('tr');
-        const isActive = f.status === 'active';
-        tr.className = "hover:bg-slate-50 transition-colors";
-        tr.innerHTML = `
-          <td class="px-5 py-3 font-medium text-slate-900">${f.email}</td>
-          <td class="px-5 py-3">
-            <span class="px-2.5 py-0.5 rounded-full text-xs font-bold ${isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}">
-              ${f.status || 'active'}
-            </span>
-          </td>
-          <td class="px-5 py-3">
-            <button onclick="toggleFacultyStatus('${doc.id}', '${f.status}')" class="px-3 py-1 rounded-lg text-xs font-semibold ${isActive ? 'bg-rose-50 text-rose-600 hover:bg-rose-100' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'} transition-all">
-              ${isActive ? 'Disable' : 'Enable'}
-            </button>
-          </td>
-        `;
-        facultyTable.appendChild(tr);
-
-        const opt = document.createElement('option');
-        opt.value = doc.id;
-        opt.innerText = f.email;
-        assignFacultySelect.appendChild(opt);
-      });
-
-      // 2. Fetch Subjects
-      const subjectsSnapshot = await db.collection('subjects').get();
-      document.getElementById('subjectsCountDisplay').innerText = subjectsSnapshot.size;
-
-      const assignSubjectSelect = document.getElementById('assignSubjectSelect');
-      assignSubjectSelect.innerHTML = '<option value="">Select Subject...</option>';
-      subjectsSnapshot.forEach((doc) => {
-        const s = doc.data();
-        const opt = document.createElement('option');
-        opt.value = s.subjectCode;
-        opt.innerText = `${s.subjectCode} - ${s.subjectName}`;
-        assignSubjectSelect.appendChild(opt);
-      });
-
-      // 3. Fetch Activity Logs
-      const logsSnapshot = await db.collection('logs').orderBy('timestamp', 'desc').limit(10).get();
-      document.getElementById('logsCountDisplay').innerText = logsSnapshot.size;
-
-      const logsTable = document.getElementById('logsTableBody');
-      logsTable.innerHTML = '';
-      logsSnapshot.forEach((doc) => {
-        const l = doc.data();
-        const timeStr = l.timestamp ? new Date(l.timestamp.toDate()).toLocaleString() : 'Just now';
-        const tr = document.createElement('tr');
-        tr.className = "hover:bg-slate-50";
-        tr.innerHTML = `
-          <td class="px-4 py-2 font-mono text-slate-500">${timeStr}</td>
-          <td class="px-4 py-2 font-semibold text-slate-800">${l.user}</td>
-          <td class="px-4 py-2 text-slate-700">${l.action}</td>
-        `;
-        logsTable.appendChild(tr);
-      });
-    }
-
-    async function toggleFacultyStatus(uid, currentStatus) {
-      const newStatus = currentStatus === 'disabled' ? 'active' : 'disabled';
-      await db.collection('users').doc(uid).update({ status: newStatus });
-      await logActivity(currentUserEmail, `Updated instructor status (${uid}) to ${newStatus}`);
-      alert(`Instructor account status updated to ${newStatus}!`);
-      loadAdminDashboardData();
-    }
-
-    async function assignSubjectToFaculty() {
-      const facultyUid = document.getElementById('assignFacultySelect').value;
-      const subjectCode = document.getElementById('assignSubjectSelect').value;
-
-      if (!facultyUid || !subjectCode) {
-        alert("Please select both a faculty member and a subject.");
-        return;
-      }
-
-      await db.collection('assignments').add({
-        facultyUid, subjectCode,
-        assignedAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      await logActivity(currentUserEmail, `Assigned ${subjectCode} to instructor ${facultyUid}`);
-      alert(`Successfully assigned subject ${subjectCode}!`);
-    }
-
-    async function generateSemesterReport() {
-      const semesterTag = document.getElementById('reportSemesterSelect').value;
-      const snapshot = await db.collection('grades')
-        .where('isReleased', '==', true)
-        .get();
-
-      let totalRecords = 0, passedCount = 0, failedCount = 0;
-
-      snapshot.forEach((doc) => {
-        const g = doc.data();
-        if (g.classId.includes(semesterTag)) {
-          totalRecords++;
-          const avg = (g.prelim + g.midterm + g.finals) / 3;
-          if (avg >= 75) passedCount++; else failedCount++;
-        }
-      });
-
-      const passRate = totalRecords > 0 ? ((passedCount / totalRecords) * 100).toFixed(1) : 0;
-
-      document.getElementById('reportSummaryOutput').innerHTML = `
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
-          <div class="p-3 bg-white rounded-lg border"><strong>${totalRecords}</strong><div class="text-[10px] text-slate-500 uppercase">Total Records</div></div>
-          <div class="p-3 bg-white rounded-lg border text-emerald-600"><strong>${passedCount}</strong><div class="text-[10px] text-slate-500 uppercase">Passed</div></div>
-          <div class="p-3 bg-white rounded-lg border text-rose-600"><strong>${failedCount}</strong><div class="text-[10px] text-slate-500 uppercase">Re-Eval</div></div>
-          <div class="p-3 bg-white rounded-lg border text-indigo-600"><strong>${passRate}%</strong><div class="text-[10px] text-slate-500 uppercase">Passing Rate</div></div>
-        </div>
-      `;
-    }
-
-    async function logActivity(user, action) {
-      await db.collection('logs').add({
-        user, action,
-        timestamp: firebase.firestore.FieldValue.serverTimestamp()
-      });
-    }
-
-    // --- STUDENT & INSTRUCTOR CORE FUNCTIONS ---
-
-    async function loadStudentDashboard(studentId) {
-      const gradesSnapshot = await db.collection('grades')
-        .where('studentId', '==', studentId)
-        .where('isReleased', '==', true)
-        .get();
-
-      const tbody = document.getElementById('studentGradesBody');
-      tbody.innerHTML = '';
-
-      gradesSnapshot.forEach((doc) => {
-        const g = doc.data();
-        const avg = ((g.prelim + g.midterm + g.finals) / 3).toFixed(2);
-        const passed = avg >= 75;
-
-        const tr = document.createElement('tr');
-        tr.className = "hover:bg-slate-50 font-medium";
-        tr.innerHTML = `
-          <td class="px-5 py-4 text-slate-900">${g.classId}</td>
-          <td class="px-5 py-4">${g.prelim}</td>
-          <td class="px-5 py-4">${g.midterm}</td>
-          <td class="px-5 py-4">${g.finals}</td>
-          <td class="px-5 py-4 font-bold text-slate-900">${avg}</td>
-          <td class="px-5 py-4">
-            <span class="px-2.5 py-1 rounded-full text-xs font-bold ${passed ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}">
-              ${passed ? 'PASSED' : 'RE-EVAL'}
-            </span>
-          </td>
-        `;
-        tbody.appendChild(tr);
-      });
-    }
-
-    function processExcel() {
-      const fileInput = document.getElementById('excelFile');
-      if (!fileInput.files.length) return alert("Select an Excel file.");
-
-      const file = fileInput.files[0];
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        parsedGradeData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-        
-        const tbody = document.getElementById('previewBody');
-        tbody.innerHTML = '';
-        parsedGradeData.forEach((row) => {
-          const tr = document.createElement('tr');
-          tr.innerHTML = `
-            <td class="px-5 py-3 font-mono text-xs text-slate-500">${row.studentId || ''}</td>
-            <td class="px-5 py-3 font-semibold text-slate-900">${row.fullName || ''}</td>
-            <td class="px-5 py-3">${row.prelim || 0}</td>
-            <td class="px-5 py-3">${row.midterm || 0}</td>
-            <td class="px-5 py-3">${row.finals || 0}</td>
-          `;
-          tbody.appendChild(tr);
-        });
-        document.getElementById('previewContainer').classList.remove('hidden');
-      };
-      reader.readAsArrayBuffer(file);
-    }
-
-    async function saveDraftGrades() {
-      const classId = document.getElementById('classSelect').value;
-      const batch = db.batch();
-      parsedGradeData.forEach((row) => {
-        const docRef = db.collection('grades').doc(`${classId}_${row.studentId}`);
-        batch.set(docRef, {
-          classId, studentId: String(row.studentId), fullName: row.fullName,
-          prelim: parseFloat(row.prelim) || 0, midterm: parseFloat(row.midterm) || 0,
-          finals: parseFloat(row.finals) || 0, isReleased: false,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, { merge: true });
-      });
-      await batch.commit();
-      await logActivity(currentUserEmail, `Saved draft grades for ${classId}`);
-      alert("Draft saved!");
-    }
-
-    async function releaseGrades() {
-      const classId = document.getElementById('classSelect').value;
-      const batch = db.batch();
-      parsedGradeData.forEach((row) => {
-        const gradeRef = db.collection('grades').doc(`${classId}_${row.studentId}`);
-        batch.update(gradeRef, { isReleased: true });
-      });
-      await batch.commit();
-      await logActivity(currentUserEmail, `Released official grades for ${classId}`);
-      alert("Grades released!");
-    }
-
-    async function createInstructor() {
-      const email = document.getElementById('instEmail').value.trim();
-      const password = document.getElementById('instPassword').value.trim();
-
-      if (!email || !password) return alert("Enter email and password.");
-
-      try {
-        const tempApp = firebase.initializeApp(firebaseConfig, "SecondaryApp");
-        const tempAuth = tempApp.auth();
-
-        const userCredential = await tempAuth.createUserWithEmailAndPassword(email, password);
-        const newUid = userCredential.user.uid;
-
-        await db.collection('users').doc(newUid).set({
-          email, role: "instructor", status: "active",
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-
-        await tempApp.delete();
-        await logActivity(currentUserEmail, `Provisioned instructor account (${email})`);
-        alert(`Instructor created: ${email}`);
-        loadAdminDashboardData();
-      } catch (err) {
-        alert("Error: " + err.message);
-      }
-    }
-
-    async function addSubject() {
-      const subjectCode = document.getElementById('subCode').value.trim();
-      const subjectName = document.getElementById('subName').value.trim();
-      const units = parseInt(document.getElementById('subUnits').value);
-
-      if (!subjectCode || !subjectName || isNaN(units)) return alert("Complete all fields.");
-
-      try {
-        await db.collection('subjects').doc(subjectCode).set({ subjectCode, subjectName, units });
-        await logActivity(currentUserEmail, `Added department subject ${subjectCode}`);
-        alert(`Subject ${subjectCode} saved!`);
-        loadAdminDashboardData();
-      } catch (err) {
-        alert("Error: " + err.message);
-      }
-    }
-
-    function handleLogout() { auth.signOut(); }
-  </script>
-</body>
+    <!-- Custom Controller Script -->
+    <script src="app.js"></script>
+    <!-- jsPDF & jsPDF-AutoTable for PDF Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+  </body>
 </html>
