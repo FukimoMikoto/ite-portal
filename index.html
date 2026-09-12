@@ -25,10 +25,27 @@
   <body
     class="h-full antialiased text-slate-200 bg-slate-950 flex flex-col min-h-screen"
   >
+    <!-- Initial Auth-Resolving Splash. Shown by default and hidden by
+         app.js as soon as Firebase's onAuthStateChanged fires for the
+         first time, so neither the login screen nor the dashboard paints
+         before we actually know whether the user is signed in. -->
+    <div
+      id="authLoadingScreen"
+      class="min-h-screen w-full flex flex-col items-center justify-center bg-slate-950 space-y-4"
+    >
+      <img
+        src="ITELogo.jpg"
+        alt="ITE Seal"
+        class="w-14 h-14 rounded-full border border-emerald-400/50 shadow-lg object-cover animate-pulse"
+      />
+      <div class="w-8 h-8 border-2 border-emerald-500/30 border-t-emerald-400 rounded-full animate-spin"></div>
+      <p class="text-xs text-slate-500 font-semibold uppercase tracking-wider">Loading Portal...</p>
+    </div>
+
     <!-- Split-Screen Login View -->
     <div
       id="authContainer"
-      class="min-h-screen w-full flex flex-col lg:flex-row bg-slate-950"
+      class="hidden min-h-screen w-full flex flex-col lg:flex-row bg-slate-950"
     >
       <!-- Left Hero Image Section -->
       <div
@@ -269,7 +286,27 @@
             </div>
           </div>
 
-          <div id="userInfo" class="flex items-center space-x-4"></div>
+          <div class="flex items-center space-x-3">
+            <div id="notificationBellWrapper" class="relative hidden">
+              <button
+                id="notificationBellBtn"
+                onclick="toggleNotificationPanel()"
+                class="relative p-2 rounded-full hover:bg-slate-800 transition-all"
+                aria-label="Notifications"
+              >
+                <i data-lucide="bell" class="w-5 h-5 text-slate-300"></i>
+                <span
+                  id="notificationBadge"
+                  class="hidden absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1"
+                >0</span>
+              </button>
+              <div
+                id="notificationPanel"
+                class="hidden absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 p-2 space-y-2"
+              ></div>
+            </div>
+            <div id="userInfo" class="flex items-center space-x-4"></div>
+          </div>
         </div>
       </header>
 
@@ -319,6 +356,7 @@
               </p>
 
               <label
+                id="excelDropzone"
                 class="border-2 border-dashed border-emerald-500/40 hover:border-emerald-400 rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer bg-slate-950/60 transition-all text-center group"
               >
                 <i
@@ -378,6 +416,38 @@
                 >
                   Release Grades
                 </button>
+              </div>
+            </div>
+
+            <!-- Semester Selector: tags every save/release with the
+                 selected term, and filters which grades are shown below. -->
+            <div class="flex items-center gap-3">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Semester:</span>
+              <div class="inline-flex rounded-xl border border-slate-800 overflow-hidden">
+                <button
+                  id="semester1SBtn"
+                  onclick="setActiveSemester('1S')"
+                  class="px-4 py-1.5 text-xs font-bold transition-all bg-emerald-500 text-slate-950"
+                >
+                  1st Semester
+                </button>
+                <button
+                  id="semester2SBtn"
+                  onclick="setActiveSemester('2S')"
+                  class="px-4 py-1.5 text-xs font-bold transition-all bg-slate-800 text-slate-300 hover:bg-slate-700"
+                >
+                  2nd Semester
+                </button>
+              </div>
+            </div>
+
+            <!-- Pending Class Roster Requests -->
+            <div class="space-y-2">
+              <h4 class="text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 pb-2">
+                Pending Class Roster Requests
+              </h4>
+              <div id="pendingEnrollmentsList" class="space-y-2 max-h-48 overflow-y-auto">
+                <!-- Populated by loadPendingEnrollments() -->
               </div>
             </div>
 
@@ -607,6 +677,19 @@
           <div
             class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
           >
+            <h3
+              class="font-bold text-white text-xs uppercase tracking-wider border-b border-slate-800 pb-2"
+            >
+              Active Subject Assignments
+            </h3>
+            <div id="activeAssignmentsList" class="space-y-2 max-h-72 overflow-y-auto">
+              <!-- Populated by loadAdminDashboardData() -->
+            </div>
+          </div>
+
+          <div
+            class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
+          >
             <div
               class="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-3 gap-3"
             >
@@ -681,7 +764,21 @@
             class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
           >
             <h3 class="font-bold text-white text-base">
-              Enrolled Subjects & Published Grades
+              Available Department Subjects
+            </h3>
+            <p class="text-xs text-slate-500">
+              Request enrollment in a subject. Your instructor must approve the request before it's added to their official class roster.
+            </p>
+            <div id="availableSubjectsList" class="space-y-2 max-h-72 overflow-y-auto">
+              <!-- Populated by loadAvailableSubjectsForStudent() -->
+            </div>
+          </div>
+
+          <div
+            class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
+          >
+            <h3 class="font-bold text-white text-base">
+              1st Semester - Published Grades
             </h3>
             <div class="overflow-x-auto rounded-xl border border-slate-800">
               <table class="w-full text-sm text-left">
@@ -698,7 +795,35 @@
                   </tr>
                 </thead>
                 <tbody
-                  id="studentGradesBody"
+                  id="studentGradesBody1S"
+                  class="divide-y divide-slate-800 bg-slate-900"
+                ></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div
+            class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
+          >
+            <h3 class="font-bold text-white text-base">
+              2nd Semester - Published Grades
+            </h3>
+            <div class="overflow-x-auto rounded-xl border border-slate-800">
+              <table class="w-full text-sm text-left">
+                <thead
+                  class="text-xs uppercase bg-slate-950 text-slate-400 border-b border-slate-800 font-semibold"
+                >
+                  <tr>
+                    <th class="px-5 py-3.5">Subject / Section</th>
+                    <th class="px-5 py-3.5">Prelim</th>
+                    <th class="px-5 py-3.5">Midterm</th>
+                    <th class="px-5 py-3.5">Finals</th>
+                    <th class="px-5 py-3.5">Term Average</th>
+                    <th class="px-5 py-3.5">Status</th>
+                  </tr>
+                </thead>
+                <tbody
+                  id="studentGradesBody2S"
                   class="divide-y divide-slate-800 bg-slate-900"
                 ></tbody>
               </table>
