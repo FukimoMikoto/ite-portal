@@ -24,40 +24,65 @@ let currentUserId = '';
 let activeSubjectCode = '';
 let lastReportData = null;
 
-// New state for this feature set:
-let activeSemester = '1S'; // matches the existing "1S"/"2S" convention
-                            // already used by the admin semester-report
-                            // generator (#reportSemesterSelect) and, by
-                            // extension, every grade doc saved so far.
-let currentStudentSchoolId = ''; // registered users/{uid}.studentId
-let currentStudentFullName = ''; // registered users/{uid}.fullName
-let notificationsUnsubscribe = null; // detach fn for the notifications
-                                      // onSnapshot listener, so it can be
-                                      // torn down on sign-out.
+let activeSemester = '1st Semester';
+let currentStudentSchoolId = '';
+let currentStudentFullName = '';
+let notificationsUnsubscribe = null;
 
-function semesterDisplayLabel(sem) {
-  return sem === '2S' ? '2nd Semester' : '1st Semester';
+let selectedPortalRole = 'student';
+let isFreshLoginAttempt = false;
+
+function roleDisplayLabel(role) {
+  if (role === 'admin') return 'Department Head / Admin Console';
+  if (role === 'instructor') return 'Faculty Workspace';
+  return 'Student Portal';
 }
 
-/**
- * Deterministic enrollment document ID (subjectCode_studentUid).
- */
+function facultyDisplayLabel(f) {
+  if (!f) return '';
+  if (f.fullName && f.title) return `${f.fullName} (${f.title})`;
+  if (f.fullName) return f.fullName;
+  return f.email || '';
+}
+
+function selectPortal(role) {
+  selectedPortalRole = role;
+  const authError = document.getElementById('authError');
+  if (authError) authError.innerText = '';
+
+  const configs = {
+    student: 'portalTabStudent',
+    instructor: 'portalTabFaculty',
+    admin: 'portalTabAdmin'
+  };
+  const ACTIVE = "flex-1 py-2.5 rounded-lg bg-emerald-500 text-slate-950 font-bold transition-all text-[11px] sm:text-xs";
+  const INACTIVE = "flex-1 py-2.5 rounded-lg text-slate-400 hover:text-white transition-all text-[11px] sm:text-xs";
+
+  Object.entries(configs).forEach(([r, id]) => {
+    const btn = document.getElementById(id);
+    if (btn) btn.className = (r === role) ? ACTIVE : INACTIVE;
+  });
+}
+
+function normalizeSemester(sem) {
+  if (!sem) return '1st Semester';
+  const s = String(sem).trim().toUpperCase();
+  if (s === '1S' || s === '1ST SEMESTER' || s === '1') return '1st Semester';
+  if (s === '2S' || s === '2ND SEMESTER' || s === '2') return '2nd Semester';
+  return sem;
+}
+
+function semesterDisplayLabel(sem) {
+  const norm = normalizeSemester(sem);
+  return norm === '2nd Semester' ? '2nd Semester' : '1st Semester';
+}
+
 function buildEnrollmentDocId(subjectCode, studentUid) {
   return `${subjectCode}_${studentUid}`;
 }
 
-// --- SHARED UTILITIES ---
-// Single source of truth for the passing threshold. Referenced by the
-// instructor grade table, the student dashboard, and the semester report
-// generator so the business rule is defined exactly once.
 const PASSING_THRESHOLD = 75;
 
-/**
- * Escapes a value for safe interpolation into innerHTML templates.
- * Every piece of user-supplied data (names, emails, subject codes, log
- * entries, etc.) must be passed through this before being placed in an
- * HTML string, to prevent stored XSS.
- */
 function escapeHtml(value) {
   const str = (value === null || value === undefined) ? '' : String(value);
   return str.replace(/[&<>"']/g, (ch) => ({
@@ -69,11 +94,6 @@ function escapeHtml(value) {
   }[ch]));
 }
 
-/**
- * Centralized grade computation. Any place that needs the average or
- * pass/fail status for a set of prelim/midterm/finals scores must go
- * through this function instead of re-implementing the formula.
- */
 function computeGradeStats(prelim, midterm, finals) {
   const p = parseFloat(prelim) || 0;
   const m = parseFloat(midterm) || 0;
@@ -89,34 +109,14 @@ function computeGradeStats(prelim, midterm, finals) {
   };
 }
 
-/**
- * Deterministic grade document ID. Using the same builder everywhere
- * guarantees that re-uploading a spreadsheet for the same subject upserts
- * existing student records instead of creating duplicates, and matches
- * the ID scheme enforced by firestore.rules.
- */
 function buildGradeDocId(subjectCode, studentId) {
   return `${subjectCode}_${String(studentId).trim()}`;
 }
 
-/**
- * Deterministic assignment document ID (facultyUid_subjectCode). This
- * makes "is this instructor assigned to this subject" a single get()
- * lookup, which is required for firestore.rules to enforce it, and it
- * makes re-assigning the same pair an upsert instead of a duplicate.
- */
 function buildAssignmentDocId(facultyUid, subjectCode) {
   return `${facultyUid}_${subjectCode}`;
 }
 
-/**
- * Normalizes a student's full name into a stable, deterministic key used
- * as a grade-mapping fallback when a spreadsheet has no Student ID column
- * (e.g. "Alcantara, Albert Marquez" -> "alcantara_albert_marquez"). This
- * is intentionally stable across re-imports (same name -> same key),
- * unlike a positional sequence number, so it does not reintroduce the
- * record-overwrite bug a row-position-based fallback would cause.
- */
 function normalizeNameKey(fullName) {
   return String(fullName || '')
     .toLowerCase()
@@ -129,16 +129,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (window.lucide) {
     lucide.createIcons();
   }
-
   setupExcelDropzone();
 });
 
-/**
- * Wires drag-and-drop auto-parsing onto the Excel importer's dropzone.
- * preventDefault()/stopPropagation() on 'dragover' and 'drop' are required
- * so the browser doesn't fall back to its native "open this file" / save
- * dialog behavior for the dragged file.
- */
 function setupExcelDropzone() {
   const dropzone = document.getElementById('excelDropzone');
   const fileInput = document.getElementById('excelFile');
@@ -176,9 +169,6 @@ function setupExcelDropzone() {
       return;
     }
 
-    // Assigning a FileList directly to a file input's .files property is
-    // supported in all current browsers, so the existing processExcel()
-    // (which reads from #excelFile.files[0]) needs no changes at all.
     fileInput.files = droppedFiles;
     processExcel();
   });
@@ -203,6 +193,7 @@ function switchAuthTab(tab) {
     if (formRegister) formRegister.classList.remove('hidden');
     if (tabBtnRegister) tabBtnRegister.className = "flex-1 py-2.5 rounded-lg bg-emerald-500 text-slate-950 font-bold transition-all";
     if (tabBtnLogin) tabBtnLogin.className = "flex-1 py-2.5 rounded-lg text-slate-400 hover:text-white transition-all";
+    selectPortal('student');
   }
 }
 
@@ -212,10 +203,6 @@ auth.onAuthStateChanged(async (user) => {
   const authLoadingScreen = document.getElementById('authLoadingScreen');
   const userInfo = document.getElementById('userInfo');
 
-  // Hides the initial splash and reveals whichever view we're about to set
-  // up. Called on every exit path below so the splash can never get stuck
-  // showing (e.g. on a Firestore error), which is the flicker/redirect bug
-  // this whole handler exists to prevent.
   function showAuthContainer() {
     if (authLoadingScreen) authLoadingScreen.classList.add('hidden');
     if (mainDashboard) mainDashboard.classList.add('hidden');
@@ -236,13 +223,22 @@ auth.onAuthStateChanged(async (user) => {
 
       if (userDoc.exists) {
         const data = userDoc.data();
-        
+
+        if (isFreshLoginAttempt) {
+          isFreshLoginAttempt = false;
+          if (data.role !== selectedPortalRole) {
+            alert(
+              `This account is registered as ${roleDisplayLabel(data.role)}. ` +
+              `Please use the ${roleDisplayLabel(selectedPortalRole)} tab to sign in.`
+            );
+            auth.signOut();
+            return;
+          }
+        }
+
         if (data.status === 'disabled') {
           alert("Your account has been disabled by the administrator.");
           auth.signOut();
-          // Don't call showAuthContainer() here: signOut() triggers this
-          // same handler again with user === null, which will resolve the
-          // splash and show the login screen at that point.
           return;
         }
 
@@ -257,14 +253,13 @@ auth.onAuthStateChanged(async (user) => {
 
         routeUserRole(data.role, data);
       } else {
-        // Authenticated with Firebase Auth but no matching users/{uid}
-        // document (e.g. account mid-provisioning). Fail safe to the
-        // login screen rather than leaving the splash on screen forever.
+        isFreshLoginAttempt = false;
         detachNotificationsListener();
         showAuthContainer();
       }
     } catch (err) {
       console.error(err);
+      isFreshLoginAttempt = false;
       detachNotificationsListener();
       showAuthContainer();
     }
@@ -281,8 +276,10 @@ async function handleLogin() {
   const authError = document.getElementById('authError');
 
   try {
+    isFreshLoginAttempt = true;
     await auth.signInWithEmailAndPassword(email, password);
   } catch (err) {
+    isFreshLoginAttempt = false;
     if (authError) authError.innerText = err.message;
   }
 }
@@ -329,27 +326,13 @@ function routeUserRole(role, userData) {
     currentStudentSchoolId = (userData && userData.studentId) || '';
     currentStudentFullName = (userData && userData.fullName) || '';
 
-    // Either key is enough to attempt a lookup now that grades can be
-    // linked by registered Student ID OR by normalized name (see the
-    // flexible Excel importer). Previously this only fired when
-    // studentId was present, which silently skipped the dashboard load
-    // entirely for any student who registered without one.
-    if (userData && (userData.studentId || userData.fullName)) {
-      loadStudentDashboard(userData.studentId, userData.fullName);
-    }
-
+    loadStudentDashboard(currentStudentSchoolId, currentStudentFullName);
     loadAvailableSubjectsForStudent();
     setupNotificationsListener(currentUserId);
   } else {
-    // Any other role (or a re-route away from student, e.g. after
-    // sign-out): make sure the notifications listener from a prior
-    // student session isn't left running against a now-invalid or
-    // different auth context.
     detachNotificationsListener();
   }
 }
-
-// --- INSTRUCTOR ASSIGNED SUBJECTS ONLY ---
 
 async function loadInstructorAssignedSubjects() {
   const container = document.getElementById('assignedClassesList');
@@ -371,12 +354,6 @@ async function loadInstructorAssignedSubjects() {
       return;
     }
 
-    // De-duplicate by subjectCode. Assignments created before the switch to
-    // deterministic IDs (facultyUid_subjectCode) may still exist in
-    // Firestore alongside the canonical doc for the same faculty+subject
-    // pair — without this step, both would render as separate cards. The
-    // canonical doc (doc.id === facultyUid_subjectCode) always wins when
-    // present; otherwise the first legacy doc encountered is kept.
     const bySubjectCode = new Map();
     for (const doc of assignSnapshot.docs) {
       const assignment = doc.data();
@@ -392,7 +369,6 @@ async function loadInstructorAssignedSubjects() {
     }
 
     const uniqueAssignments = Array.from(bySubjectCode.values());
-
     let isFirst = true;
 
     for (const assignment of uniqueAssignments) {
@@ -451,15 +427,8 @@ function selectSubject(code, title, cardElement) {
   loadPendingEnrollments(code);
 }
 
-/**
- * Switches the active semester filter for the instructor workspace.
- * Reloads the grade table (and re-applies the button's active styling)
- * for whichever subject is currently selected. Pending enrollment
- * requests are NOT semester-scoped (a roster approval is per subject,
- * not per term), so that panel is left alone here.
- */
 function setActiveSemester(sem) {
-  activeSemester = sem;
+  activeSemester = normalizeSemester(sem);
 
   const btn1S = document.getElementById('semester1SBtn');
   const btn2S = document.getElementById('semester2SBtn');
@@ -468,8 +437,8 @@ function setActiveSemester(sem) {
 
   if (btn1S) btn1S.classList.remove(...ACTIVE, ...INACTIVE);
   if (btn2S) btn2S.classList.remove(...ACTIVE, ...INACTIVE);
-  if (btn1S) btn1S.classList.add(...(sem === '1S' ? ACTIVE : INACTIVE));
-  if (btn2S) btn2S.classList.add(...(sem === '2S' ? ACTIVE : INACTIVE));
+  if (btn1S) btn1S.classList.add(...(activeSemester === '1st Semester' ? ACTIVE : INACTIVE));
+  if (btn2S) btn2S.classList.add(...(activeSemester === '2nd Semester' ? ACTIVE : INACTIVE));
 
   if (activeSubjectCode) {
     loadInstructorGradesFromFirestore(activeSubjectCode);
@@ -487,9 +456,13 @@ async function loadInstructorGradesFromFirestore(subjectCode) {
   `;
 
   try {
+    const semQueryValues = (activeSemester === '1st Semester' || activeSemester === '1S')
+      ? ['1S', '1st Semester']
+      : ['2S', '2nd Semester'];
+
     const snapshot = await db.collection('grades')
       .where('classId', '==', subjectCode)
-      .where('semester', '==', activeSemester)
+      .where('semester', 'in', semQueryValues)
       .get();
 
     if (snapshot.empty) {
@@ -501,33 +474,23 @@ async function loadInstructorGradesFromFirestore(subjectCode) {
         </tr>
       `;
       parsedGradeData = [];
+      renderAcademicAnalytics([], {
+        distributionCanvasId: 'instructorGradeDistributionChart',
+        passFailCanvasId: 'instructorPassFailChart',
+        atRiskTableId: 'instructorAtRiskTableBody'
+      });
       return;
     }
 
     parsedGradeData = [];
     tbody.innerHTML = '';
 
-    // De-duplicate by student identity (normalizeNameKey(fullName)). Making
-    // Student ID optional means the same student can end up with two
-    // Firestore docs for the same subject — one keyed by a real ID from an
-    // earlier import, another keyed by their normalized name from a later
-    // import that had no ID column — and both would otherwise render as
-    // separate rows for the same person.
-    //
-    // Tie-break rule when duplicates exist for a name:
-    //   1) Prefer the record whose studentId is an EXPLICIT ID rather than
-    //      one auto-derived from the name. A doc is "explicit" if its
-    //      studentId does NOT equal normalizeNameKey(its own fullName) —
-    //      that can only happen if a real ID came from the sheet, since our
-    //      own fallback always sets studentId = normalizeNameKey(fullName).
-    //   2) If both (or neither) are explicit, prefer the most recently
-    //      updated document (updatedAt).
     const gradesByStudent = new Map();
 
     snapshot.forEach((doc) => {
       const g = doc.data();
       const nameKey = normalizeNameKey(g.fullName);
-      if (!nameKey) return; // no usable identity to group by; skip defensively
+      if (!nameKey) return;
 
       const isExplicitId = !!g.studentId && g.studentId !== nameKey;
       const candidate = { ...g, __docId: doc.id, __isExplicitId: isExplicitId };
@@ -539,13 +502,10 @@ async function loadInstructorGradesFromFirestore(subjectCode) {
       }
 
       if (candidate.__isExplicitId !== existing.__isExplicitId) {
-        // Exactly one of the two has an explicit ID — it wins outright.
         if (candidate.__isExplicitId) gradesByStudent.set(nameKey, candidate);
         return;
       }
 
-      // Both explicit or both name-derived: prefer the most recently
-      // updated record.
       const existingMs = existing.updatedAt && existing.updatedAt.toMillis ? existing.updatedAt.toMillis() : 0;
       const candidateMs = candidate.updatedAt && candidate.updatedAt.toMillis ? candidate.updatedAt.toMillis() : 0;
       if (candidateMs >= existingMs) {
@@ -575,12 +535,16 @@ async function loadInstructorGradesFromFirestore(subjectCode) {
       `;
       tbody.appendChild(tr);
     });
+
+    renderAcademicAnalytics(Array.from(gradesByStudent.values()), {
+      distributionCanvasId: 'instructorGradeDistributionChart',
+      passFailCanvasId: 'instructorPassFailChart',
+      atRiskTableId: 'instructorAtRiskTableBody'
+    });
   } catch (err) {
     console.error("Error fetching grades:", err);
   }
 }
-
-// --- FLEXIBLE EXCEL PARSER ---
 
 function processExcel() {
   const fileInput = document.getElementById('excelFile');
@@ -594,12 +558,6 @@ function processExcel() {
       const data = new Uint8Array(e.target.result);
       const workbook = XLSX.read(data, { type: 'array' });
 
-      // 1. Locate the summary/grades sheet if multi-sheet workbook.
-      // Priority: an explicit "FINAL GRADE" tab (e.g. "IS 2 FINAL GRADE")
-      // wins first, then "AVERAGE" (a common summary-tab name for
-      // instructors who don't label it "final grade"), then the previous
-      // broader "SUMMARY"/"GRADE" matches, then the first sheet as a
-      // last resort.
       let targetSheetName =
         workbook.SheetNames.find(s => s.toUpperCase().includes("FINAL GRADE")) ||
         workbook.SheetNames.find(s => s.toUpperCase().includes("AVERAGE")) ||
@@ -608,16 +566,10 @@ function processExcel() {
         workbook.SheetNames[0];
 
       const worksheet = workbook.Sheets[targetSheetName];
-      
-      // Convert sheet to 2D array matrix to inspect header rows
       const matrix = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
 
       if (!matrix.length) return alert("Selected Excel sheet is empty.");
 
-      // 2. Scan rows to find the actual header row. Some class records have
-      // department/title metadata rows above the real header, so we scan
-      // up to 15 rows looking for either a recognizable name-column header
-      // or the PRELIM/MIDTERM grade-component pair.
       let headerRowIndex = -1;
       for (let i = 0; i < Math.min(matrix.length, 15); i++) {
         const rowStr = matrix[i].map(c => c.toString().toLowerCase()).join(" ");
@@ -635,25 +587,26 @@ function processExcel() {
 
       const headers = matrix[headerRowIndex].map(h => h.toString().trim());
 
-      // Identify column indices
       let nameIdx = headers.findIndex(h => {
         const lower = h.toLowerCase();
         return lower.includes("student name") || lower.includes("full name") || lower === "names" || lower === "name";
       });
       let idIdx = headers.findIndex(h => {
-        const lower = h.toLowerCase();
-        return lower.includes("student id") || lower === "id" || lower.includes("id no.");
+        const lower = h.toLowerCase().replace(/\s+/g, '');
+        return lower.includes("studentid") || lower === "id" || lower.includes("idno.");
       });
       let prelimIdx = headers.findIndex(h => h.toLowerCase() === "prelim");
       let midtermIdx = headers.findIndex(h => h.toLowerCase() === "midterm");
       let finalIdx = headers.findIndex(h => h.toLowerCase() === "final" || h.toLowerCase().includes("finals"));
 
-      // 2b. Header validation. Student Name and all three grade components
-      // are required. Student ID is now OPTIONAL: instructor class records
-      // commonly only have a sequential "No." column (not a real student
-      // identifier), so we no longer require an ID column to import — rows
-      // without one fall back to a name-based key (see below) instead of
-      // being rejected outright.
+      const quizColumns = [];
+      headers.forEach((h, idx) => {
+        const match = h.trim().match(/^quiz\s*(\d+)$/i);
+        if (match) quizColumns.push({ name: `Quiz ${match[1]}`, idx });
+      });
+      const attendanceIdx = headers.findIndex(h => h.toLowerCase().trim() === "attendance");
+      const hasBreakdownColumns = quizColumns.length > 0 || attendanceIdx !== -1;
+
       const missingColumns = [];
       if (nameIdx === -1) missingColumns.push("Student Name");
       if (prelimIdx === -1) missingColumns.push("Prelim");
@@ -672,23 +625,14 @@ function processExcel() {
       const skippedRows = [];
       const seenKeys = new Set();
 
-      // 3. Extract student records below the header row
       for (let r = headerRowIndex + 1; r < matrix.length; r++) {
-        const rowNumber = r + 1; // 1-based, matches what a user sees in Excel
+        const rowNumber = r + 1;
         const row = matrix[r];
         const rawName = row[nameIdx] ? row[nameIdx].toString().trim() : "";
 
-        // Stop if name is blank or summary total row reached
         if (!rawName || rawName.toLowerCase().includes("total") || rawName.toLowerCase().includes("average")) continue;
 
         const rawId = idIdx !== -1 && row[idIdx] ? row[idIdx].toString().trim() : "";
-
-        // Fallback key: when no real Student ID is present, derive a
-        // stable key from the normalized student name instead. Unlike the
-        // old auto-incrementing sequence fallback, this key is tied to the
-        // actual student (same name -> same key on every re-import), so it
-        // doesn't reintroduce the record-overwrite bug that fallback
-        // caused.
         const studentKey = rawId || normalizeNameKey(rawName);
 
         if (!studentKey) {
@@ -710,6 +654,15 @@ function processExcel() {
         if (rawMidterm !== "" && isNaN(parseFloat(rawMidterm))) invalidComponents.push("Midterm");
         if (rawFinals !== "" && isNaN(parseFloat(rawFinals))) invalidComponents.push("Final");
 
+        quizColumns.forEach(({ name, idx }) => {
+          const raw = row[idx];
+          if (raw !== "" && isNaN(parseFloat(raw))) invalidComponents.push(name);
+        });
+        if (attendanceIdx !== -1) {
+          const rawAttendance = row[attendanceIdx];
+          if (rawAttendance !== "" && isNaN(parseFloat(rawAttendance))) invalidComponents.push("Attendance");
+        }
+
         if (invalidComponents.length) {
           skippedRows.push(`Row ${rowNumber} ("${rawName}"): invalid numeric value in ${invalidComponents.join(", ")}.`);
           continue;
@@ -719,13 +672,23 @@ function processExcel() {
         const midterm = parseFloat(rawMidterm) || 0;
         const finals = parseFloat(rawFinals) || 0;
 
+        const breakdown = hasBreakdownColumns ? {
+          quizzes: quizColumns.map(({ name, idx }) => ({
+            name,
+            score: parseFloat(row[idx]) || 0,
+            maxScore: 100
+          })),
+          attendance: attendanceIdx !== -1 ? (parseFloat(row[attendanceIdx]) || 0) : null
+        } : null;
+
         seenKeys.add(studentKey);
         parsedGradeData.push({
           studentId: studentKey,
           fullName: rawName,
           prelim: parseFloat(prelim.toFixed(2)),
           midterm: parseFloat(midterm.toFixed(2)),
-          finals: parseFloat(finals.toFixed(2))
+          finals: parseFloat(finals.toFixed(2)),
+          breakdown
         });
       }
 
@@ -745,13 +708,9 @@ function processExcel() {
   };
 
   reader.readAsArrayBuffer(file);
-  // Reset the input so re-selecting the same filename fires 'onchange' again.
   fileInput.value = '';
 }
 
-/**
- * Render parsed Excel data with dynamic academic status badges
- */
 function renderParsedGradesToTable() {
   const tbody = document.getElementById('previewBody');
   if (!tbody) return;
@@ -791,29 +750,75 @@ function renderParsedGradesToTable() {
   });
 }
 
-// --- FIREBASE GRADE SAVE & RELEASE HANDLERS ---
+async function buildRegisteredStudentIndex(subjectCode) {
+  const index = new Map();
+
+  const enrollSnapshot = await db.collection('enrollments')
+    .where('subjectCode', '==', subjectCode)
+    .get();
+  enrollSnapshot.forEach((doc) => {
+    const e = doc.data();
+    const key = normalizeNameKey(e.fullName);
+    if (key && e.studentId) {
+      index.set(key, { studentUid: e.studentUid, studentId: e.studentId, fullName: e.fullName });
+    }
+  });
+
+  const usersSnapshot = await db.collection('users').where('role', '==', 'student').get();
+  usersSnapshot.forEach((doc) => {
+    const u = doc.data();
+    const key = normalizeNameKey(u.fullName);
+    if (key && u.studentId && !index.has(key)) {
+      index.set(key, { studentUid: doc.id, studentId: u.studentId, fullName: u.fullName });
+    }
+  });
+
+  return index;
+}
+
+function resolveEffectiveStudentId(row, subjectCode, registeredIndex, batch) {
+  const isNameFallbackKey = row.studentId === normalizeNameKey(row.fullName);
+  if (!isNameFallbackKey) return row.studentId;
+
+  const match = registeredIndex.get(normalizeNameKey(row.fullName));
+  if (!match || !match.studentId || match.studentId === row.studentId) return row.studentId;
+
+  const legacyDocId = buildGradeDocId(subjectCode, row.studentId);
+  batch.delete(db.collection('grades').doc(legacyDocId));
+  return match.studentId;
+}
 
 async function saveDraftGrades() {
   if (!activeSubjectCode) return alert("Select an active subject first.");
   if (!parsedGradeData.length) return alert("Upload an Excel sheet to parse grades first.");
 
   try {
+    const registeredIndex = await buildRegisteredStudentIndex(activeSubjectCode);
     const batch = db.batch();
     parsedGradeData.forEach((row) => {
-      const docId = buildGradeDocId(activeSubjectCode, row.studentId);
+      const effectiveStudentId = resolveEffectiveStudentId(row, activeSubjectCode, registeredIndex, batch);
+      const docId = buildGradeDocId(activeSubjectCode, effectiveStudentId);
       const docRef = db.collection('grades').doc(docId);
       const stats = computeGradeStats(row.prelim, row.midterm, row.finals);
 
+      const breakdown = row.breakdown ? {
+        quizzes: row.breakdown.quizzes,
+        exams: { prelim: stats.prelim, midterm: stats.midterm, finals: stats.finals },
+        attendance: row.breakdown.attendance,
+        termAverage: stats.average
+      } : null;
+
       batch.set(docRef, {
         classId: activeSubjectCode, 
-        studentId: String(row.studentId).trim(), 
+        studentId: String(effectiveStudentId).trim(), 
         fullName: row.fullName,
         prelim: stats.prelim, 
         midterm: stats.midterm,
         finals: stats.finals, 
-        semester: activeSemester,
+        semester: normalizeSemester(activeSemester),
         schoolYear: "2026-2027",
         isReleased: false,
+        breakdown,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     });
@@ -833,22 +838,32 @@ async function releaseGrades() {
   if (!parsedGradeData.length) return alert("Upload an Excel sheet to parse grades first.");
 
   try {
+    const registeredIndex = await buildRegisteredStudentIndex(activeSubjectCode);
     const batch = db.batch();
     parsedGradeData.forEach((row) => {
-      const docId = buildGradeDocId(activeSubjectCode, row.studentId);
+      const effectiveStudentId = resolveEffectiveStudentId(row, activeSubjectCode, registeredIndex, batch);
+      const docId = buildGradeDocId(activeSubjectCode, effectiveStudentId);
       const gradeRef = db.collection('grades').doc(docId);
       const stats = computeGradeStats(row.prelim, row.midterm, row.finals);
 
+      const breakdown = row.breakdown ? {
+        quizzes: row.breakdown.quizzes,
+        exams: { prelim: stats.prelim, midterm: stats.midterm, finals: stats.finals },
+        attendance: row.breakdown.attendance,
+        termAverage: stats.average
+      } : null;
+
       batch.set(gradeRef, {
         classId: activeSubjectCode, 
-        studentId: String(row.studentId).trim(), 
+        studentId: String(effectiveStudentId).trim(), 
         fullName: row.fullName,
         prelim: stats.prelim, 
         midterm: stats.midterm,
         finals: stats.finals, 
-        semester: activeSemester,
+        semester: normalizeSemester(activeSemester),
         schoolYear: "2026-2027",
         isReleased: true,
+        breakdown,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     });
@@ -856,10 +871,6 @@ async function releaseGrades() {
     await batch.commit();
     await logActivity(currentUserEmail, `Released official grades for ${activeSubjectCode} (${semesterDisplayLabel(activeSemester)})`);
 
-    // Notify every APPROVED enrolled student for this subject. The
-    // enrollments collection is what actually links a student's Auth uid
-    // (recipientUid) to this subject — parsedGradeData only has
-    // studentId/fullName, which isn't a reliable notification target.
     try {
       const approvedSnapshot = await db.collection('enrollments')
         .where('subjectCode', '==', activeSubjectCode)
@@ -876,7 +887,7 @@ async function releaseGrades() {
             title: "Grades Released",
             message: `Your ${semesterDisplayLabel(activeSemester)} grades for ${activeSubjectCode} have been published.`,
             subjectCode: activeSubjectCode,
-            semester: activeSemester,
+            semester: normalizeSemester(activeSemester),
             isRead: false,
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
           });
@@ -884,9 +895,6 @@ async function releaseGrades() {
         await notifyBatch.commit();
       }
     } catch (notifyErr) {
-      // Grades already released successfully at this point — a
-      // notification failure shouldn't be reported as a release failure,
-      // just logged.
       console.error("Error sending release notifications:", notifyErr);
     }
 
@@ -898,7 +906,104 @@ async function releaseGrades() {
   }
 }
 
-// --- ADMIN, REPORTS & STUDENT MODULES ---
+window.analyticsCharts = window.analyticsCharts || {};
+
+function renderChart(canvasId, config) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  if (window.analyticsCharts[canvasId]) {
+    window.analyticsCharts[canvasId].destroy();
+  }
+  window.analyticsCharts[canvasId] = new Chart(canvas.getContext('2d'), config);
+}
+
+function renderAcademicAnalytics(gradeDocs, ids) {
+  const buckets = { '90-100': 0, '80-89': 0, '75-79': 0, 'Below 75': 0 };
+  let passed = 0;
+  let failed = 0;
+  const atRisk = [];
+
+  gradeDocs.forEach((g) => {
+    if (!g.isReleased) return;
+
+    const stats = computeGradeStats(g.prelim, g.midterm, g.finals);
+    const avg = stats.average;
+
+    if (avg >= 90) buckets['90-100']++;
+    else if (avg >= 80) buckets['80-89']++;
+    else if (avg >= 75) buckets['75-79']++;
+    else buckets['Below 75']++;
+
+    if (stats.isPassing) passed++; else failed++;
+
+    if (avg < PASSING_THRESHOLD || g.isAtRisk === true) {
+      atRisk.push({
+        fullName: g.fullName,
+        studentId: g.studentId,
+        classId: g.classId,
+        termAverage: avg
+      });
+    }
+  });
+
+  renderChart(ids.distributionCanvasId, {
+    type: 'bar',
+    data: {
+      labels: Object.keys(buckets),
+      datasets: [{
+        label: 'Number of Students',
+        data: Object.values(buckets),
+        backgroundColor: ['#22c55e', '#38bdf8', '#f59e0b', '#f43f5e']
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' } },
+        y: { beginAtZero: true, ticks: { color: '#94a3b8', precision: 0 }, grid: { color: '#1e293b' } }
+      }
+    }
+  });
+
+  renderChart(ids.passFailCanvasId, {
+    type: 'doughnut',
+    data: {
+      labels: ['Passed', 'Failed'],
+      datasets: [{ data: [passed, failed], backgroundColor: ['#22c55e', '#f43f5e'] }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'bottom', labels: { color: '#cbd5e1' } } }
+    }
+  });
+
+  const tableBody = document.getElementById(ids.atRiskTableId);
+  if (tableBody) {
+    tableBody.innerHTML = '';
+    if (!atRisk.length) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td colspan="5" class="px-4 py-6 text-center text-slate-500 italic">No at-risk students in this data set.</td>`;
+      tableBody.appendChild(tr);
+    } else {
+      atRisk.forEach((s) => {
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-800/50";
+        tr.innerHTML = `
+          <td class="px-4 py-2 font-medium text-white">${escapeHtml(s.fullName || '(Unnamed)')}</td>
+          <td class="px-4 py-2 font-mono text-slate-400">${escapeHtml(s.studentId || 'N/A')}</td>
+          <td class="px-4 py-2 text-slate-300">${escapeHtml(s.classId || '')}</td>
+          <td class="px-4 py-2 font-bold text-rose-400">${s.termAverage.toFixed(2)}</td>
+          <td class="px-4 py-2">
+            <span class="px-2.5 py-1 rounded-full text-[11px] font-bold uppercase bg-rose-500/20 text-rose-400 border border-rose-500/30">Needs Intervention</span>
+          </td>
+        `;
+        tableBody.appendChild(tr);
+      });
+    }
+  }
+}
 
 async function generateSemesterReport() {
   const semesterVal = document.getElementById('reportSemesterSelect').value;
@@ -913,10 +1018,18 @@ async function generateSemesterReport() {
   `;
 
   try {
+    const semQueryValues = (semesterVal === '1S' || semesterVal === '1st Semester') ? ['1S', '1st Semester'] : ['2S', '2nd Semester'];
+
     const snapshot = await db.collection('grades')
-      .where('semester', '==', semesterVal)
+      .where('semester', 'in', semQueryValues)
       .where('isReleased', '==', true)
       .get();
+
+    const adminAnalyticsIds = {
+      distributionCanvasId: 'adminGradeDistributionChart',
+      passFailCanvasId: 'adminPassFailChart',
+      atRiskTableId: 'adminAtRiskTableBody'
+    };
 
     if (snapshot.empty) {
       outputContainer.innerHTML = `
@@ -925,6 +1038,7 @@ async function generateSemesterReport() {
         </div>
       `;
       lastReportData = null;
+      renderAcademicAnalytics(snapshot.docs.map((d) => d.data()), adminAnalyticsIds);
       return;
     }
 
@@ -1030,6 +1144,7 @@ async function generateSemesterReport() {
     `;
 
     await logActivity(currentUserEmail, `Generated ${semesterVal} semester grade report`);
+    renderAcademicAnalytics(snapshot.docs.map((d) => d.data()), adminAnalyticsIds);
   } catch (err) {
     console.error("Error generating report:", err);
     outputContainer.innerHTML = `<div class="text-rose-500 text-xs p-2">Error calculating report: ${escapeHtml(err.message)}</div>`;
@@ -1094,25 +1209,23 @@ async function loadAdminDashboardData() {
   if (facultyTable) facultyTable.innerHTML = '';
   if (assignFacultySelect) assignFacultySelect.innerHTML = '<option value="">Select Faculty...</option>';
 
-  // Lookup map used later to render faculty email next to each assignment,
-  // built here since this is where we already have each instructor's data.
-  const facultyEmailByUid = {};
+  const facultyInfoByUid = {};
 
   facultySnapshot.forEach((doc) => {
     const f = doc.data();
-    facultyEmailByUid[doc.id] = f.email;
+    facultyInfoByUid[doc.id] = f;
+    const displayLabel = facultyDisplayLabel(f);
 
     if (facultyTable) {
       const tr = document.createElement('tr');
       const isActive = f.status === 'active';
-      // doc.id is a Firestore-generated ID and status is one of two known
-      // literals we control, so this pair is safe to place in an inline
-      // handler, but we still normalize status to a strict allow-list
-      // rather than interpolating the raw field value.
       const safeStatus = f.status === 'disabled' ? 'disabled' : 'active';
       tr.className = "hover:bg-slate-800/50 transition-colors";
       tr.innerHTML = `
-        <td class="px-5 py-3 font-medium text-white">${escapeHtml(f.email)}</td>
+        <td class="px-5 py-3">
+          <div class="font-medium text-white">${escapeHtml(displayLabel)}</div>
+          ${f.fullName ? `<div class="text-[11px] text-slate-500">${escapeHtml(f.email)}</div>` : ''}
+        </td>
         <td class="px-5 py-3">
           <span class="px-2.5 py-0.5 rounded-full text-xs font-bold ${isActive ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}">
             ${escapeHtml(f.status || 'active')}
@@ -1130,7 +1243,7 @@ async function loadAdminDashboardData() {
     if (assignFacultySelect) {
       const opt = document.createElement('option');
       opt.value = doc.id;
-      opt.innerText = f.email;
+      opt.innerText = displayLabel;
       assignFacultySelect.appendChild(opt);
     }
   });
@@ -1139,8 +1252,6 @@ async function loadAdminDashboardData() {
   const subjectsCount = document.getElementById('subjectsCountDisplay');
   if (subjectsCount) subjectsCount.innerText = subjectsSnapshot.size;
 
-  // Lookup map used to render a readable subject name next to each
-  // assignment below.
   const subjectNameByCode = {};
 
   const assignSubjectSelect = document.getElementById('assignSubjectSelect');
@@ -1158,12 +1269,6 @@ async function loadAdminDashboardData() {
     }
   });
 
-  // Active Faculty Assignments Directory: one entry per registered
-  // instructor, listing every subject currently assigned to them
-  // (cross-referencing users, assignments, and subjects), each with its
-  // own Unassign button. Built with DOM APIs rather than innerHTML
-  // templating so facultyUid/subjectCode never need to be embedded in an
-  // inline HTML attribute or string-escaped.
   const activeAssignmentsList = document.getElementById('activeAssignmentsList');
   if (activeAssignmentsList) {
     const assignmentsSnapshot = await db.collection('assignments').get();
@@ -1185,7 +1290,7 @@ async function loadAdminDashboardData() {
     } else {
       facultySnapshot.forEach((facultyDoc) => {
         const facultyUid = facultyDoc.id;
-        const facultyEmail = facultyEmailByUid[facultyUid];
+        const facultyLabel = facultyDisplayLabel(facultyInfoByUid[facultyUid] || {});
         const subjectCodes = subjectCodesByFaculty[facultyUid] || [];
 
         const card = document.createElement('div');
@@ -1193,7 +1298,7 @@ async function loadAdminDashboardData() {
 
         const header = document.createElement('div');
         header.className = "text-sm font-semibold text-white truncate";
-        header.textContent = facultyEmail;
+        header.textContent = facultyLabel;
         card.appendChild(header);
 
         const subjectsContainer = document.createElement('div');
@@ -1272,21 +1377,11 @@ async function assignSubjectToFaculty() {
     return;
   }
 
-  // The select's option text is the instructor's email (set when the
-  // faculty dropdown was populated), so we can use it for the success
-  // message without an extra Firestore read.
   const facultyEmail = facultySelect.options[facultySelect.selectedIndex]?.text || facultyUid;
-
-  // Deterministic doc ID (facultyUid_subjectCode) is what makes this pair
-  // uniquely identifiable, and is required by firestore.rules to verify an
-  // instructor's class ownership via a direct exists() lookup.
   const assignmentId = buildAssignmentDocId(facultyUid, subjectCode);
   const assignmentRef = db.collection('assignments').doc(assignmentId);
 
   try {
-    // Check for an existing assignment BEFORE writing, so we can tell the
-    // admin whether this was a no-op rather than silently re-confirming
-    // success on a duplicate.
     const existingDoc = await assignmentRef.get();
 
     if (existingDoc.exists) {
@@ -1323,11 +1418,60 @@ async function unassignSubjectFromFaculty(facultyUid, subjectCode) {
   }
 }
 
+async function migrateLegacyAssignmentIds() {
+  const confirmed = confirm(
+    "This will scan all faculty-subject assignments and re-key any created " +
+    "with an old, non-deterministic document ID. This is safe to run more " +
+    "than once. Continue?"
+  );
+  if (!confirmed) return;
+
+  try {
+    const snapshot = await db.collection('assignments').get();
+
+    const legacyDocs = [];
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      if (!data.facultyUid || !data.subjectCode) return;
+      const expectedId = buildAssignmentDocId(data.facultyUid, data.subjectCode);
+      if (doc.id !== expectedId) {
+        legacyDocs.push({ oldId: doc.id, expectedId, data });
+      }
+    });
+
+    if (!legacyDocs.length) {
+      alert("No legacy assignment IDs found — everything is already correctly keyed.");
+      return;
+    }
+
+    const batch = db.batch();
+    legacyDocs.forEach(({ oldId, expectedId, data }) => {
+      const newRef = db.collection('assignments').doc(expectedId);
+      batch.set(newRef, {
+        facultyUid: data.facultyUid,
+        subjectCode: data.subjectCode,
+        assignedAt: data.assignedAt || firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+      batch.delete(db.collection('assignments').doc(oldId));
+    });
+
+    await batch.commit();
+    await logActivity(currentUserEmail, `Migrated ${legacyDocs.length} legacy assignment ID(s) to the deterministic format`);
+    alert(`Migrated ${legacyDocs.length} assignment record(s) to the correct ID format.`);
+    loadAdminDashboardData();
+  } catch (err) {
+    console.error("Assignment ID Migration Error:", err);
+    alert("Error migrating assignment IDs: " + err.message);
+  }
+}
+
 async function createInstructor() {
+  const fullName = document.getElementById('instFullName').value.trim();
+  const title = document.getElementById('instTitle').value.trim();
   const email = document.getElementById('instEmail').value.trim();
   const password = document.getElementById('instPassword').value.trim();
 
-  if (!email || !password) return alert("Enter email and password.");
+  if (!fullName || !email || !password) return alert("Enter at least the full name, email, and password.");
 
   try {
     const tempApp = firebase.initializeApp(firebaseConfig, "SecondaryApp");
@@ -1337,13 +1481,13 @@ async function createInstructor() {
     const newUid = userCredential.user.uid;
 
     await db.collection('users').doc(newUid).set({
-      email, role: "instructor", status: "active",
+      fullName, title, email, role: "instructor", status: "active",
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
 
     await tempApp.delete();
-    await logActivity(currentUserEmail, `Provisioned instructor account (${email})`);
-    alert(`Instructor created: ${email}`);
+    await logActivity(currentUserEmail, `Provisioned instructor account (${fullName} - ${email})`);
+    alert(`Instructor created: ${fullName}`);
     loadAdminDashboardData();
   } catch (err) {
     alert("Error: " + err.message);
@@ -1354,11 +1498,19 @@ async function addSubject() {
   const subjectCode = document.getElementById('subCode').value.trim();
   const subjectName = document.getElementById('subName').value.trim();
   const units = parseInt(document.getElementById('subUnits').value);
+  const yearLevel = document.getElementById('subYearLevel').value;
+  const semester = document.getElementById('subSemester').value;
+  const lecHrs = parseFloat(document.getElementById('subLecHrs').value) || 0;
+  const labHrs = parseFloat(document.getElementById('subLabHrs').value) || 0;
+  const prerequisite = document.getElementById('subPrerequisite').value.trim();
 
-  if (!subjectCode || !subjectName || isNaN(units)) return alert("Complete all fields.");
+  if (!subjectCode || !subjectName || isNaN(units)) return alert("Complete the Code, Name, and Units fields.");
 
   try {
-    await db.collection('subjects').doc(subjectCode).set({ subjectCode, subjectName, units });
+    await db.collection('subjects').doc(subjectCode).set({
+      subjectCode, subjectName, units,
+      yearLevel, semester, lecHrs, labHrs, prerequisite
+    });
     await logActivity(currentUserEmail, `Added department subject ${subjectCode}`);
     alert(`Subject ${subjectCode} saved!`);
     loadAdminDashboardData();
@@ -1367,90 +1519,92 @@ async function addSubject() {
   }
 }
 
+/**
+ * SECURE LOAD STUDENT DASHBOARD
+ * Executes targeted Firestore queries matching the logged-in student's ID or name
+ * so that strict database-level Security Rules pass cleanly.
+ */
 async function loadStudentDashboard(studentId, fullName) {
-  if (!document.getElementById('studentGradesBody1S') && !document.getElementById('studentGradesBody2S')) return;
+  const tbody1S = document.getElementById('studentGradesBody1S');
+  const tbody2S = document.getElementById('studentGradesBody2S');
+  if (!tbody1S && !tbody2S) return;
 
   try {
-    const nameKey = normalizeNameKey(fullName);
-    const queries = [];
-
-    // Query A: released grades matching the student's registered school ID.
-    if (studentId) {
-      queries.push(
-        db.collection('grades')
-          .where('isReleased', '==', true)
-          .where('studentId', '==', studentId)
-          .get()
-      );
-    }
-
-    // Query B: released grades matching the student's normalized name key,
-    // for classes an instructor imported without a Student ID column (see
-    // the flexible Excel importer). Skipped if it's the same key as
-    // studentId, to avoid a redundant duplicate query.
-    if (nameKey && nameKey !== studentId) {
-      queries.push(
-        db.collection('grades')
-          .where('isReleased', '==', true)
-          .where('studentId', '==', nameKey)
-          .get()
-      );
-    }
-
-    // Query C: exact fullName string match. Catches a record saved under
-    // a studentId that matches neither the registered ID nor the
-    // normalized name key, but whose stored fullName is an exact match to
-    // this student's registered name. Runs alongside A and B rather than
-    // only as a last resort, per spec.
-    if (fullName) {
-      queries.push(
-        db.collection('grades')
-          .where('isReleased', '==', true)
-          .where('fullName', '==', fullName)
-          .get()
-      );
-    }
-
-    const snapshots = queries.length ? await Promise.all(queries) : [];
-
-    // Merge & deduplicate by document ID — the same grade record can
-    // legitimately satisfy more than one of the three queries above.
-    const gradesById = new Map();
-    snapshots.forEach((snapshot) => {
-      snapshot.forEach((doc) => {
-        gradesById.set(doc.id, doc.data());
-      });
-    });
-
-    const tbody1S = document.getElementById('studentGradesBody1S');
-    const tbody2S = document.getElementById('studentGradesBody2S');
     if (tbody1S) tbody1S.innerHTML = '';
     if (tbody2S) tbody2S.innerHTML = '';
 
-    if (!gradesById.size) {
-      const emptyRow = () => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td colspan="6" class="px-5 py-8 text-center text-slate-500 italic">
-            No released grades found yet.
-          </td>
+    const cleanStudentId = String(studentId || '').trim();
+    const cleanFullName = String(fullName || '').trim();
+
+    if (!cleanStudentId && !cleanFullName) {
+      const renderEmpty = (container) => {
+        if (!container) return;
+        container.innerHTML = `
+          <tr>
+            <td colspan="6" class="px-5 py-8 text-center text-slate-500 italic">
+              Student profile incomplete. Please contact the administrator.
+            </td>
+          </tr>
         `;
-        return tr;
       };
-      if (tbody1S) tbody1S.appendChild(emptyRow());
-      if (tbody2S) tbody2S.appendChild(emptyRow());
+      renderEmpty(tbody1S);
+      renderEmpty(tbody2S);
       return;
     }
 
-    gradesById.forEach((g) => {
-      // finals is the canonical field name written by saveDraftGrades /
-      // releaseGrades; the `final` fallback is defensive only, in case a
-      // record was ever created with that alternate key.
+    // Execute targeted queries matching the authenticated student's identity
+    const queries = [];
+    if (cleanStudentId) {
+      queries.push(
+        db.collection('grades')
+          .where('isReleased', '==', true)
+          .where('studentId', '==', cleanStudentId)
+          .get()
+      );
+    }
+    if (cleanFullName) {
+      queries.push(
+        db.collection('grades')
+          .where('isReleased', '==', true)
+          .where('fullName', '==', cleanFullName)
+          .get()
+      );
+    }
+
+    const snapshots = await Promise.all(queries);
+    const gradeDocsMap = new Map();
+
+    snapshots.forEach((snapshot) => {
+      snapshot.forEach((doc) => {
+        gradeDocsMap.set(doc.id, doc.data());
+      });
+    });
+
+    const matchedGrades = Array.from(gradeDocsMap.values());
+
+    if (!matchedGrades.length) {
+      const renderEmpty = (container) => {
+        if (!container) return;
+        container.innerHTML = `
+          <tr>
+            <td colspan="6" class="px-5 py-8 text-center text-slate-500 italic">
+              No released grades found for your profile (${escapeHtml(fullName || studentId || 'Student')}).
+            </td>
+          </tr>
+        `;
+      };
+      renderEmpty(tbody1S);
+      renderEmpty(tbody2S);
+      return;
+    }
+
+    matchedGrades.forEach((g) => {
       const finalsValue = g.finals !== undefined ? g.finals : g.final;
       const stats = computeGradeStats(g.prelim, g.midterm, finalsValue);
 
       const tr = document.createElement('tr');
-      tr.className = "hover:bg-slate-800/50 font-medium";
+      tr.className = "hover:bg-slate-800/50 font-medium cursor-pointer";
+      tr.title = "Click for detailed assessment breakdown";
       tr.innerHTML = `
         <td class="px-5 py-4 text-white">${escapeHtml(g.classId)}</td>
         <td class="px-5 py-4">${stats.prelim.toFixed(2)}</td>
@@ -1463,27 +1617,23 @@ async function loadStudentDashboard(studentId, fullName) {
           </span>
         </td>
       `;
+      tr.addEventListener('click', () => openStudentGradeBreakdownModal(g));
 
-      // Normalize before bucketing: canonical values are "1S"/"2S", but
-      // this defensively also recognizes legacy human-readable labels
-      // (e.g. "1st Semester", "1st Semester (2026)") in case any document
-      // was ever written with one, rather than assuming every record uses
-      // the canonical form. Anything that isn't recognizably 2nd Semester
-      // defaults to 1st Semester rather than being silently dropped.
-      const isSecondSemester = g.semester === '2S' || /2nd\s*semester/i.test(String(g.semester || ''));
+      const normSem = normalizeSemester(g.semester);
+      const isSecondSemester = normSem === '2nd Semester';
       const targetBody = isSecondSemester ? tbody2S : tbody1S;
       if (targetBody) targetBody.appendChild(tr);
     });
 
     [tbody1S, tbody2S].forEach((body) => {
       if (body && !body.children.length) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td colspan="6" class="px-5 py-8 text-center text-slate-500 italic">
-            No released grades for this semester yet.
-          </td>
+        body.innerHTML = `
+          <tr>
+            <td colspan="6" class="px-5 py-8 text-center text-slate-500 italic">
+              No released grades for this semester yet.
+            </td>
+          </tr>
         `;
-        body.appendChild(tr);
       }
     });
   } catch (err) {
@@ -1491,12 +1641,187 @@ async function loadStudentDashboard(studentId, fullName) {
   }
 }
 
-// ------------------------------------------------------------------
-// STUDENT SELF-ENROLLMENT
-// ------------------------------------------------------------------
+function openStudentGradeBreakdownModal(g) {
+  const modal = document.getElementById('studentGradeBreakdownModal');
+  const panel = document.getElementById('studentGradeBreakdownModalPanel');
+  const title = document.getElementById('studentGradeBreakdownModalTitle');
+  const body = document.getElementById('studentGradeBreakdownModalBody');
+  if (!modal || !body) return;
+
+  if (title) title.textContent = g.classId ? `${g.classId} - Assessment Breakdown` : 'Assessment Breakdown';
+
+  const finalsValue = g.finals !== undefined ? g.finals : g.final;
+  const stats = computeGradeStats(g.prelim, g.midterm, finalsValue);
+
+  body.innerHTML = '';
+
+  const summary = document.createElement('div');
+  summary.className = "flex items-center justify-between p-3 rounded-xl border border-slate-800 bg-slate-950";
+  summary.innerHTML = `
+    <div>
+      <div class="text-xs text-slate-500 uppercase tracking-wider font-bold">Term Average</div>
+      <div class="text-2xl font-bold text-white">${stats.averageDisplay}</div>
+    </div>
+    <span class="px-3 py-1.5 rounded-full text-xs font-bold ${stats.isPassing ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}">
+      ${stats.isPassing ? 'PASS' : 'FAIL'}
+    </span>
+  `;
+  body.appendChild(summary);
+
+  if (!g.breakdown) {
+    const notice = document.createElement('div');
+    notice.className = "p-4 rounded-xl border border-slate-800 bg-slate-950 text-center text-sm text-slate-400 italic";
+    notice.textContent = "Detailed itemized assessment breakdown is not available for this term record.";
+    body.appendChild(notice);
+  } else {
+    const examsSection = document.createElement('div');
+    examsSection.className = "space-y-2";
+    const examsHeading = document.createElement('h4');
+    examsHeading.className = "text-xs font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-1.5";
+    examsHeading.textContent = "Major Exams";
+    examsSection.appendChild(examsHeading);
+
+    const examsGrid = document.createElement('div');
+    examsGrid.className = "grid grid-cols-3 gap-2";
+    const exams = g.breakdown.exams || { prelim: stats.prelim, midterm: stats.midterm, finals: stats.finals };
+    [['Prelim', exams.prelim], ['Midterm', exams.midterm], ['Finals', exams.finals]].forEach(([label, val]) => {
+      const cell = document.createElement('div');
+      cell.className = "p-2 rounded-lg bg-slate-950 border border-slate-800 text-center";
+      const labelEl = document.createElement('div');
+      labelEl.className = "text-[10px] text-slate-500 uppercase font-bold";
+      labelEl.textContent = label;
+      const valEl = document.createElement('div');
+      valEl.className = "text-sm font-bold text-white";
+      valEl.textContent = (Number(val) || 0).toFixed(2);
+      cell.appendChild(labelEl);
+      cell.appendChild(valEl);
+      examsGrid.appendChild(cell);
+    });
+    examsSection.appendChild(examsGrid);
+    body.appendChild(examsSection);
+
+    const quizzesSection = document.createElement('div');
+    quizzesSection.className = "space-y-2";
+    const quizzesHeading = document.createElement('h4');
+    quizzesHeading.className = "text-xs font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-1.5";
+    quizzesHeading.textContent = "Quizzes";
+    quizzesSection.appendChild(quizzesHeading);
+
+    const quizzes = g.breakdown.quizzes || [];
+    if (quizzes.length) {
+      quizzes.forEach((q) => {
+        const row = document.createElement('div');
+        row.className = "flex items-center justify-between text-sm p-2 rounded-lg bg-slate-950 border border-slate-800";
+        const name = document.createElement('span');
+        name.className = "text-slate-300";
+        name.textContent = q.name;
+        const score = document.createElement('span');
+        score.className = "font-bold text-white";
+        score.textContent = `${q.score} / ${q.maxScore}`;
+        row.appendChild(name);
+        row.appendChild(score);
+        quizzesSection.appendChild(row);
+      });
+    } else {
+      const none = document.createElement('div');
+      none.className = "text-xs text-slate-500 italic p-2";
+      none.textContent = "No quizzes recorded.";
+      quizzesSection.appendChild(none);
+    }
+    body.appendChild(quizzesSection);
+
+    const attendanceSection = document.createElement('div');
+    attendanceSection.className = "flex items-center justify-between p-3 rounded-xl border border-slate-800 bg-slate-950";
+    const attendanceLabel = document.createElement('span');
+    attendanceLabel.className = "text-xs font-bold uppercase tracking-wider text-slate-400";
+    attendanceLabel.textContent = "Attendance";
+    const attendanceVal = document.createElement('span');
+    attendanceVal.className = "font-bold text-white";
+    attendanceVal.textContent = (g.breakdown.attendance !== null && g.breakdown.attendance !== undefined)
+      ? `${g.breakdown.attendance}%`
+      : 'Not recorded';
+    attendanceSection.appendChild(attendanceLabel);
+    attendanceSection.appendChild(attendanceVal);
+    body.appendChild(attendanceSection);
+  }
+
+  modal.classList.remove('hidden');
+  if (panel) {
+    void panel.offsetWidth;
+    panel.classList.remove('opacity-0', 'scale-95');
+  }
+}
+
+function closeStudentGradeBreakdownModal() {
+  const modal = document.getElementById('studentGradeBreakdownModal');
+  const panel = document.getElementById('studentGradeBreakdownModalPanel');
+  if (!modal) return;
+
+  if (panel) panel.classList.add('opacity-0', 'scale-95');
+  setTimeout(() => modal.classList.add('hidden'), 200);
+}
+
+const PROSPECTUS_GROUPS = [
+  { yearLevel: '1', semester: '1S', label: '1st Year - 1st Semester' },
+  { yearLevel: '1', semester: '2S', label: '1st Year - 2nd Semester' },
+  { yearLevel: '2', semester: '1S', label: '2nd Year - 1st Semester' },
+  { yearLevel: '2', semester: '2S', label: '2nd Year - 2nd Semester' },
+  { yearLevel: '3', semester: '1S', label: '3rd Year - 1st Semester' },
+  { yearLevel: '3', semester: '2S', label: '3rd Year - 2nd Semester' },
+  { yearLevel: '4', semester: '1S', label: '4th Year - 1st Semester' },
+  { yearLevel: '4', semester: '2S', label: '4th Year - 2nd Semester' }
+];
+
+let isItOnlyFilterActive = false;
+const IT_SUBJECT_PREFIXES = ['COMP', 'PROG', 'IT', 'SIA', 'DBMS', 'CAPSTONE', 'NET', 'MS', 'IS', 'APPSDEV', 'IPT', 'MUL'];
+
+function isItSubjectCode(subjectCode) {
+  const code = String(subjectCode || '').toUpperCase();
+  return IT_SUBJECT_PREFIXES.some((prefix) => code.startsWith(prefix));
+}
+
+function prospectusGroupKey(yearLevel, semester) {
+  return `${yearLevel || ''}_${semester || ''}`;
+}
+
+function groupSubjectsForProspectus(subjectsSnapshot, itOnly = false) {
+  const buckets = new Map();
+  subjectsSnapshot.forEach((doc) => {
+    const s = doc.data();
+    if (itOnly && !isItSubjectCode(s.subjectCode)) return;
+    const key = (s.yearLevel && s.semester) ? prospectusGroupKey(s.yearLevel, s.semester) : 'unassigned';
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(s);
+  });
+
+  const groups = [];
+  PROSPECTUS_GROUPS.forEach((group) => {
+    const key = prospectusGroupKey(group.yearLevel, group.semester);
+    const subjects = buckets.get(key);
+    if (subjects && subjects.length) groups.push({ label: group.label, subjects });
+  });
+  if (buckets.has('unassigned')) {
+    groups.push({ label: 'Unassigned / Needs Year-Level Assignment', subjects: buckets.get('unassigned') });
+  }
+  return groups;
+}
+
+function toggleITSubjectFilter(mode) {
+  isItOnlyFilterActive = (mode === 'it');
+
+  const btnAll = document.getElementById('btnFilterAllSubjects');
+  const btnIT = document.getElementById('btnFilterITSubjects');
+  const ACTIVE = "px-3 py-1 text-sm rounded-lg bg-emerald-600 text-white font-medium";
+  const INACTIVE = "px-3 py-1 text-sm rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium";
+
+  if (btnAll) btnAll.className = isItOnlyFilterActive ? INACTIVE : ACTIVE;
+  if (btnIT) btnIT.className = isItOnlyFilterActive ? ACTIVE : INACTIVE;
+
+  loadAvailableSubjectsForStudent();
+}
 
 async function loadAvailableSubjectsForStudent() {
-  const container = document.getElementById('availableSubjectsList');
+  const container = document.getElementById('prospectusContainer');
   if (!container || !currentUserId) return;
 
   try {
@@ -1521,58 +1846,228 @@ async function loadAvailableSubjectsForStudent() {
       return;
     }
 
-    subjectsSnapshot.forEach((doc) => {
-      const s = doc.data();
-      const status = statusByCode[s.subjectCode]; // undefined | 'pending' | 'approved' | 'rejected'
+    const renderGroup = (label, subjects) => {
+      const section = document.createElement('div');
+      section.className = "space-y-2";
 
-      const row = document.createElement('div');
-      row.className = "flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950";
+      const heading = document.createElement('h4');
+      heading.className = "text-xs font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-1.5";
+      heading.textContent = label;
+      section.appendChild(heading);
 
-      const label = document.createElement('div');
-      label.className = "min-w-0";
-      const codeLine = document.createElement('div');
-      codeLine.className = "text-sm font-semibold text-white truncate";
-      codeLine.textContent = `${s.subjectCode} - ${s.subjectName}`;
-      const unitsLine = document.createElement('div');
-      unitsLine.className = "text-xs text-slate-400";
-      unitsLine.textContent = `${Number(s.units) || 0} Units`;
-      label.appendChild(codeLine);
-      label.appendChild(unitsLine);
-      row.appendChild(label);
+      subjects.forEach((s) => {
+        const status = statusByCode[s.subjectCode];
 
-      if (!status) {
-        const requestBtn = document.createElement('button');
-        requestBtn.className = "shrink-0 px-3 py-1 rounded-lg text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition-all";
-        requestBtn.textContent = "Request Enrollment";
-        requestBtn.addEventListener('click', () => requestEnrollment(s.subjectCode));
-        row.appendChild(requestBtn);
-      } else {
-        // status is one of 'pending' | 'approved' | 'rejected'.
-        const badgeConfig = {
-          pending: { label: 'PENDING APPROVAL', cls: 'bg-amber-500/20 text-amber-400 border border-amber-500/30' },
-          approved: { label: 'ENROLLED', cls: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' },
-          rejected: { label: 'NOT APPROVED', cls: 'bg-rose-500/20 text-rose-400 border border-rose-500/30' }
-        }[status] || { label: status.toUpperCase(), cls: 'bg-slate-700/40 text-slate-300 border border-slate-700' };
+        const row = document.createElement('div');
+        row.className = "flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950";
 
-        const badge = document.createElement('span');
-        badge.className = `shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase ${badgeConfig.cls}`;
-        badge.textContent = badgeConfig.label;
-        row.appendChild(badge);
-      }
+        const left = document.createElement('div');
+        left.className = "flex items-center gap-3 min-w-0";
 
-      container.appendChild(row);
-    });
+        if (!status) {
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.className = "prospectus-checkbox w-4 h-4 accent-emerald-500 shrink-0";
+          checkbox.dataset.subjectCode = s.subjectCode;
+          left.appendChild(checkbox);
+        }
+
+        const label2 = document.createElement('div');
+        label2.className = "min-w-0";
+        const codeLine = document.createElement('div');
+        codeLine.className = "text-sm font-semibold text-white truncate";
+        codeLine.textContent = `${s.subjectCode} - ${s.subjectName}`;
+        const metaLine = document.createElement('div');
+        metaLine.className = "text-xs text-slate-400";
+        const hoursText = (s.lecHrs || s.labHrs) ? ` • ${Number(s.lecHrs) || 0} Lec / ${Number(s.labHrs) || 0} Lab hrs` : '';
+        const prereqText = s.prerequisite ? ` • Prerequisite: ${s.prerequisite}` : '';
+        metaLine.textContent = `${Number(s.units) || 0} Units${hoursText}${prereqText}`;
+        label2.appendChild(codeLine);
+        label2.appendChild(metaLine);
+        left.appendChild(label2);
+        row.appendChild(left);
+
+        if (status) {
+          const badgeConfig = {
+            pending: { label: 'PENDING APPROVAL', cls: 'bg-amber-500/20 text-amber-400 border border-amber-500/30' },
+            approved: { label: 'ENROLLED', cls: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' },
+            rejected: { label: 'NOT APPROVED', cls: 'bg-rose-500/20 text-rose-400 border border-rose-500/30' }
+          }[status] || { label: status.toUpperCase(), cls: 'bg-slate-700/40 text-slate-300 border border-slate-700' };
+
+          const badge = document.createElement('span');
+          badge.className = `shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase ${badgeConfig.cls}`;
+          badge.textContent = badgeConfig.label;
+          row.appendChild(badge);
+        }
+
+        section.appendChild(row);
+      });
+
+      container.appendChild(section);
+    };
+
+    const groups = groupSubjectsForProspectus(subjectsSnapshot, isItOnlyFilterActive);
+
+    if (!groups.length) {
+      const noMatch = document.createElement('div');
+      noMatch.className = "p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500";
+      noMatch.textContent = isItOnlyFilterActive
+        ? "No IT subjects found. Switch to \"All Subjects\" to see the full prospectus."
+        : "No subjects are available yet.";
+      container.appendChild(noMatch);
+    } else {
+      groups.forEach(({ label, subjects }) => {
+        renderGroup(label, subjects);
+      });
+    }
   } catch (err) {
     console.error("Error loading available subjects:", err);
-    // Surface the failure visibly instead of leaving the card silently
-    // blank — a permission-denied error (e.g. a stale Firestore rule)
-    // otherwise looks identical to "there's just nothing here yet."
     container.innerHTML = '';
     const errorMsg = document.createElement('div');
     errorMsg.className = "p-3 rounded-lg border border-rose-500/30 bg-rose-500/10 text-center text-xs text-rose-400";
     errorMsg.textContent = "Couldn't load available subjects: " + err.message;
     container.appendChild(errorMsg);
   }
+}
+
+function handleAssignSubjectSelectChange() {
+  const select = document.getElementById('assignSubjectSelect');
+  const indicator = document.getElementById('selectedSubjectIndicator');
+  if (!select || !indicator) return;
+
+  if (select.value) {
+    const optionLabel = select.options[select.selectedIndex]?.text || select.value;
+    indicator.textContent = `Selected: ${optionLabel}`;
+    indicator.classList.remove('hidden');
+  } else {
+    indicator.classList.add('hidden');
+  }
+}
+
+async function openAdminProspectusModal() {
+  const modal = document.getElementById('adminProspectusModal');
+  const panel = document.getElementById('adminProspectusModalPanel');
+  const body = document.getElementById('adminProspectusModalBody');
+  if (!modal || !body) return;
+
+  body.innerHTML = `<div class="text-center text-xs text-slate-500 py-8 animate-pulse">Loading curriculum...</div>`;
+  modal.classList.remove('hidden');
+  if (panel) {
+    void panel.offsetWidth;
+    panel.classList.remove('opacity-0', 'scale-95');
+  }
+
+  try {
+    const subjectsSnapshot = await db.collection('subjects').get();
+    const groups = groupSubjectsForProspectus(subjectsSnapshot);
+
+    body.innerHTML = '';
+
+    if (!groups.length) {
+      const empty = document.createElement('div');
+      empty.className = "text-center text-xs text-slate-500 py-8";
+      empty.textContent = "No subjects have been added yet.";
+      body.appendChild(empty);
+      return;
+    }
+
+    groups.forEach(({ label, subjects }) => {
+      const section = document.createElement('div');
+      section.className = "space-y-2";
+
+      const heading = document.createElement('h4');
+      heading.className = "text-xs font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-1.5";
+      heading.textContent = label;
+      section.appendChild(heading);
+
+      const tableWrap = document.createElement('div');
+      tableWrap.className = "overflow-x-auto rounded-xl border border-slate-800";
+
+      const table = document.createElement('table');
+      table.className = "w-full text-xs text-left";
+
+      const thead = document.createElement('thead');
+      thead.className = "bg-slate-950 text-slate-400 uppercase border-b border-slate-800";
+      const headRow = document.createElement('tr');
+      ['Code', 'Title', 'Units', 'Year', 'Semester', ''].forEach((col) => {
+        const th = document.createElement('th');
+        th.className = "px-3 py-2";
+        th.textContent = col;
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      tbody.className = "divide-y divide-slate-800";
+
+      subjects.forEach((s) => {
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-800/50";
+
+        const tdCode = document.createElement('td');
+        tdCode.className = "px-3 py-2 font-mono text-slate-300 whitespace-nowrap";
+        tdCode.textContent = s.subjectCode;
+
+        const tdTitle = document.createElement('td');
+        tdTitle.className = "px-3 py-2 text-white font-semibold";
+        tdTitle.textContent = s.subjectName;
+
+        const tdUnits = document.createElement('td');
+        tdUnits.className = "px-3 py-2 text-slate-300";
+        tdUnits.textContent = Number(s.units) || 0;
+
+        const tdYear = document.createElement('td');
+        tdYear.className = "px-3 py-2 text-slate-300 whitespace-nowrap";
+        tdYear.textContent = s.yearLevel || '—';
+
+        const tdSem = document.createElement('td');
+        tdSem.className = "px-3 py-2 text-slate-300 whitespace-nowrap";
+        tdSem.textContent = s.semester === '2S' ? '2nd Sem' : (s.semester === '1S' ? '1st Sem' : '—');
+
+        const tdAction = document.createElement('td');
+        tdAction.className = "px-3 py-2 text-right whitespace-nowrap";
+        const selectBtn = document.createElement('button');
+        selectBtn.className = "px-2.5 py-1 rounded-lg text-[11px] font-bold bg-sky-500 hover:bg-sky-400 text-slate-950 transition-all";
+        selectBtn.textContent = "Select Subject";
+        selectBtn.addEventListener('click', () => selectSubjectFromProspectusModal(s.subjectCode, s.subjectName));
+        tdAction.appendChild(selectBtn);
+
+        [tdCode, tdTitle, tdUnits, tdYear, tdSem, tdAction].forEach((td) => tr.appendChild(td));
+        tbody.appendChild(tr);
+      });
+
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+      section.appendChild(tableWrap);
+      body.appendChild(section);
+    });
+  } catch (err) {
+    console.error("Error loading prospectus modal:", err);
+    body.innerHTML = '';
+    const errorMsg = document.createElement('div');
+    errorMsg.className = "p-3 rounded-lg border border-rose-500/30 bg-rose-500/10 text-center text-xs text-rose-400";
+    errorMsg.textContent = "Couldn't load curriculum: " + err.message;
+    body.appendChild(errorMsg);
+  }
+}
+
+function closeAdminProspectusModal() {
+  const modal = document.getElementById('adminProspectusModal');
+  const panel = document.getElementById('adminProspectusModalPanel');
+  if (!modal) return;
+
+  if (panel) panel.classList.add('opacity-0', 'scale-95');
+  setTimeout(() => modal.classList.add('hidden'), 200);
+}
+
+function selectSubjectFromProspectusModal(subjectCode, subjectName) {
+  const select = document.getElementById('assignSubjectSelect');
+  if (select) {
+    select.value = subjectCode;
+    handleAssignSubjectSelectChange();
+  }
+  closeAdminProspectusModal();
 }
 
 async function requestEnrollment(subjectCode) {
@@ -1598,13 +2093,52 @@ async function requestEnrollment(subjectCode) {
   }
 }
 
-// ------------------------------------------------------------------
-// INSTRUCTOR: PENDING CLASS ROSTER REQUESTS
-// ------------------------------------------------------------------
+async function applySelectedSubjects() {
+  if (!currentUserId) return;
+
+  const checkedBoxes = Array.from(document.querySelectorAll('.prospectus-checkbox:checked'));
+  if (!checkedBoxes.length) return alert("Check at least one subject before applying.");
+
+  try {
+    const batch = db.batch();
+    const subjectCodes = [];
+
+    checkedBoxes.forEach((checkbox) => {
+      const subjectCode = checkbox.dataset.subjectCode;
+      if (!subjectCode) return;
+      subjectCodes.push(subjectCode);
+
+      const enrollmentId = buildEnrollmentDocId(subjectCode, currentUserId);
+      const ref = db.collection('enrollments').doc(enrollmentId);
+      batch.set(ref, {
+        subjectCode,
+        studentUid: currentUserId,
+        studentId: currentStudentSchoolId || '',
+        fullName: currentStudentFullName || '',
+        status: 'pending',
+        enrolledBy: 'student',
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    });
+
+    if (!subjectCodes.length) return;
+
+    await batch.commit();
+    await logActivity(currentUserEmail, `Requested enrollment in ${subjectCodes.join(', ')}`);
+    alert(`Enrollment requests sent for: ${subjectCodes.join(', ')}. Your instructor(s) must approve each before class rosters are finalized.`);
+    loadAvailableSubjectsForStudent();
+  } catch (err) {
+    console.error("Error applying for selected subjects:", err);
+    alert("Error applying for selected subjects: " + err.message);
+  }
+}
 
 async function loadPendingEnrollments(subjectCode) {
   const container = document.getElementById('pendingEnrollmentsList');
+  const selectAllCheckbox = document.getElementById('pendingSelectAllCheckbox');
   if (!container) return;
+
+  if (selectAllCheckbox) selectAllCheckbox.checked = false;
 
   try {
     const snapshot = await db.collection('enrollments')
@@ -1628,6 +2162,15 @@ async function loadPendingEnrollments(subjectCode) {
       const row = document.createElement('div');
       row.className = "flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950";
 
+      const left = document.createElement('div');
+      left.className = "flex items-center gap-3 min-w-0";
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = "roster-checkbox w-4 h-4 accent-emerald-500 shrink-0";
+      checkbox.dataset.enrollmentId = doc.id;
+      left.appendChild(checkbox);
+
       const label = document.createElement('div');
       label.className = "min-w-0";
       const nameLine = document.createElement('div');
@@ -1638,7 +2181,8 @@ async function loadPendingEnrollments(subjectCode) {
       idLine.textContent = e.studentId || 'No Student ID on file';
       label.appendChild(nameLine);
       label.appendChild(idLine);
-      row.appendChild(label);
+      left.appendChild(label);
+      row.appendChild(left);
 
       const actions = document.createElement('div');
       actions.className = "flex items-center gap-2 shrink-0";
@@ -1661,6 +2205,44 @@ async function loadPendingEnrollments(subjectCode) {
     });
   } catch (err) {
     console.error("Error loading pending enrollments:", err);
+    container.innerHTML = '';
+    const errorMsg = document.createElement('div');
+    errorMsg.className = "p-3 rounded-lg border border-rose-500/30 bg-rose-500/10 text-center text-xs text-rose-400";
+    errorMsg.textContent = "Couldn't load pending requests: " + err.message;
+    container.appendChild(errorMsg);
+  }
+}
+
+function toggleSelectAllPendingEnrollments(checked) {
+  document.querySelectorAll('.roster-checkbox').forEach((checkbox) => {
+    checkbox.checked = checked;
+  });
+}
+
+async function batchUpdatePendingEnrollments(newStatus) {
+  const checkedBoxes = Array.from(document.querySelectorAll('.roster-checkbox:checked'));
+  if (!checkedBoxes.length) return alert("Select at least one student first.");
+  if (!activeSubjectCode) return;
+
+  try {
+    const batch = db.batch();
+    checkedBoxes.forEach((checkbox) => {
+      const enrollmentId = checkbox.dataset.enrollmentId;
+      if (!enrollmentId) return;
+      const ref = db.collection('enrollments').doc(enrollmentId);
+      batch.update(ref, {
+        status: newStatus,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    });
+
+    await batch.commit();
+    await logActivity(currentUserEmail, `Batch marked ${checkedBoxes.length} enrollment(s) as ${newStatus} for ${activeSubjectCode}`);
+    alert(`${checkedBoxes.length} request(s) marked as ${newStatus}.`);
+    loadPendingEnrollments(activeSubjectCode);
+  } catch (err) {
+    console.error("Error batch-updating enrollments:", err);
+    alert("Error updating selected requests: " + err.message);
   }
 }
 
@@ -1678,9 +2260,105 @@ async function updateEnrollmentStatus(enrollmentId, newStatus, subjectCode) {
   }
 }
 
-// ------------------------------------------------------------------
-// STUDENT NOTIFICATIONS (real-time)
-// ------------------------------------------------------------------
+async function searchStudentsForDirectAssignment() {
+  const input = document.getElementById('directAssignSearchInput');
+  const container = document.getElementById('directAssignSearchResults');
+  if (!input || !container) return;
+
+  const query = input.value.trim().toLowerCase();
+  if (!query) {
+    container.innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = `<div class="text-center text-xs text-slate-500 py-3 animate-pulse">Searching...</div>`;
+
+  try {
+    const snapshot = await db.collection('users').where('role', '==', 'student').get();
+    const matches = [];
+    snapshot.forEach((doc) => {
+      const u = doc.data();
+      const haystack = `${u.fullName || ''} ${u.studentId || ''}`.toLowerCase();
+      if (haystack.includes(query)) matches.push({ uid: doc.id, ...u });
+    });
+
+    container.innerHTML = '';
+
+    if (!matches.length) {
+      const empty = document.createElement('div');
+      empty.className = "p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500";
+      empty.textContent = "No matching students found.";
+      container.appendChild(empty);
+      return;
+    }
+
+    matches.slice(0, 20).forEach((u) => {
+      const row = document.createElement('div');
+      row.className = "flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950";
+
+      const label = document.createElement('div');
+      label.className = "min-w-0";
+      const nameLine = document.createElement('div');
+      nameLine.className = "text-sm font-semibold text-white truncate";
+      nameLine.textContent = u.fullName || '(Unnamed Student)';
+      const idLine = document.createElement('div');
+      idLine.className = "text-xs text-slate-400 font-mono";
+      idLine.textContent = u.studentId || 'No Student ID on file';
+      label.appendChild(nameLine);
+      label.appendChild(idLine);
+      row.appendChild(label);
+
+      const addBtn = document.createElement('button');
+      addBtn.className = "shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-all";
+      addBtn.textContent = "Add to Roster";
+      addBtn.addEventListener('click', () => directAssignStudentToSubject(u.uid, u.studentId, u.fullName));
+      row.appendChild(addBtn);
+
+      container.appendChild(row);
+    });
+  } catch (err) {
+    console.error("Error searching students:", err);
+    container.innerHTML = '';
+    const errorMsg = document.createElement('div');
+    errorMsg.className = "p-3 rounded-lg border border-rose-500/30 bg-rose-500/10 text-center text-xs text-rose-400";
+    errorMsg.textContent = "Couldn't search students: " + err.message;
+    container.appendChild(errorMsg);
+  }
+}
+
+async function directAssignStudentToSubject(studentUid, studentId, fullName) {
+  if (!activeSubjectCode) return alert("Select an active subject first.");
+
+  try {
+    const enrollmentId = buildEnrollmentDocId(activeSubjectCode, studentUid);
+    const ref = db.collection('enrollments').doc(enrollmentId);
+    const existing = await ref.get();
+
+    if (existing.exists) {
+      await ref.update({
+        status: 'approved',
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    } else {
+      await ref.set({
+        subjectCode: activeSubjectCode,
+        studentUid,
+        studentId: studentId || '',
+        fullName: fullName || '',
+        status: 'approved',
+        enrolledBy: 'instructor',
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+
+    await logActivity(currentUserEmail, `Directly enrolled ${fullName || studentUid} into ${activeSubjectCode}`);
+    alert(`${fullName || 'Student'} has been added to the ${activeSubjectCode} roster.`);
+    loadPendingEnrollments(activeSubjectCode);
+  } catch (err) {
+    console.error("Error directly assigning student:", err);
+    alert("Error assigning student: " + err.message);
+  }
+}
 
 function setupNotificationsListener(uid) {
   detachNotificationsListener();

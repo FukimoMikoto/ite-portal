@@ -21,6 +21,9 @@
 
     <!-- SheetJS for Excel Processing -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+    <!-- Chart.js for Academic Performance Analytics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   </head>
   <body
     class="h-full antialiased text-slate-200 bg-slate-950 flex flex-col min-h-screen"
@@ -109,6 +112,41 @@
             <p class="text-xs text-slate-400 mt-1">
               Sign in with your school credentials or register as a student.
             </p>
+          </div>
+
+          <!-- Portal Selector (Multi-Portal Entry) -->
+          <div>
+            <label class="block text-xs font-bold text-slate-300 uppercase mb-1">
+              Select Your Portal
+            </label>
+            <div
+              class="flex p-1 bg-slate-950 border border-slate-800 rounded-xl"
+            >
+              <button
+                type="button"
+                onclick="selectPortal('student')"
+                id="portalTabStudent"
+                class="flex-1 py-2.5 rounded-lg bg-emerald-500 text-slate-950 font-bold transition-all text-[11px] sm:text-xs"
+              >
+                Student Portal
+              </button>
+              <button
+                type="button"
+                onclick="selectPortal('instructor')"
+                id="portalTabFaculty"
+                class="flex-1 py-2.5 rounded-lg text-slate-400 hover:text-white transition-all text-[11px] sm:text-xs"
+              >
+                Faculty Workspace
+              </button>
+              <button
+                type="button"
+                onclick="selectPortal('admin')"
+                id="portalTabAdmin"
+                class="flex-1 py-2.5 rounded-lg text-slate-400 hover:text-white transition-all text-[11px] sm:text-xs"
+              >
+                Admin Console
+              </button>
+            </div>
           </div>
 
           <!-- Auth Mode Tabs (Login / Register) -->
@@ -443,11 +481,63 @@
 
             <!-- Pending Class Roster Requests -->
             <div class="space-y-2">
-              <h4 class="text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 pb-2">
-                Pending Class Roster Requests
-              </h4>
+              <div class="flex items-center justify-between border-b border-slate-800 pb-2 gap-2 flex-wrap">
+                <h4 class="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Pending Class Roster Requests
+                </h4>
+                <div class="flex items-center gap-2">
+                  <button
+                    onclick="batchUpdatePendingEnrollments('approved')"
+                    class="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-all"
+                  >
+                    Batch Approve Selected
+                  </button>
+                  <button
+                    onclick="batchUpdatePendingEnrollments('rejected')"
+                    class="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition-all"
+                  >
+                    Batch Reject Selected
+                  </button>
+                </div>
+              </div>
+              <label class="flex items-center gap-2 text-xs text-slate-500">
+                <input
+                  type="checkbox"
+                  id="pendingSelectAllCheckbox"
+                  onchange="toggleSelectAllPendingEnrollments(this.checked)"
+                  class="w-4 h-4 accent-emerald-500"
+                />
+                Select All
+              </label>
               <div id="pendingEnrollmentsList" class="space-y-2 max-h-48 overflow-y-auto">
                 <!-- Populated by loadPendingEnrollments() -->
+              </div>
+            </div>
+
+            <!-- Irregular Student Direct Roster Override -->
+            <div class="space-y-2">
+              <h4 class="text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 pb-2">
+                Direct Roster Assignment (Irregular Students)
+              </h4>
+              <p class="text-xs text-slate-500">
+                Search any registered student and add them directly to this subject's roster, regardless of their year level or whether they've applied.
+              </p>
+              <div class="flex gap-2">
+                <input
+                  type="text"
+                  id="directAssignSearchInput"
+                  placeholder="Search by name or Student ID..."
+                  class="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                />
+                <button
+                  onclick="searchStudentsForDirectAssignment()"
+                  class="px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-bold rounded-xl text-xs transition-all"
+                >
+                  Search
+                </button>
+              </div>
+              <div id="directAssignSearchResults" class="space-y-2 max-h-48 overflow-y-auto">
+                <!-- Populated by searchStudentsForDirectAssignment() -->
               </div>
             </div>
 
@@ -482,6 +572,47 @@
                   </tr>
                 </tbody>
               </table>
+            </div>
+
+            <!-- Academic Performance Analytics -->
+            <div class="space-y-4 pt-2">
+              <h4 class="text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 pb-2">
+                Academic Performance Analytics
+              </h4>
+              <p class="text-xs text-slate-500">
+                Reflects released grades for the currently selected subject and semester.
+              </p>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="p-4 bg-slate-950 rounded-xl border border-slate-800">
+                  <div class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Grade Distribution</div>
+                  <canvas id="instructorGradeDistributionChart"></canvas>
+                </div>
+                <div class="p-4 bg-slate-950 rounded-xl border border-slate-800">
+                  <div class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Pass vs. Fail Ratio</div>
+                  <canvas id="instructorPassFailChart"></canvas>
+                </div>
+              </div>
+              <div class="space-y-2">
+                <h4 class="text-xs font-bold uppercase tracking-wider text-rose-400 border-b border-slate-800 pb-2">
+                  At-Risk Student Intervention Panel
+                </h4>
+                <div class="overflow-x-auto rounded-xl border border-slate-800">
+                  <table class="w-full text-xs text-left">
+                    <thead class="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
+                      <tr>
+                        <th class="px-4 py-2">Student Name</th>
+                        <th class="px-4 py-2">Student ID</th>
+                        <th class="px-4 py-2">Subject</th>
+                        <th class="px-4 py-2">Term Average</th>
+                        <th class="px-4 py-2">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody id="instructorAtRiskTableBody" class="divide-y divide-slate-800 bg-slate-900">
+                      <tr><td colspan="5" class="px-4 py-6 text-center text-slate-500 italic">No grades loaded yet.</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -596,6 +727,18 @@
                 Create Faculty
               </h3>
               <input
+                type="text"
+                id="instFullName"
+                placeholder="Full Name (e.g. Engr. Jerson V. Pingson)"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+              />
+              <input
+                type="text"
+                id="instTitle"
+                placeholder="Academic Rank / Title (e.g. Program Coordinator / Instructor)"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+              />
+              <input
                 type="email"
                 id="instEmail"
                 placeholder="faculty@cdk.edu.ph"
@@ -635,10 +778,50 @@
                 placeholder="Subject Name"
                 class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
               />
+              <div class="grid grid-cols-2 gap-2">
+                <select
+                  id="subYearLevel"
+                  class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                >
+                  <option value="1">1st Year</option>
+                  <option value="2">2nd Year</option>
+                  <option value="3">3rd Year</option>
+                  <option value="4">4th Year</option>
+                </select>
+                <select
+                  id="subSemester"
+                  class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                >
+                  <option value="1S">1st Semester</option>
+                  <option value="2S">2nd Semester</option>
+                </select>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <input
+                  type="number"
+                  id="subLecHrs"
+                  placeholder="Lec Hours"
+                  min="0"
+                  class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                />
+                <input
+                  type="number"
+                  id="subLabHrs"
+                  placeholder="Lab Hours"
+                  min="0"
+                  class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                />
+              </div>
               <input
                 type="number"
                 id="subUnits"
                 placeholder="Units"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+              />
+              <input
+                type="text"
+                id="subPrerequisite"
+                placeholder="Prerequisite (e.g. IT210) — optional"
                 class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
               />
               <button
@@ -663,8 +846,21 @@
               ></select>
               <select
                 id="assignSubjectSelect"
+                onchange="handleAssignSubjectSelectChange()"
                 class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
               ></select>
+              <button
+                type="button"
+                id="btnOpenProspectusModal"
+                onclick="openAdminProspectusModal()"
+                class="w-full py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-bold rounded-xl text-xs transition-all"
+              >
+                🗂️ Browse Curriculum Prospectus
+              </button>
+              <div
+                id="selectedSubjectIndicator"
+                class="hidden p-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-xs font-semibold text-emerald-400 truncate"
+              ></div>
               <button
                 onclick="assignSubjectToFaculty()"
                 class="w-full py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold rounded-xl text-sm"
@@ -685,6 +881,13 @@
             <div id="activeAssignmentsList" class="space-y-2 max-h-72 overflow-y-auto">
               <!-- Populated by loadAdminDashboardData() -->
             </div>
+            <button
+              type="button"
+              onclick="migrateLegacyAssignmentIds()"
+              class="w-full py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-all"
+            >
+              🔧 Migrate Legacy Assignment IDs
+            </button>
           </div>
 
           <div
@@ -735,6 +938,51 @@
             <h3
               class="font-bold text-white text-sm uppercase tracking-wider border-b border-slate-800 pb-3 flex items-center space-x-2"
             >
+              <i data-lucide="bar-chart-3" class="w-4 h-4 text-emerald-400"></i>
+              <span>Academic Performance Analytics</span>
+            </h3>
+            <p class="text-xs text-slate-500">
+              Updates automatically whenever you click "Generate Report" above.
+            </p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="p-4 bg-slate-950 rounded-xl border border-slate-800">
+                <div class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Grade Distribution</div>
+                <canvas id="adminGradeDistributionChart"></canvas>
+              </div>
+              <div class="p-4 bg-slate-950 rounded-xl border border-slate-800">
+                <div class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Pass vs. Fail Ratio</div>
+                <canvas id="adminPassFailChart"></canvas>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <h4 class="text-xs font-bold uppercase tracking-wider text-rose-400 border-b border-slate-800 pb-2">
+                At-Risk Student Intervention Panel
+              </h4>
+              <div class="overflow-x-auto rounded-xl border border-slate-800">
+                <table class="w-full text-xs text-left">
+                  <thead class="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
+                    <tr>
+                      <th class="px-4 py-2">Student Name</th>
+                      <th class="px-4 py-2">Student ID</th>
+                      <th class="px-4 py-2">Subject</th>
+                      <th class="px-4 py-2">Term Average</th>
+                      <th class="px-4 py-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="adminAtRiskTableBody" class="divide-y divide-slate-800 bg-slate-900">
+                    <tr><td colspan="5" class="px-4 py-6 text-center text-slate-500 italic">Generate a report to see at-risk students.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div
+            class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
+          >
+            <h3
+              class="font-bold text-white text-sm uppercase tracking-wider border-b border-slate-800 pb-3 flex items-center space-x-2"
+            >
               <i data-lucide="activity" class="w-4 h-4 text-emerald-400"></i>
               <span>System Activity & Audit Logs</span>
             </h3>
@@ -764,14 +1012,24 @@
             class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
           >
             <h3 class="font-bold text-white text-base">
-              Available Department Subjects
+              BSIT Curriculum Prospectus
             </h3>
             <p class="text-xs text-slate-500">
-              Request enrollment in a subject. Your instructor must approve the request before it's added to their official class roster.
+              Check any eligible subject(s) below — across any year level, if you're taking subjects out of sequence — and apply in bulk. Your instructor must approve each request before it's added to their official class roster.
             </p>
-            <div id="availableSubjectsList" class="space-y-2 max-h-72 overflow-y-auto">
+            <div class="flex items-center space-x-2 mb-4">
+              <button id="btnFilterAllSubjects" class="px-3 py-1 text-sm rounded-lg bg-emerald-600 text-white font-medium" onclick="toggleITSubjectFilter('all')">All Subjects</button>
+              <button id="btnFilterITSubjects" class="px-3 py-1 text-sm rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium" onclick="toggleITSubjectFilter('it')">💻 IT Subjects Only</button>
+            </div>
+            <div id="prospectusContainer" class="space-y-6 max-h-[36rem] overflow-y-auto pr-1">
               <!-- Populated by loadAvailableSubjectsForStudent() -->
             </div>
+            <button
+              onclick="applySelectedSubjects()"
+              class="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-sm transition-all"
+            >
+              Apply for Selected Subjects
+            </button>
           </div>
 
           <div
@@ -831,6 +1089,58 @@
           </div>
         </div>
       </main>
+    </div>
+
+    <!-- Admin Prospectus Modal Picker -->
+    <div
+      id="adminProspectusModal"
+      class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+    >
+      <div
+        id="adminProspectusModalPanel"
+        class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl opacity-0 scale-95 transition-all duration-200"
+      >
+        <div class="flex items-center justify-between p-5 border-b border-slate-800 shrink-0">
+          <h3 class="font-bold text-white text-base">Browse Curriculum Prospectus</h3>
+          <button
+            type="button"
+            onclick="closeAdminProspectusModal()"
+            aria-label="Close"
+            class="text-slate-400 hover:text-white transition-all text-2xl leading-none"
+          >
+            &times;
+          </button>
+        </div>
+        <div id="adminProspectusModalBody" class="p-5 space-y-6 overflow-y-auto">
+          <!-- Populated by openAdminProspectusModal() -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Student Grade Breakdown Modal -->
+    <div
+      id="studentGradeBreakdownModal"
+      class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+    >
+      <div
+        id="studentGradeBreakdownModalPanel"
+        class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg max-h-[85vh] flex flex-col shadow-2xl opacity-0 scale-95 transition-all duration-200"
+      >
+        <div class="flex items-center justify-between p-5 border-b border-slate-800 shrink-0">
+          <h3 id="studentGradeBreakdownModalTitle" class="font-bold text-white text-base">Assessment Breakdown</h3>
+          <button
+            type="button"
+            onclick="closeStudentGradeBreakdownModal()"
+            aria-label="Close"
+            class="text-slate-400 hover:text-white transition-all text-2xl leading-none"
+          >
+            &times;
+          </button>
+        </div>
+        <div id="studentGradeBreakdownModalBody" class="p-5 space-y-4 overflow-y-auto">
+          <!-- Populated by openStudentGradeBreakdownModal() -->
+        </div>
+      </div>
     </div>
 
     <!-- Custom Controller Script -->
