@@ -1825,16 +1825,52 @@ async function loadAvailableSubjectsForStudent() {
   if (!container || !currentUserId) return;
 
   try {
+    // 1. Fetch subjects and student enrollments in parallel (these always pass security rules for students)
     const [subjectsSnapshot, enrollmentsSnapshot] = await Promise.all([
       db.collection('subjects').get(),
       db.collection('enrollments').where('studentUid', '==', currentUserId).get()
     ]);
 
+    // Map existing enrollment statuses
     const statusByCode = {};
     enrollmentsSnapshot.forEach((doc) => {
       const e = doc.data();
       statusByCode[e.subjectCode] = e.status;
     });
+
+    // 2. Safely fetch student's grades ONLY if identifiers are present
+    const passedSubjects = new Set();
+    const cleanStudentId = String(currentStudentSchoolId || '').trim();
+    const cleanFullName = String(currentStudentFullName || '').trim();
+
+    if (cleanStudentId || cleanFullName) {
+      try {
+        const gradeQueries = [];
+        if (cleanStudentId) {
+          gradeQueries.push(db.collection('grades').where('studentId', '==', cleanStudentId).get());
+        }
+        if (cleanFullName && cleanFullName !== cleanStudentId) {
+          gradeQueries.push(db.collection('grades').where('fullName', '==', cleanFullName).get());
+        }
+
+        if (gradeQueries.length > 0) {
+          const gradeSnapshots = await Promise.all(gradeQueries);
+          gradeSnapshots.forEach((snapshot) => {
+            snapshot.forEach((doc) => {
+              const g = doc.data();
+              if (g.isReleased === true) {
+                const stats = computeGradeStats(g.prelim, g.midterm, g.finals !== undefined ? g.finals : g.final);
+                if (stats.isPassing) {
+                  passedSubjects.add(g.classId);
+                }
+              }
+            });
+          });
+        }
+      } catch (gradeErr) {
+        console.warn("Could not fetch prerequisite grades securely (non-fatal):", gradeErr);
+      }
+    }
 
     container.innerHTML = '';
 
@@ -1858,18 +1894,35 @@ async function loadAvailableSubjectsForStudent() {
       subjects.forEach((s) => {
         const status = statusByCode[s.subjectCode];
 
+        // Check if prerequisite is met
+        let hasUnmetPrerequisite = false;
+        let prereqMessage = '';
+        if (s.prerequisite && s.prerequisite.trim() !== '') {
+          const requiredCode = s.prerequisite.trim();
+          if (!passedSubjects.has(requiredCode)) {
+            hasUnmetPrerequisite = true;
+            prereqMessage = `Prerequisite not met: Failed or missing ${requiredCode}`;
+          }
+        }
+
         const row = document.createElement('div');
         row.className = "flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950";
 
         const left = document.createElement('div');
         left.className = "flex items-center gap-3 min-w-0";
 
-        if (!status) {
+        if (!status && !hasUnmetPrerequisite) {
           const checkbox = document.createElement('input');
           checkbox.type = 'checkbox';
           checkbox.className = "prospectus-checkbox w-4 h-4 accent-emerald-500 shrink-0";
           checkbox.dataset.subjectCode = s.subjectCode;
           left.appendChild(checkbox);
+        } else if (hasUnmetPrerequisite && !status) {
+          // Disabled placeholder box for blocked prerequisite
+          const disabledBox = document.createElement('div');
+          disabledBox.className = "w-4 h-4 rounded bg-slate-800 border border-slate-700 shrink-0 flex items-center justify-center text-[10px] text-slate-500";
+          disabledBox.textContent = "🔒";
+          left.appendChild(disabledBox);
         }
 
         const label2 = document.createElement('div');
@@ -1877,11 +1930,13 @@ async function loadAvailableSubjectsForStudent() {
         const codeLine = document.createElement('div');
         codeLine.className = "text-sm font-semibold text-white truncate";
         codeLine.textContent = `${s.subjectCode} - ${s.subjectName}`;
+        
         const metaLine = document.createElement('div');
         metaLine.className = "text-xs text-slate-400";
         const hoursText = (s.lecHrs || s.labHrs) ? ` • ${Number(s.lecHrs) || 0} Lec / ${Number(s.labHrs) || 0} Lab hrs` : '';
         const prereqText = s.prerequisite ? ` • Prerequisite: ${s.prerequisite}` : '';
         metaLine.textContent = `${Number(s.units) || 0} Units${hoursText}${prereqText}`;
+        
         label2.appendChild(codeLine);
         label2.appendChild(metaLine);
         left.appendChild(label2);
@@ -1898,6 +1953,11 @@ async function loadAvailableSubjectsForStudent() {
           badge.className = `shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase ${badgeConfig.cls}`;
           badge.textContent = badgeConfig.label;
           row.appendChild(badge);
+        } else if (hasUnmetPrerequisite) {
+          const lockBadge = document.createElement('span');
+          lockBadge.className = "shrink-0 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-rose-500/20 text-rose-400 border border-rose-500/30";
+          lockBadge.textContent = prereqMessage;
+          row.appendChild(lockBadge);
         }
 
         section.appendChild(row);
@@ -1927,128 +1987,6 @@ async function loadAvailableSubjectsForStudent() {
     errorMsg.className = "p-3 rounded-lg border border-rose-500/30 bg-rose-500/10 text-center text-xs text-rose-400";
     errorMsg.textContent = "Couldn't load available subjects: " + err.message;
     container.appendChild(errorMsg);
-  }
-}
-
-function handleAssignSubjectSelectChange() {
-  const select = document.getElementById('assignSubjectSelect');
-  const indicator = document.getElementById('selectedSubjectIndicator');
-  if (!select || !indicator) return;
-
-  if (select.value) {
-    const optionLabel = select.options[select.selectedIndex]?.text || select.value;
-    indicator.textContent = `Selected: ${optionLabel}`;
-    indicator.classList.remove('hidden');
-  } else {
-    indicator.classList.add('hidden');
-  }
-}
-
-async function openAdminProspectusModal() {
-  const modal = document.getElementById('adminProspectusModal');
-  const panel = document.getElementById('adminProspectusModalPanel');
-  const body = document.getElementById('adminProspectusModalBody');
-  if (!modal || !body) return;
-
-  body.innerHTML = `<div class="text-center text-xs text-slate-500 py-8 animate-pulse">Loading curriculum...</div>`;
-  modal.classList.remove('hidden');
-  if (panel) {
-    void panel.offsetWidth;
-    panel.classList.remove('opacity-0', 'scale-95');
-  }
-
-  try {
-    const subjectsSnapshot = await db.collection('subjects').get();
-    const groups = groupSubjectsForProspectus(subjectsSnapshot);
-
-    body.innerHTML = '';
-
-    if (!groups.length) {
-      const empty = document.createElement('div');
-      empty.className = "text-center text-xs text-slate-500 py-8";
-      empty.textContent = "No subjects have been added yet.";
-      body.appendChild(empty);
-      return;
-    }
-
-    groups.forEach(({ label, subjects }) => {
-      const section = document.createElement('div');
-      section.className = "space-y-2";
-
-      const heading = document.createElement('h4');
-      heading.className = "text-xs font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-1.5";
-      heading.textContent = label;
-      section.appendChild(heading);
-
-      const tableWrap = document.createElement('div');
-      tableWrap.className = "overflow-x-auto rounded-xl border border-slate-800";
-
-      const table = document.createElement('table');
-      table.className = "w-full text-xs text-left";
-
-      const thead = document.createElement('thead');
-      thead.className = "bg-slate-950 text-slate-400 uppercase border-b border-slate-800";
-      const headRow = document.createElement('tr');
-      ['Code', 'Title', 'Units', 'Year', 'Semester', ''].forEach((col) => {
-        const th = document.createElement('th');
-        th.className = "px-3 py-2";
-        th.textContent = col;
-        headRow.appendChild(th);
-      });
-      thead.appendChild(headRow);
-      table.appendChild(thead);
-
-      const tbody = document.createElement('tbody');
-      tbody.className = "divide-y divide-slate-800";
-
-      subjects.forEach((s) => {
-        const tr = document.createElement('tr');
-        tr.className = "hover:bg-slate-800/50";
-
-        const tdCode = document.createElement('td');
-        tdCode.className = "px-3 py-2 font-mono text-slate-300 whitespace-nowrap";
-        tdCode.textContent = s.subjectCode;
-
-        const tdTitle = document.createElement('td');
-        tdTitle.className = "px-3 py-2 text-white font-semibold";
-        tdTitle.textContent = s.subjectName;
-
-        const tdUnits = document.createElement('td');
-        tdUnits.className = "px-3 py-2 text-slate-300";
-        tdUnits.textContent = Number(s.units) || 0;
-
-        const tdYear = document.createElement('td');
-        tdYear.className = "px-3 py-2 text-slate-300 whitespace-nowrap";
-        tdYear.textContent = s.yearLevel || '—';
-
-        const tdSem = document.createElement('td');
-        tdSem.className = "px-3 py-2 text-slate-300 whitespace-nowrap";
-        tdSem.textContent = s.semester === '2S' ? '2nd Sem' : (s.semester === '1S' ? '1st Sem' : '—');
-
-        const tdAction = document.createElement('td');
-        tdAction.className = "px-3 py-2 text-right whitespace-nowrap";
-        const selectBtn = document.createElement('button');
-        selectBtn.className = "px-2.5 py-1 rounded-lg text-[11px] font-bold bg-sky-500 hover:bg-sky-400 text-slate-950 transition-all";
-        selectBtn.textContent = "Select Subject";
-        selectBtn.addEventListener('click', () => selectSubjectFromProspectusModal(s.subjectCode, s.subjectName));
-        tdAction.appendChild(selectBtn);
-
-        [tdCode, tdTitle, tdUnits, tdYear, tdSem, tdAction].forEach((td) => tr.appendChild(td));
-        tbody.appendChild(tr);
-      });
-
-      table.appendChild(tbody);
-      tableWrap.appendChild(table);
-      section.appendChild(tableWrap);
-      body.appendChild(section);
-    });
-  } catch (err) {
-    console.error("Error loading prospectus modal:", err);
-    body.innerHTML = '';
-    const errorMsg = document.createElement('div');
-    errorMsg.className = "p-3 rounded-lg border border-rose-500/30 bg-rose-500/10 text-center text-xs text-rose-400";
-    errorMsg.textContent = "Couldn't load curriculum: " + err.message;
-    body.appendChild(errorMsg);
   }
 }
 
