@@ -32,6 +32,32 @@ let notificationsUnsubscribe = null;
 let selectedPortalRole = 'student';
 let isFreshLoginAttempt = false;
 
+// ------------------------------------------------------------------
+// 1. ISOLATED PORTAL ROUTER & CONFIGS
+// ------------------------------------------------------------------
+
+/**
+ * ISOLATED PORTAL ROUTER
+ * Detects URL parameters/hashes (?portal=admin or #admin) to show/hide portal views.
+ */
+function initPortalView() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const portalType = urlParams.get('portal') || window.location.hash.replace('#', '');
+
+  const studentLoginForm = document.getElementById('studentLoginContainer');
+  const staffLoginForm = document.getElementById('staffLoginContainer');
+
+  if (portalType === 'admin' || portalType === 'faculty') {
+    selectedPortalRole = portalType === 'admin' ? 'admin' : 'instructor';
+    if (studentLoginForm) studentLoginForm.classList.add('hidden');
+    if (staffLoginForm) staffLoginForm.classList.remove('hidden');
+  } else {
+    selectedPortalRole = 'student';
+    if (staffLoginForm) staffLoginForm.classList.add('hidden');
+    if (studentLoginForm) studentLoginForm.classList.remove('hidden');
+  }
+}
+
 function roleDisplayLabel(role) {
   if (role === 'admin') return 'Department Head / Admin Console';
   if (role === 'instructor') return 'Faculty Workspace';
@@ -125,11 +151,16 @@ function normalizeNameKey(fullName) {
     .replace(/\s+/g, '_');
 }
 
+// ------------------------------------------------------------------
+// DOM INITIALIZATION
+// ------------------------------------------------------------------
+
 document.addEventListener('DOMContentLoaded', () => {
   if (window.lucide) {
     lucide.createIcons();
   }
   setupExcelDropzone();
+  initPortalView();
 });
 
 function setupExcelDropzone() {
@@ -197,6 +228,10 @@ function switchAuthTab(tab) {
   }
 }
 
+// ------------------------------------------------------------------
+// AUTHENTICATION ENGINE
+// ------------------------------------------------------------------
+
 auth.onAuthStateChanged(async (user) => {
   const authContainer = document.getElementById('authContainer');
   const mainDashboard = document.getElementById('mainDashboard');
@@ -226,10 +261,10 @@ auth.onAuthStateChanged(async (user) => {
 
         if (isFreshLoginAttempt) {
           isFreshLoginAttempt = false;
-          if (data.role !== selectedPortalRole) {
+          if (data.role !== selectedPortalRole && !(selectedPortalRole === 'instructor' && data.role === 'admin')) {
             alert(
               `This account is registered as ${roleDisplayLabel(data.role)}. ` +
-              `Please use the ${roleDisplayLabel(selectedPortalRole)} tab to sign in.`
+              `Please use the appropriate portal to sign in.`
             );
             auth.signOut();
             return;
@@ -271,8 +306,13 @@ auth.onAuthStateChanged(async (user) => {
 });
 
 async function handleLogin() {
-  const email = document.getElementById('loginEmail').value.trim();
-  const password = document.getElementById('loginPassword').value.trim();
+  const emailInput = document.getElementById('loginEmail') || document.getElementById('staffEmail') || document.getElementById('studentEmail');
+  const passwordInput = document.getElementById('loginPassword') || document.getElementById('staffPassword') || document.getElementById('studentPassword');
+  
+  if (!emailInput || !passwordInput) return;
+
+  const email = emailInput.value.trim();
+  const password = passwordInput.value.trim();
   const authError = document.getElementById('authError');
 
   try {
@@ -321,18 +361,24 @@ function routeUserRole(role, userData) {
     if (instructorView) instructorView.classList.remove('hidden');
     loadInstructorAssignedSubjects();
   }
-  if (role === 'student') {
-    if (studentView) studentView.classList.remove('hidden');
-    currentStudentSchoolId = (userData && userData.studentId) || '';
-    currentStudentFullName = (userData && userData.fullName) || '';
+  // Replace the 'student' block inside routeUserRole with this:
+if (role === 'student') {
+  if (studentView) studentView.classList.remove('hidden');
+  currentStudentSchoolId = (userData && userData.studentId) || '';
+  currentStudentFullName = (userData && userData.fullName) || '';
 
-    loadStudentDashboard(currentStudentSchoolId, currentStudentFullName);
-    loadAvailableSubjectsForStudent();
-    setupNotificationsListener(currentUserId);
-  } else {
-    detachNotificationsListener();
-  }
+  // Pass userData to loadStudentDashboard
+  loadStudentDashboard(currentStudentSchoolId, currentStudentFullName, userData);
+  loadAvailableSubjectsForStudent();
+  setupNotificationsListener(currentUserId);
+} else {
+  detachNotificationsListener();
 }
+}
+
+// ------------------------------------------------------------------
+// INSTRUCTOR WORKSPACE & GRADE MANAGEMENT
+// ------------------------------------------------------------------
 
 async function loadInstructorAssignedSubjects() {
   const container = document.getElementById('assignedClassesList');
@@ -519,7 +565,8 @@ async function loadInstructorGradesFromFirestore(subjectCode) {
       const stats = computeGradeStats(g.prelim, g.midterm, g.finals);
 
       const tr = document.createElement('tr');
-      tr.className = "hover:bg-slate-800/50 transition-colors";
+      tr.className = "hover:bg-slate-800/50 transition-colors cursor-pointer";
+      tr.title = "Click to view itemized assessment breakdown";
       tr.innerHTML = `
         <td class="px-4 py-3.5 font-mono text-xs text-slate-400 whitespace-nowrap">${escapeHtml(g.studentId || '')}</td>
         <td class="px-4 py-3.5 font-semibold text-white whitespace-nowrap">${escapeHtml(g.fullName || '')}</td>
@@ -533,6 +580,7 @@ async function loadInstructorGradesFromFirestore(subjectCode) {
           </span>
         </td>
       `;
+      tr.addEventListener('click', () => openStudentGradeBreakdownModal(g));
       tbody.appendChild(tr);
     });
 
@@ -558,157 +606,220 @@ function processExcel() {
       const data = new Uint8Array(e.target.result);
       const workbook = XLSX.read(data, { type: 'array' });
 
-      let targetSheetName =
-        workbook.SheetNames.find(s => s.toUpperCase().includes("FINAL GRADE")) ||
-        workbook.SheetNames.find(s => s.toUpperCase().includes("AVERAGE")) ||
-        workbook.SheetNames.find(s => s.toUpperCase().includes("SUMMARY")) ||
-        workbook.SheetNames.find(s => s.toUpperCase().includes("GRADE")) ||
-        workbook.SheetNames[0];
+      const hasMultiTabSheets = workbook.SheetNames.some(s => 
+        ['PRELIM', 'MIDTERM', 'FINAL'].includes(s.trim().toUpperCase())
+      );
 
-      const worksheet = workbook.Sheets[targetSheetName];
-      const matrix = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
-
-      if (!matrix.length) return alert("Selected Excel sheet is empty.");
-
-      let headerRowIndex = -1;
-      for (let i = 0; i < Math.min(matrix.length, 15); i++) {
-        const rowStr = matrix[i].map(c => c.toString().toLowerCase()).join(" ");
-        const hasNameHeader = rowStr.includes("student name") || rowStr.includes("full name") || rowStr.includes("names");
-        const hasGradeHeaders = rowStr.includes("prelim") && rowStr.includes("midterm");
-        if (hasNameHeader || hasGradeHeaders) {
-          headerRowIndex = i;
-          break;
-        }
-      }
-
-      if (headerRowIndex === -1) {
-        return alert("Could not locate student header row. Ensure a 'Student Name' (or 'Names'/'Full Name') column exists.");
-      }
-
-      const headers = matrix[headerRowIndex].map(h => h.toString().trim());
-
-      let nameIdx = headers.findIndex(h => {
-        const lower = h.toLowerCase();
-        return lower.includes("student name") || lower.includes("full name") || lower === "names" || lower === "name";
-      });
-      let idIdx = headers.findIndex(h => {
-        const lower = h.toLowerCase().replace(/\s+/g, '');
-        return lower.includes("studentid") || lower === "id" || lower.includes("idno.");
-      });
-      let prelimIdx = headers.findIndex(h => h.toLowerCase() === "prelim");
-      let midtermIdx = headers.findIndex(h => h.toLowerCase() === "midterm");
-      let finalIdx = headers.findIndex(h => h.toLowerCase() === "final" || h.toLowerCase().includes("finals"));
-
-      const quizColumns = [];
-      headers.forEach((h, idx) => {
-        const match = h.trim().match(/^quiz\s*(\d+)$/i);
-        if (match) quizColumns.push({ name: `Quiz ${match[1]}`, idx });
-      });
-      const attendanceIdx = headers.findIndex(h => h.toLowerCase().trim() === "attendance");
-      const hasBreakdownColumns = quizColumns.length > 0 || attendanceIdx !== -1;
-
-      const missingColumns = [];
-      if (nameIdx === -1) missingColumns.push("Student Name");
-      if (prelimIdx === -1) missingColumns.push("Prelim");
-      if (midtermIdx === -1) missingColumns.push("Midterm");
-      if (finalIdx === -1) missingColumns.push("Final");
-
-      if (missingColumns.length) {
-        return alert(
-          "Cannot import this file. The following required column(s) were not found in the header row: " +
-          missingColumns.join(", ") +
-          ". Please check the spreadsheet headers and try again."
-        );
-      }
-
-      parsedGradeData = [];
-      const skippedRows = [];
-      const seenKeys = new Set();
-
-      for (let r = headerRowIndex + 1; r < matrix.length; r++) {
-        const rowNumber = r + 1;
-        const row = matrix[r];
-        const rawName = row[nameIdx] ? row[nameIdx].toString().trim() : "";
-
-        if (!rawName || rawName.toLowerCase().includes("total") || rawName.toLowerCase().includes("average")) continue;
-
-        const rawId = idIdx !== -1 && row[idIdx] ? row[idIdx].toString().trim() : "";
-        const studentKey = rawId || normalizeNameKey(rawName);
-
-        if (!studentKey) {
-          skippedRows.push(`Row ${rowNumber} ("${rawName}"): could not derive a student key.`);
-          continue;
-        }
-
-        if (seenKeys.has(studentKey)) {
-          skippedRows.push(`Row ${rowNumber} ("${rawName}"): duplicate student key "${studentKey}" already used earlier in this sheet.`);
-          continue;
-        }
-
-        const rawPrelim = row[prelimIdx];
-        const rawMidterm = row[midtermIdx];
-        const rawFinals = row[finalIdx];
-
-        const invalidComponents = [];
-        if (rawPrelim !== "" && isNaN(parseFloat(rawPrelim))) invalidComponents.push("Prelim");
-        if (rawMidterm !== "" && isNaN(parseFloat(rawMidterm))) invalidComponents.push("Midterm");
-        if (rawFinals !== "" && isNaN(parseFloat(rawFinals))) invalidComponents.push("Final");
-
-        quizColumns.forEach(({ name, idx }) => {
-          const raw = row[idx];
-          if (raw !== "" && isNaN(parseFloat(raw))) invalidComponents.push(name);
-        });
-        if (attendanceIdx !== -1) {
-          const rawAttendance = row[attendanceIdx];
-          if (rawAttendance !== "" && isNaN(parseFloat(rawAttendance))) invalidComponents.push("Attendance");
-        }
-
-        if (invalidComponents.length) {
-          skippedRows.push(`Row ${rowNumber} ("${rawName}"): invalid numeric value in ${invalidComponents.join(", ")}.`);
-          continue;
-        }
-
-        const prelim = parseFloat(rawPrelim) || 0;
-        const midterm = parseFloat(rawMidterm) || 0;
-        const finals = parseFloat(rawFinals) || 0;
-
-        const breakdown = hasBreakdownColumns ? {
-          quizzes: quizColumns.map(({ name, idx }) => ({
-            name,
-            score: parseFloat(row[idx]) || 0,
-            maxScore: 100
-          })),
-          attendance: attendanceIdx !== -1 ? (parseFloat(row[attendanceIdx]) || 0) : null
-        } : null;
-
-        seenKeys.add(studentKey);
-        parsedGradeData.push({
-          studentId: studentKey,
-          fullName: rawName,
-          prelim: parseFloat(prelim.toFixed(2)),
-          midterm: parseFloat(midterm.toFixed(2)),
-          finals: parseFloat(finals.toFixed(2)),
-          breakdown
-        });
-      }
-
-      renderParsedGradesToTable();
-
-      if (skippedRows.length) {
-        alert(
-          `Imported ${parsedGradeData.length} student record(s). ` +
-          `${skippedRows.length} row(s) were skipped and NOT imported:\n\n` +
-          skippedRows.join("\n")
-        );
+      if (hasMultiTabSheets) {
+        processMultiTabExcel(workbook);
+      } else {
+        processSingleTabExcel(workbook);
       }
     } catch (err) {
-      console.error("Multi-sheet Parsing Error:", err);
-      alert("Error parsing official record: " + err.message);
+      console.error("Excel Parsing Error:", err);
+      alert("Error parsing Excel file: " + err.message);
     }
   };
 
   reader.readAsArrayBuffer(file);
-  fileInput.value = '';
+}
+
+function processMultiTabExcel(workbook) {
+  const summarySheetName = workbook.SheetNames.find(s => s.toUpperCase().includes("FINAL GRADE")) ||
+                           workbook.SheetNames.find(s => s.toUpperCase().includes("AVERAGE")) ||
+                           workbook.SheetNames.find(s => s.toUpperCase().includes("SUMMARY"));
+
+  if (!summarySheetName) {
+    return alert("Could not locate summary tab ('FINAL GRADE').");
+  }
+
+  const summarySheet = workbook.Sheets[summarySheetName];
+  const summaryMatrix = XLSX.utils.sheet_to_json(summarySheet, { header: 1, defval: "" });
+
+  let headerRowIndex = -1;
+  for (let i = 0; i < Math.min(summaryMatrix.length, 15); i++) {
+    const rowStr = summaryMatrix[i].map(c => c.toString().toLowerCase()).join(" ");
+    if (rowStr.includes("student name") || (rowStr.includes("prelim") && rowStr.includes("midterm"))) {
+      headerRowIndex = i;
+      break;
+    }
+  }
+
+  if (headerRowIndex === -1) {
+    return alert("Could not locate student header row in summary sheet.");
+  }
+
+  const headers = summaryMatrix[headerRowIndex].map(h => h.toString().trim());
+  const nameIdx = headers.findIndex(h => h.toLowerCase().includes("student name") || h.toLowerCase().includes("full name"));
+  const idIdx = headers.findIndex(h => h.toLowerCase().includes("student id") || h.toLowerCase() === "id" || h.toLowerCase().includes("no."));
+  const prelimIdx = headers.findIndex(h => h.toLowerCase() === "prelim");
+  const midtermIdx = headers.findIndex(h => h.toLowerCase() === "midterm");
+  const finalIdx = headers.findIndex(h => h.toLowerCase() === "final" || h.toLowerCase().includes("finals"));
+
+  const termBreakdowns = {};
+  ['Prelim', 'Midterm', 'Final'].forEach(termKey => {
+    const sheetName = workbook.SheetNames.find(s => s.trim().toLowerCase() === termKey.toLowerCase());
+    if (sheetName) {
+      termBreakdowns[termKey.toLowerCase()] = parseTermSubSheet(workbook.Sheets[sheetName]);
+    }
+  });
+
+  parsedGradeData = [];
+
+  for (let r = headerRowIndex + 1; r < summaryMatrix.length; r++) {
+    const row = summaryMatrix[r];
+    const rawName = row[nameIdx] ? row[nameIdx].toString().trim() : "";
+    if (!rawName || rawName.toLowerCase().includes("total") || rawName.toLowerCase().includes("average")) continue;
+
+    const rawId = idIdx !== -1 && row[idIdx] ? row[idIdx].toString().trim() : "";
+    const prelim = parseFloat(row[prelimIdx]) || 0;
+    const midterm = parseFloat(row[midtermIdx]) || 0;
+    const finals = parseFloat(row[finalIdx]) || 0;
+
+    const nameKey = normalizeNameKey(rawName);
+    const pDetail = termBreakdowns.prelim ? termBreakdowns.prelim[nameKey] : null;
+    const mDetail = termBreakdowns.midterm ? termBreakdowns.midterm[nameKey] : null;
+    const fDetail = termBreakdowns.final ? termBreakdowns.final[nameKey] : null;
+
+    const breakdown = {
+      quizzes: [
+        ...(pDetail?.quizzes || []),
+        ...(mDetail?.quizzes || []),
+        ...(fDetail?.quizzes || [])
+      ],
+      assignments: [
+        ...(pDetail?.assignments || []),
+        ...(mDetail?.assignments || []),
+        ...(fDetail?.assignments || [])
+      ],
+      attendance: pDetail?.attendance ?? mDetail?.attendance ?? fDetail?.attendance ?? null,
+      labExercises: [
+        ...(pDetail?.labExercises || []),
+        ...(mDetail?.labExercises || []),
+        ...(fDetail?.labExercises || [])
+      ]
+    };
+
+    parsedGradeData.push({
+      studentId: rawId,
+      fullName: rawName,
+      prelim: parseFloat(prelim.toFixed(2)),
+      midterm: parseFloat(midterm.toFixed(2)),
+      finals: parseFloat(finals.toFixed(2)),
+      breakdown
+    });
+  }
+
+  renderParsedGradesToTable();
+  alert(`Imported ${parsedGradeData.length} student record(s) with full multi-term component breakdowns.`);
+}
+
+function parseTermSubSheet(sheet) {
+  const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+  if (matrix.length < 10) return {};
+
+  const nameRow = matrix.find(r => r.some(c => c.toString().toLowerCase().includes("student name")));
+  if (!nameRow) return {};
+
+  const nameIdx = nameRow.findIndex(c => c.toString().toLowerCase().includes("student name"));
+  const resultMap = {};
+
+  for (let r = 9; r < matrix.length; r++) {
+    const row = matrix[r];
+    const name = row[nameIdx] ? row[nameIdx].toString().trim() : "";
+    if (!name || name.toLowerCase().includes("total") || name.toLowerCase().includes("average")) continue;
+
+    const nameKey = normalizeNameKey(name);
+    resultMap[nameKey] = {
+      attendance: row[2] !== undefined && row[2] !== "" ? Math.round((parseFloat(row[2]) || 0) * 100 / 30) : null,
+      assignments: row[5] !== undefined && row[5] !== "" ? [{ name: 'Assignments / Seatwork', score: parseFloat(row[5]) || 0, maxScore: 50 }] : [],
+      quizzes: [
+        row[11] !== undefined && row[11] !== "" ? { name: 'Quiz 1', score: parseFloat(row[11]) || 0, maxScore: matrix[8]?.[11] || 15 } : null,
+        row[12] !== undefined && row[12] !== "" ? { name: 'Quiz 2', score: parseFloat(row[12]) || 0, maxScore: matrix[8]?.[12] || 15 } : null,
+        row[13] !== undefined && row[13] !== "" ? { name: 'Quiz 3', score: parseFloat(row[13]) || 0, maxScore: matrix[8]?.[13] || 15 } : null
+      ].filter(Boolean),
+      labExercises: row[34] !== undefined && row[34] !== "" ? [{ name: 'Lab Exercise', score: parseFloat(row[34]) || 0, maxScore: 100 }] : []
+    };
+  }
+
+  return resultMap;
+}
+
+function processSingleTabExcel(workbook) {
+  let targetSheetName =
+    workbook.SheetNames.find(s => s.toUpperCase().includes("FINAL GRADE")) ||
+    workbook.SheetNames.find(s => s.toUpperCase().includes("AVERAGE")) ||
+    workbook.SheetNames.find(s => s.toUpperCase().includes("SUMMARY")) ||
+    workbook.SheetNames.find(s => s.toUpperCase().includes("GRADE")) ||
+    workbook.SheetNames[0];
+
+  const worksheet = workbook.Sheets[targetSheetName];
+  const matrix = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+
+  if (!matrix.length) return alert("Selected Excel sheet is empty.");
+
+  let headerRowIndex = -1;
+  for (let i = 0; i < Math.min(matrix.length, 15); i++) {
+    const rowStr = matrix[i].map(c => c.toString().toLowerCase()).join(" ");
+    if (rowStr.includes("student name") || rowStr.includes("full name") || rowStr.includes("names") || (rowStr.includes("prelim") && rowStr.includes("midterm"))) {
+      headerRowIndex = i;
+      break;
+    }
+  }
+
+  if (headerRowIndex === -1) {
+    return alert("Could not locate student header row. Ensure a 'Student Name' column exists.");
+  }
+
+  const headers = matrix[headerRowIndex].map(h => h.toString().trim());
+  const nameIdx = headers.findIndex(h => h.toLowerCase().includes("student name") || h.toLowerCase().includes("full name") || h.toLowerCase() === "name");
+  const idIdx = headers.findIndex(h => h.toLowerCase().includes("student id") || h.toLowerCase() === "id" || h.toLowerCase().includes("idno."));
+  const prelimIdx = headers.findIndex(h => h.toLowerCase() === "prelim");
+  const midtermIdx = headers.findIndex(h => h.toLowerCase() === "midterm");
+  const finalIdx = headers.findIndex(h => h.toLowerCase() === "final" || h.toLowerCase().includes("finals"));
+
+  const quizColumns = [];
+  headers.forEach((h, idx) => {
+    const match = h.trim().match(/^quiz\s*(\d+)$/i);
+    if (match) quizColumns.push({ name: `Quiz ${match[1]}`, idx });
+  });
+  const attendanceIdx = headers.findIndex(h => h.toLowerCase().trim() === "attendance");
+  const hasBreakdownColumns = quizColumns.length > 0 || attendanceIdx !== -1;
+
+  parsedGradeData = [];
+  for (let r = headerRowIndex + 1; r < matrix.length; r++) {
+    const row = matrix[r];
+    const rawName = row[nameIdx] ? row[nameIdx].toString().trim() : "";
+    if (!rawName || rawName.toLowerCase().includes("total") || rawName.toLowerCase().includes("average")) continue;
+
+    const rawId = idIdx !== -1 && row[idIdx] ? row[idIdx].toString().trim() : "";
+    const prelim = parseFloat(row[prelimIdx]) || 0;
+    const midterm = parseFloat(row[midtermIdx]) || 0;
+    const finals = parseFloat(row[finalIdx]) || 0;
+
+    const breakdown = hasBreakdownColumns ? {
+      quizzes: quizColumns.map(({ name, idx }) => ({
+        name,
+        score: parseFloat(row[idx]) || 0,
+        maxScore: 100
+      })),
+      assignments: [],
+      labExercises: [],
+      attendance: attendanceIdx !== -1 ? (parseFloat(row[attendanceIdx]) || 0) : null
+    } : null;
+
+    parsedGradeData.push({
+      studentId: rawId,
+      fullName: rawName,
+      prelim: parseFloat(prelim.toFixed(2)),
+      midterm: parseFloat(midterm.toFixed(2)),
+      finals: parseFloat(finals.toFixed(2)),
+      breakdown
+    });
+  }
+
+  renderParsedGradesToTable();
+  alert(`Imported ${parsedGradeData.length} student record(s).`);
 }
 
 function renderParsedGradesToTable() {
@@ -732,7 +843,8 @@ function renderParsedGradesToTable() {
     const stats = computeGradeStats(row.prelim, row.midterm, row.finals);
 
     const tr = document.createElement('tr');
-    tr.className = "hover:bg-slate-800/50 transition-colors";
+    tr.className = "hover:bg-slate-800/50 transition-colors cursor-pointer";
+    tr.title = "Click to view itemized breakdown";
     tr.innerHTML = `
       <td class="px-4 py-3.5 font-mono text-xs text-slate-400 whitespace-nowrap">${escapeHtml(row.studentId || 'N/A')}</td>
       <td class="px-4 py-3.5 font-semibold text-white whitespace-nowrap">${escapeHtml(row.fullName || 'Unnamed Student')}</td>
@@ -746,6 +858,13 @@ function renderParsedGradesToTable() {
         </span>
       </td>
     `;
+    tr.addEventListener('click', () => openStudentGradeBreakdownModal({
+      classId: activeSubjectCode,
+      prelim: row.prelim,
+      midterm: row.midterm,
+      finals: row.finals,
+      breakdown: row.breakdown
+    }));
     tbody.appendChild(tr);
   });
 }
@@ -802,7 +921,9 @@ async function saveDraftGrades() {
       const stats = computeGradeStats(row.prelim, row.midterm, row.finals);
 
       const breakdown = row.breakdown ? {
-        quizzes: row.breakdown.quizzes,
+        quizzes: row.breakdown.quizzes || [],
+        assignments: row.breakdown.assignments || [],
+        labExercises: row.breakdown.labExercises || row.breakdown.laboratoryExercises || [],
         exams: { prelim: stats.prelim, midterm: stats.midterm, finals: stats.finals },
         attendance: row.breakdown.attendance,
         termAverage: stats.average
@@ -847,7 +968,9 @@ async function releaseGrades() {
       const stats = computeGradeStats(row.prelim, row.midterm, row.finals);
 
       const breakdown = row.breakdown ? {
-        quizzes: row.breakdown.quizzes,
+        quizzes: row.breakdown.quizzes || [],
+        assignments: row.breakdown.assignments || [],
+        labExercises: row.breakdown.labExercises || row.breakdown.laboratoryExercises || [],
         exams: { prelim: stats.prelim, midterm: stats.midterm, finals: stats.finals },
         attendance: row.breakdown.attendance,
         termAverage: stats.average
@@ -905,6 +1028,10 @@ async function releaseGrades() {
     alert("Error releasing grades: " + err.message);
   }
 }
+
+// ------------------------------------------------------------------
+// ANALYTICS & DEPT REPORTS
+// ------------------------------------------------------------------
 
 window.analyticsCharts = window.analyticsCharts || {};
 
@@ -1199,6 +1326,10 @@ function downloadReportPDF() {
   doc.save(`ITE_Grade_Report_${lastReportData.semester.replace(/\s+/g, '_')}.pdf`);
 }
 
+// ------------------------------------------------------------------
+// ADMIN CONSOLE MANAGEMENT
+// ------------------------------------------------------------------
+
 async function loadAdminDashboardData() {
   const facultySnapshot = await db.collection('users').where('role', '==', 'instructor').get();
   const facultyCount = document.getElementById('facultyCountDisplay');
@@ -1418,53 +1549,6 @@ async function unassignSubjectFromFaculty(facultyUid, subjectCode) {
   }
 }
 
-async function migrateLegacyAssignmentIds() {
-  const confirmed = confirm(
-    "This will scan all faculty-subject assignments and re-key any created " +
-    "with an old, non-deterministic document ID. This is safe to run more " +
-    "than once. Continue?"
-  );
-  if (!confirmed) return;
-
-  try {
-    const snapshot = await db.collection('assignments').get();
-
-    const legacyDocs = [];
-    snapshot.forEach((doc) => {
-      const data = doc.data();
-      if (!data.facultyUid || !data.subjectCode) return;
-      const expectedId = buildAssignmentDocId(data.facultyUid, data.subjectCode);
-      if (doc.id !== expectedId) {
-        legacyDocs.push({ oldId: doc.id, expectedId, data });
-      }
-    });
-
-    if (!legacyDocs.length) {
-      alert("No legacy assignment IDs found — everything is already correctly keyed.");
-      return;
-    }
-
-    const batch = db.batch();
-    legacyDocs.forEach(({ oldId, expectedId, data }) => {
-      const newRef = db.collection('assignments').doc(expectedId);
-      batch.set(newRef, {
-        facultyUid: data.facultyUid,
-        subjectCode: data.subjectCode,
-        assignedAt: data.assignedAt || firebase.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
-      batch.delete(db.collection('assignments').doc(oldId));
-    });
-
-    await batch.commit();
-    await logActivity(currentUserEmail, `Migrated ${legacyDocs.length} legacy assignment ID(s) to the deterministic format`);
-    alert(`Migrated ${legacyDocs.length} assignment record(s) to the correct ID format.`);
-    loadAdminDashboardData();
-  } catch (err) {
-    console.error("Assignment ID Migration Error:", err);
-    alert("Error migrating assignment IDs: " + err.message);
-  }
-}
-
 async function createInstructor() {
   const fullName = document.getElementById('instFullName').value.trim();
   const title = document.getElementById('instTitle').value.trim();
@@ -1519,12 +1603,139 @@ async function addSubject() {
   }
 }
 
+// ------------------------------------------------------------------
+// PROGRESSION & YEAR-LEVEL GROUPING ENGINE
+// ------------------------------------------------------------------
+
+/**
+ * EVALUATES SEMESTER & YEAR-LEVEL PROGRESSION
+ */
+function evaluateAcademicProgression(allGrades, currentYearLevel = 1) {
+  if (!allGrades || !allGrades.length) {
+    return {
+      statusLabel: 'ENROLLED (1ST YEAR - 1ST SEMESTER)',
+      badgeClass: 'bg-slate-800 text-slate-400 border-slate-700',
+      standingText: 'Regular Student'
+    };
+  }
+
+  const failedITSubjects = allGrades.filter(g => {
+    const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
+    if (!isItSubjectCode(code)) return false;
+    const finalsVal = g.finals !== undefined ? g.finals : g.final;
+    const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
+    return !stats.isPassing;
+  });
+
+  const passedSemesters = new Set();
+  allGrades.forEach(g => {
+    const finalsVal = g.finals !== undefined ? g.finals : g.final;
+    const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
+    if (stats.isPassing) {
+      passedSemesters.add(normalizeSemester(g.semester));
+    }
+  });
+
+  const hasPassed1stSem = passedSemesters.has('1st Semester');
+  const hasPassed2ndSem = passedSemesters.has('2nd Semester');
+
+  if (failedITSubjects.length === 0) {
+    if (hasPassed1stSem && !hasPassed2ndSem) {
+      return {
+        statusLabel: 'PROMOTED TO 1ST YEAR - 2ND SEMESTER',
+        badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+        standingText: 'Good Academic Standing (Eligible for 2nd Semester)'
+      };
+    } else if (hasPassed1stSem && hasPassed2ndSem) {
+      return {
+        statusLabel: `PROMOTED TO 2ND YEAR - 1ST SEMESTER`,
+        badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+        standingText: 'Good Academic Standing (Promoted to 2nd Year)'
+      };
+    }
+  }
+
+  if (failedITSubjects.length <= 2) {
+    return {
+      statusLabel: `PROMOTED (IRREGULAR)`,
+      badgeClass: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+      standingText: `Warning: ${failedITSubjects.length} IT Deficiency Subject(s) to Retake`
+    };
+  }
+
+  return {
+    statusLabel: `RETAINED (YEAR ${currentYearLevel})`,
+    badgeClass: 'bg-rose-500/20 text-rose-400 border-rose-500/30',
+    standingText: `Academic Probation: ${failedITSubjects.length} Failed IT Subjects`
+  };
+}
+
+/**
+ * RENDERS YEAR-LEVEL PROGRESSION BANNER ON DASHBOARD
+ */
+function renderYearLevelProgressionBanner(allGrades) {
+  const banner = document.getElementById('studentProgressionBanner');
+  const badge = document.getElementById('studentProgressionBadge');
+  const text = document.getElementById('studentStandingText');
+
+  if (!banner || !badge || !text) return;
+
+  const progression = evaluateAcademicProgression(allGrades, 1);
+  banner.classList.remove('hidden');
+  badge.className = `px-3.5 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-wider border ${progression.badgeClass}`;
+  badge.textContent = progression.statusLabel;
+  text.textContent = progression.standingText;
+}
+
+/**
+ * GROUPS GRADES BY YEAR LEVEL AND CALCULATES CUMULATIVE STANDING
+ */
+function groupGradesByYearLevel(gradesList, subjectsCatalog) {
+  const subjectYearMap = new Map();
+  subjectsCatalog.forEach(s => {
+    subjectYearMap.set((s.subjectCode || '').toUpperCase(), s.yearLevel || '1');
+  });
+
+  const yearGroups = {
+    '1': { label: '1st Year', grades: [], failedCount: 0 },
+    '2': { label: '2nd Year', grades: [], failedCount: 0 },
+    '3': { label: '3rd Year', grades: [], failedCount: 0 },
+    '4': { label: '4th Year', grades: [], failedCount: 0 }
+  };
+
+  gradesList.forEach(g => {
+    const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
+    const year = subjectYearMap.get(code) || '1';
+    
+    const stats = computeGradeStats(g.prelim, g.midterm, g.finals !== undefined ? g.finals : g.final);
+    const enrichedGrade = { ...g, stats };
+
+    if (yearGroups[year]) {
+      yearGroups[year].grades.push(enrichedGrade);
+      if (!stats.isPassing && isItSubjectCode(code)) {
+        yearGroups[year].failedCount++;
+      }
+    }
+  });
+
+  return yearGroups;
+}
+
 /**
  * SECURE LOAD STUDENT DASHBOARD
- * Executes targeted Firestore queries matching the logged-in student's ID or name
- * so that strict database-level Security Rules pass cleanly.
  */
-async function loadStudentDashboard(studentId, fullName) {
+async function loadStudentDashboard(studentId, fullName, userData = null) {
+  // Update Profile Card Header Elements
+  const nameEl = document.getElementById('profileStudentName');
+  const idEl = document.getElementById('profileStudentId');
+
+  if (nameEl) {
+    nameEl.textContent = fullName || (userData && userData.fullName) || 'Student';
+  }
+  if (idEl) {
+    idEl.textContent = studentId || (userData && userData.studentId) || '';
+  }
+
   const tbody1S = document.getElementById('studentGradesBody1S');
   const tbody2S = document.getElementById('studentGradesBody2S');
   if (!tbody1S && !tbody2S) return;
@@ -1552,7 +1763,6 @@ async function loadStudentDashboard(studentId, fullName) {
       return;
     }
 
-    // Execute targeted queries matching the authenticated student's identity
     const queries = [];
     if (cleanStudentId) {
       queries.push(
@@ -1581,6 +1791,9 @@ async function loadStudentDashboard(studentId, fullName) {
     });
 
     const matchedGrades = Array.from(gradeDocsMap.values());
+
+    // Update Year Level Standing & Progression Banner
+    renderYearLevelProgressionBanner(matchedGrades);
 
     if (!matchedGrades.length) {
       const renderEmpty = (container) => {
@@ -1641,6 +1854,10 @@ async function loadStudentDashboard(studentId, fullName) {
   }
 }
 
+// ------------------------------------------------------------------
+// PROSPECTUS & PREREQUISITES LOGIC
+// ------------------------------------------------------------------
+
 function openStudentGradeBreakdownModal(g) {
   const modal = document.getElementById('studentGradeBreakdownModal');
   const panel = document.getElementById('studentGradeBreakdownModalPanel');
@@ -1700,49 +1917,49 @@ function openStudentGradeBreakdownModal(g) {
     examsSection.appendChild(examsGrid);
     body.appendChild(examsSection);
 
-    const quizzesSection = document.createElement('div');
-    quizzesSection.className = "space-y-2";
-    const quizzesHeading = document.createElement('h4');
-    quizzesHeading.className = "text-xs font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-1.5";
-    quizzesHeading.textContent = "Quizzes";
-    quizzesSection.appendChild(quizzesHeading);
+    const renderItemList = (sectionTitle, items) => {
+      if (!items || !items.length) return;
+      const section = document.createElement('div');
+      section.className = "space-y-2";
+      const heading = document.createElement('h4');
+      heading.className = "text-xs font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-1.5";
+      heading.textContent = sectionTitle;
+      section.appendChild(heading);
 
-    const quizzes = g.breakdown.quizzes || [];
-    if (quizzes.length) {
-      quizzes.forEach((q) => {
+      items.forEach((item) => {
+        if (!item) return;
         const row = document.createElement('div');
         row.className = "flex items-center justify-between text-sm p-2 rounded-lg bg-slate-950 border border-slate-800";
         const name = document.createElement('span');
         name.className = "text-slate-300";
-        name.textContent = q.name;
+        name.textContent = item.name || 'Assessment Item';
         const score = document.createElement('span');
         score.className = "font-bold text-white";
-        score.textContent = `${q.score} / ${q.maxScore}`;
+        score.textContent = `${item.score} / ${item.maxScore}`;
         row.appendChild(name);
         row.appendChild(score);
-        quizzesSection.appendChild(row);
+        section.appendChild(row);
       });
-    } else {
-      const none = document.createElement('div');
-      none.className = "text-xs text-slate-500 italic p-2";
-      none.textContent = "No quizzes recorded.";
-      quizzesSection.appendChild(none);
-    }
-    body.appendChild(quizzesSection);
+      body.appendChild(section);
+    };
 
-    const attendanceSection = document.createElement('div');
-    attendanceSection.className = "flex items-center justify-between p-3 rounded-xl border border-slate-800 bg-slate-950";
-    const attendanceLabel = document.createElement('span');
-    attendanceLabel.className = "text-xs font-bold uppercase tracking-wider text-slate-400";
-    attendanceLabel.textContent = "Attendance";
-    const attendanceVal = document.createElement('span');
-    attendanceVal.className = "font-bold text-white";
-    attendanceVal.textContent = (g.breakdown.attendance !== null && g.breakdown.attendance !== undefined)
-      ? `${g.breakdown.attendance}%`
-      : 'Not recorded';
-    attendanceSection.appendChild(attendanceLabel);
-    attendanceSection.appendChild(attendanceVal);
-    body.appendChild(attendanceSection);
+    renderItemList("Quizzes", g.breakdown.quizzes);
+    renderItemList("Assignments & Seatworks", g.breakdown.assignments);
+    renderItemList("Laboratory Exercises", g.breakdown.labExercises || g.breakdown.laboratoryExercises);
+
+    if (g.breakdown.attendance !== null && g.breakdown.attendance !== undefined) {
+      const attendanceSection = document.createElement('div');
+      attendanceSection.className = "flex items-center justify-between p-3 rounded-xl border border-slate-800 bg-slate-950";
+      const attendanceLabel = document.createElement('span');
+      attendanceLabel.className = "text-xs font-bold uppercase tracking-wider text-slate-400";
+      attendanceLabel.textContent = "Attendance / Participation";
+      const attendanceVal = document.createElement('span');
+      attendanceVal.className = "font-bold text-white";
+      attendanceVal.textContent = `${g.breakdown.attendance}%`;
+      attendanceSection.appendChild(attendanceLabel);
+      attendanceSection.appendChild(attendanceVal);
+      body.appendChild(attendanceSection);
+    }
   }
 
   modal.classList.remove('hidden');
@@ -1820,62 +2037,95 @@ function toggleITSubjectFilter(mode) {
   loadAvailableSubjectsForStudent();
 }
 
+function isITPrerequisiteMet(prereqCode, passedSubjectsSet) {
+  if (!prereqCode || prereqCode.toUpperCase() === 'NONE' || prereqCode.trim() === '') {
+    return true;
+  }
+
+  const normalizeStr = (str) => String(str || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+  const IT_ALIASES = {
+    'COMP1': 'PROG1',
+    'PROG1': 'COMP1',
+    'IS1': 'IS1'
+  };
+
+  const reqCodes = prereqCode.split(/[,/]/).map(c => c.trim());
+
+  return reqCodes.every(code => {
+    const rawClean = normalizeStr(code);
+    const aliasClean = IT_ALIASES[rawClean] || rawClean;
+
+    return Array.from(passedSubjectsSet).some(passed => {
+      const passedClean = normalizeStr(passed);
+      return passedClean === rawClean || passedClean === aliasClean;
+    });
+  });
+}
+
 async function loadAvailableSubjectsForStudent() {
   const container = document.getElementById('prospectusContainer');
   if (!container || !currentUserId) return;
 
   try {
-    // 1. Fetch subjects and student enrollments in parallel
     const [subjectsSnapshot, enrollmentsSnapshot] = await Promise.all([
       db.collection('subjects').get(),
       db.collection('enrollments').where('studentUid', '==', currentUserId).get()
     ]);
 
-    // Map existing enrollment statuses
     const statusByCode = {};
     enrollmentsSnapshot.forEach((doc) => {
       const e = doc.data();
-      statusByCode[e.subjectCode] = e.status;
+      if (e.subjectCode) {
+        statusByCode[e.subjectCode.trim().toUpperCase()] = e.status;
+      }
     });
 
-    // 2. Safely fetch student's grades ONLY if identifiers are present
     const passedSubjects = new Set();
-    let hasAnyFailedGrades = false;
+    let hasAnyFailedITGrades = false;
+
+    const publishedRows = document.querySelectorAll('#studentGradesBody1S tr, #studentGradesBody2S tr');
+    publishedRows.forEach(row => {
+      const cells = row.querySelectorAll('td');
+      if (cells.length >= 6) {
+        const codeText = cells[0].textContent.trim().toUpperCase();
+        const statusText = cells[5].textContent.trim().toUpperCase();
+        if (statusText.includes('PASS') && codeText) {
+          passedSubjects.add(codeText);
+        }
+      }
+    });
+
     const cleanStudentId = String(currentStudentSchoolId || '').trim();
     const cleanFullName = String(currentStudentFullName || '').trim();
 
-    if (cleanStudentId || cleanFullName) {
-      try {
-        const gradeQueries = [];
-        if (cleanStudentId) {
-          gradeQueries.push(db.collection('grades').where('studentId', '==', cleanStudentId).get());
-        }
-        if (cleanFullName && cleanFullName !== cleanStudentId) {
-          gradeQueries.push(db.collection('grades').where('fullName', '==', cleanFullName).get());
-        }
-
-        if (gradeQueries.length > 0) {
-          const gradeSnapshots = await Promise.all(gradeQueries);
-          gradeSnapshots.forEach((snapshot) => {
-            snapshot.forEach((doc) => {
-              const g = doc.data();
-              if (g.isReleased === true) {
-                const stats = computeGradeStats(g.prelim, g.midterm, g.finals !== undefined ? g.finals : g.final);
-                const codeKey = g.subjectCode || g.classId;
-
-                if (stats.isPassing) {
-                  if (codeKey) passedSubjects.add(codeKey);
-                  if (g.classId) passedSubjects.add(g.classId);
-                } else {
-                  hasAnyFailedGrades = true;
-                }
-              }
-            });
-          });
-        }
-      } catch (gradeErr) {
-        console.warn("Could not fetch prerequisite grades securely (non-fatal):", gradeErr);
+    try {
+      const gradeQueries = [];
+      if (cleanStudentId) {
+        gradeQueries.push(db.collection('grades').where('studentId', '==', cleanStudentId).get());
       }
+      if (cleanFullName) {
+        gradeQueries.push(db.collection('grades').where('fullName', '==', cleanFullName).get());
+      }
+
+      if (gradeQueries.length > 0) {
+        const gradeSnapshots = await Promise.all(gradeQueries);
+        gradeSnapshots.forEach(snapshot => {
+          snapshot.forEach(doc => {
+            const g = doc.data();
+            const stats = computeGradeStats(g.prelim, g.midterm, g.finals !== undefined ? g.finals : g.final);
+            const codeKey = (g.subjectCode || g.classId || '').trim().toUpperCase();
+
+            if (stats.isPassing && codeKey) {
+              passedSubjects.add(codeKey);
+            } else if (isItSubjectCode(codeKey)) {
+              hasAnyFailedITGrades = true;
+            }
+          });
+        });
+      }
+    } catch (gradeErr) {
+      console.warn("Firestore Grade query warning (falling back to UI passed list):", gradeErr);
     }
 
     container.innerHTML = '';
@@ -1888,9 +2138,6 @@ async function loadAvailableSubjectsForStudent() {
       return;
     }
 
-    // Flag to track locked prerequisites across all rendered subjects
-    let hasAnyLockedPrerequisites = false;
-
     const renderGroup = (label, subjects) => {
       const section = document.createElement('div');
       section.className = "space-y-2";
@@ -1901,17 +2148,17 @@ async function loadAvailableSubjectsForStudent() {
       section.appendChild(heading);
 
       subjects.forEach((s) => {
-        const status = statusByCode[s.subjectCode];
+        const cleanCode = (s.subjectCode || '').trim().toUpperCase();
+        const status = statusByCode[cleanCode];
+        const isIT = isItSubjectCode(s.subjectCode);
 
-        // Check if prerequisite is met
         let hasUnmetPrerequisite = false;
         let prereqMessage = '';
-        if (s.prerequisite && s.prerequisite.trim() !== '') {
-          const requiredCode = s.prerequisite.trim();
-          if (!passedSubjects.has(requiredCode)) {
+        if (isIT && s.prerequisite && s.prerequisite.trim() !== '') {
+          const isMet = isITPrerequisiteMet(s.prerequisite, passedSubjects);
+          if (!isMet) {
             hasUnmetPrerequisite = true;
-            hasAnyLockedPrerequisites = true; // Mark student as having blocked subjects
-            prereqMessage = `Prerequisite not met: Failed or missing ${requiredCode}`;
+            prereqMessage = `Prerequisite not met: Failed or missing ${s.prerequisite}`;
           }
         }
 
@@ -1956,7 +2203,7 @@ async function loadAvailableSubjectsForStudent() {
             pending: { label: 'PENDING APPROVAL', cls: 'bg-amber-500/20 text-amber-400 border border-amber-500/30' },
             approved: { label: 'ENROLLED', cls: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' },
             rejected: { label: 'NOT APPROVED', cls: 'bg-rose-500/20 text-rose-400 border border-rose-500/30' }
-          }[status] || { label: status.toUpperCase(), cls: 'bg-slate-700/40 text-slate-300 border border-slate-700' };
+          }[status] || { label: String(status).toUpperCase(), cls: 'bg-slate-700/40 text-slate-300 border border-slate-700' };
 
           const badge = document.createElement('span');
           badge.className = `shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase ${badgeConfig.cls}`;
@@ -1990,11 +2237,10 @@ async function loadAvailableSubjectsForStudent() {
       });
     }
 
-    // UPDATE STATUS BADGE ACCURATELY AFTER ALL GROUPS RENDER
     const statusBadge = document.getElementById('academicStatusBadge');
     if (statusBadge) {
       statusBadge.classList.remove('hidden');
-      const isIrregular = hasAnyFailedGrades || hasAnyLockedPrerequisites;
+      const isIrregular = hasAnyFailedITGrades;
 
       if (isIrregular) {
         statusBadge.textContent = "STATUS: IRREGULAR";
@@ -2007,54 +2253,12 @@ async function loadAvailableSubjectsForStudent() {
 
   } catch (err) {
     console.error("Error loading available subjects:", err);
-    container.innerHTML = '';
-    const errorMsg = document.createElement('div');
-    errorMsg.className = "p-3 rounded-lg border border-rose-500/30 bg-rose-500/10 text-center text-xs text-rose-400";
-    errorMsg.textContent = "Couldn't load available subjects: " + err.message;
-    container.appendChild(errorMsg);
   }
 }
 
-function closeAdminProspectusModal() {
-  const modal = document.getElementById('adminProspectusModal');
-  const panel = document.getElementById('adminProspectusModalPanel');
-  if (!modal) return;
-
-  if (panel) panel.classList.add('opacity-0', 'scale-95');
-  setTimeout(() => modal.classList.add('hidden'), 200);
-}
-
-function selectSubjectFromProspectusModal(subjectCode, subjectName) {
-  const select = document.getElementById('assignSubjectSelect');
-  if (select) {
-    select.value = subjectCode;
-    handleAssignSubjectSelectChange();
-  }
-  closeAdminProspectusModal();
-}
-
-async function requestEnrollment(subjectCode) {
-  if (!currentUserId) return;
-
-  try {
-    const enrollmentId = buildEnrollmentDocId(subjectCode, currentUserId);
-    await db.collection('enrollments').doc(enrollmentId).set({
-      subjectCode,
-      studentUid: currentUserId,
-      studentId: currentStudentSchoolId || '',
-      fullName: currentStudentFullName || '',
-      status: 'pending',
-      enrolledBy: 'student',
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    await logActivity(currentUserEmail, `Requested enrollment in ${subjectCode}`);
-    alert(`Enrollment request sent for ${subjectCode}. Your instructor must approve it before class rosters are finalized.`);
-    loadAvailableSubjectsForStudent();
-  } catch (err) {
-    console.error("Error requesting enrollment:", err);
-    alert("Error requesting enrollment: " + err.message);
-  }
-}
+// ------------------------------------------------------------------
+// ENROLLMENT & NOTIFICATIONS
+// ------------------------------------------------------------------
 
 async function applySelectedSubjects() {
   if (!currentUserId) return;
@@ -2088,7 +2292,7 @@ async function applySelectedSubjects() {
 
     await batch.commit();
     await logActivity(currentUserEmail, `Requested enrollment in ${subjectCodes.join(', ')}`);
-    alert(`Enrollment requests sent for: ${subjectCodes.join(', ')}. Your instructor(s) must approve each before class rosters are finalized.`);
+    alert(`Enrollment requests sent for: ${subjectCodes.join(', ')}.`);
     loadAvailableSubjectsForStudent();
   } catch (err) {
     console.error("Error applying for selected subjects:", err);
@@ -2098,10 +2302,7 @@ async function applySelectedSubjects() {
 
 async function loadPendingEnrollments(subjectCode) {
   const container = document.getElementById('pendingEnrollmentsList');
-  const selectAllCheckbox = document.getElementById('pendingSelectAllCheckbox');
   if (!container) return;
-
-  if (selectAllCheckbox) selectAllCheckbox.checked = false;
 
   try {
     const snapshot = await db.collection('enrollments')
@@ -2112,100 +2313,28 @@ async function loadPendingEnrollments(subjectCode) {
     container.innerHTML = '';
 
     if (snapshot.empty) {
-      const empty = document.createElement('div');
-      empty.className = "p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500";
-      empty.textContent = "No pending roster requests for this subject.";
-      container.appendChild(empty);
+      container.innerHTML = `<div class="p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">No pending roster requests.</div>`;
       return;
     }
 
     snapshot.forEach((doc) => {
       const e = doc.data();
-
       const row = document.createElement('div');
       row.className = "flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950";
-
-      const left = document.createElement('div');
-      left.className = "flex items-center gap-3 min-w-0";
-
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.className = "roster-checkbox w-4 h-4 accent-emerald-500 shrink-0";
-      checkbox.dataset.enrollmentId = doc.id;
-      left.appendChild(checkbox);
-
-      const label = document.createElement('div');
-      label.className = "min-w-0";
-      const nameLine = document.createElement('div');
-      nameLine.className = "text-sm font-semibold text-white truncate";
-      nameLine.textContent = e.fullName || '(Unnamed Student)';
-      const idLine = document.createElement('div');
-      idLine.className = "text-xs text-slate-400 font-mono";
-      idLine.textContent = e.studentId || 'No Student ID on file';
-      label.appendChild(nameLine);
-      label.appendChild(idLine);
-      left.appendChild(label);
-      row.appendChild(left);
-
-      const actions = document.createElement('div');
-      actions.className = "flex items-center gap-2 shrink-0";
-
-      const approveBtn = document.createElement('button');
-      approveBtn.className = "px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-all";
-      approveBtn.textContent = "Approve";
-      approveBtn.addEventListener('click', () => updateEnrollmentStatus(doc.id, 'approved', subjectCode));
-
-      const rejectBtn = document.createElement('button');
-      rejectBtn.className = "px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition-all";
-      rejectBtn.textContent = "Reject";
-      rejectBtn.addEventListener('click', () => updateEnrollmentStatus(doc.id, 'rejected', subjectCode));
-
-      actions.appendChild(approveBtn);
-      actions.appendChild(rejectBtn);
-      row.appendChild(actions);
-
+      row.innerHTML = `
+        <div>
+          <div class="text-sm font-semibold text-white">${escapeHtml(e.fullName || '')}</div>
+          <div class="text-xs text-slate-400 font-mono">${escapeHtml(e.studentId || '')}</div>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="updateEnrollmentStatus('${doc.id}', 'approved', '${subjectCode}')" class="px-2.5 py-1 bg-emerald-500/10 text-emerald-400 font-bold text-xs rounded-lg">Approve</button>
+          <button onclick="updateEnrollmentStatus('${doc.id}', 'rejected', '${subjectCode}')" class="px-2.5 py-1 bg-rose-500/10 text-rose-400 font-bold text-xs rounded-lg">Reject</button>
+        </div>
+      `;
       container.appendChild(row);
     });
   } catch (err) {
-    console.error("Error loading pending enrollments:", err);
-    container.innerHTML = '';
-    const errorMsg = document.createElement('div');
-    errorMsg.className = "p-3 rounded-lg border border-rose-500/30 bg-rose-500/10 text-center text-xs text-rose-400";
-    errorMsg.textContent = "Couldn't load pending requests: " + err.message;
-    container.appendChild(errorMsg);
-  }
-}
-
-function toggleSelectAllPendingEnrollments(checked) {
-  document.querySelectorAll('.roster-checkbox').forEach((checkbox) => {
-    checkbox.checked = checked;
-  });
-}
-
-async function batchUpdatePendingEnrollments(newStatus) {
-  const checkedBoxes = Array.from(document.querySelectorAll('.roster-checkbox:checked'));
-  if (!checkedBoxes.length) return alert("Select at least one student first.");
-  if (!activeSubjectCode) return;
-
-  try {
-    const batch = db.batch();
-    checkedBoxes.forEach((checkbox) => {
-      const enrollmentId = checkbox.dataset.enrollmentId;
-      if (!enrollmentId) return;
-      const ref = db.collection('enrollments').doc(enrollmentId);
-      batch.update(ref, {
-        status: newStatus,
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-    });
-
-    await batch.commit();
-    await logActivity(currentUserEmail, `Batch marked ${checkedBoxes.length} enrollment(s) as ${newStatus} for ${activeSubjectCode}`);
-    alert(`${checkedBoxes.length} request(s) marked as ${newStatus}.`);
-    loadPendingEnrollments(activeSubjectCode);
-  } catch (err) {
-    console.error("Error batch-updating enrollments:", err);
-    alert("Error updating selected requests: " + err.message);
+    console.error(err);
   }
 }
 
@@ -2215,111 +2344,9 @@ async function updateEnrollmentStatus(enrollmentId, newStatus, subjectCode) {
       status: newStatus,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
-    await logActivity(currentUserEmail, `Marked enrollment ${enrollmentId} as ${newStatus}`);
     loadPendingEnrollments(subjectCode);
   } catch (err) {
-    console.error("Error updating enrollment status:", err);
-    alert("Error updating enrollment: " + err.message);
-  }
-}
-
-async function searchStudentsForDirectAssignment() {
-  const input = document.getElementById('directAssignSearchInput');
-  const container = document.getElementById('directAssignSearchResults');
-  if (!input || !container) return;
-
-  const query = input.value.trim().toLowerCase();
-  if (!query) {
-    container.innerHTML = '';
-    return;
-  }
-
-  container.innerHTML = `<div class="text-center text-xs text-slate-500 py-3 animate-pulse">Searching...</div>`;
-
-  try {
-    const snapshot = await db.collection('users').where('role', '==', 'student').get();
-    const matches = [];
-    snapshot.forEach((doc) => {
-      const u = doc.data();
-      const haystack = `${u.fullName || ''} ${u.studentId || ''}`.toLowerCase();
-      if (haystack.includes(query)) matches.push({ uid: doc.id, ...u });
-    });
-
-    container.innerHTML = '';
-
-    if (!matches.length) {
-      const empty = document.createElement('div');
-      empty.className = "p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500";
-      empty.textContent = "No matching students found.";
-      container.appendChild(empty);
-      return;
-    }
-
-    matches.slice(0, 20).forEach((u) => {
-      const row = document.createElement('div');
-      row.className = "flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950";
-
-      const label = document.createElement('div');
-      label.className = "min-w-0";
-      const nameLine = document.createElement('div');
-      nameLine.className = "text-sm font-semibold text-white truncate";
-      nameLine.textContent = u.fullName || '(Unnamed Student)';
-      const idLine = document.createElement('div');
-      idLine.className = "text-xs text-slate-400 font-mono";
-      idLine.textContent = u.studentId || 'No Student ID on file';
-      label.appendChild(nameLine);
-      label.appendChild(idLine);
-      row.appendChild(label);
-
-      const addBtn = document.createElement('button');
-      addBtn.className = "shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-all";
-      addBtn.textContent = "Add to Roster";
-      addBtn.addEventListener('click', () => directAssignStudentToSubject(u.uid, u.studentId, u.fullName));
-      row.appendChild(addBtn);
-
-      container.appendChild(row);
-    });
-  } catch (err) {
-    console.error("Error searching students:", err);
-    container.innerHTML = '';
-    const errorMsg = document.createElement('div');
-    errorMsg.className = "p-3 rounded-lg border border-rose-500/30 bg-rose-500/10 text-center text-xs text-rose-400";
-    errorMsg.textContent = "Couldn't search students: " + err.message;
-    container.appendChild(errorMsg);
-  }
-}
-
-async function directAssignStudentToSubject(studentUid, studentId, fullName) {
-  if (!activeSubjectCode) return alert("Select an active subject first.");
-
-  try {
-    const enrollmentId = buildEnrollmentDocId(activeSubjectCode, studentUid);
-    const ref = db.collection('enrollments').doc(enrollmentId);
-    const existing = await ref.get();
-
-    if (existing.exists) {
-      await ref.update({
-        status: 'approved',
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-    } else {
-      await ref.set({
-        subjectCode: activeSubjectCode,
-        studentUid,
-        studentId: studentId || '',
-        fullName: fullName || '',
-        status: 'approved',
-        enrolledBy: 'instructor',
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-    }
-
-    await logActivity(currentUserEmail, `Directly enrolled ${fullName || studentUid} into ${activeSubjectCode}`);
-    alert(`${fullName || 'Student'} has been added to the ${activeSubjectCode} roster.`);
-    loadPendingEnrollments(activeSubjectCode);
-  } catch (err) {
-    console.error("Error directly assigning student:", err);
-    alert("Error assigning student: " + err.message);
+    alert("Error: " + err.message);
   }
 }
 
@@ -2346,12 +2373,10 @@ function detachNotificationsListener() {
 function renderNotifications(snapshot) {
   const badge = document.getElementById('notificationBadge');
   const panel = document.getElementById('notificationPanel');
-  const wrapper = document.getElementById('notificationBellWrapper');
-  if (wrapper) wrapper.classList.remove('hidden');
 
   if (badge) {
     if (snapshot.size > 0) {
-      badge.textContent = snapshot.size > 9 ? '9+' : String(snapshot.size);
+      badge.textContent = String(snapshot.size);
       badge.classList.remove('hidden');
     } else {
       badge.classList.add('hidden');
@@ -2361,51 +2386,21 @@ function renderNotifications(snapshot) {
   if (!panel) return;
   panel.innerHTML = '';
 
-  if (snapshot.empty) {
-    const empty = document.createElement('div');
-    empty.className = "p-3 text-center text-xs text-slate-500";
-    empty.textContent = "No new notifications.";
-    panel.appendChild(empty);
-    return;
-  }
-
   snapshot.forEach((doc) => {
     const n = doc.data();
-
     const card = document.createElement('div');
     card.className = "p-3 rounded-lg border border-slate-800 bg-slate-950 space-y-1";
-
-    const title = document.createElement('div');
-    title.className = "text-xs font-bold text-emerald-400";
-    title.textContent = n.title || 'Notification';
-
-    const message = document.createElement('div');
-    message.className = "text-xs text-slate-300";
-    message.textContent = n.message || '';
-
-    const markReadBtn = document.createElement('button');
-    markReadBtn.className = "mt-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all";
-    markReadBtn.textContent = "Mark as Read";
-    markReadBtn.addEventListener('click', () => markNotificationRead(doc.id));
-
-    card.appendChild(title);
-    card.appendChild(message);
-    card.appendChild(markReadBtn);
+    card.innerHTML = `
+      <div class="text-xs font-bold text-emerald-400">${escapeHtml(n.title || '')}</div>
+      <div class="text-xs text-slate-300">${escapeHtml(n.message || '')}</div>
+      <button onclick="markNotificationRead('${doc.id}')" class="mt-1 px-2.5 py-1 text-[11px] font-bold bg-slate-800 text-slate-300 rounded-lg">Mark as Read</button>
+    `;
     panel.appendChild(card);
   });
 }
 
-async function markNotificationRead(notificationId) {
-  try {
-    await db.collection('notifications').doc(notificationId).update({ isRead: true });
-  } catch (err) {
-    console.error("Error marking notification read:", err);
-  }
-}
-
-function toggleNotificationPanel() {
-  const panel = document.getElementById('notificationPanel');
-  if (panel) panel.classList.toggle('hidden');
+async function markNotificationRead(id) {
+  await db.collection('notifications').doc(id).update({ isRead: true });
 }
 
 async function logActivity(user, action) {
