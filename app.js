@@ -1490,6 +1490,187 @@ async function loadAdminDashboardData() {
   }
 }
 
+// ------------------------------------------------------------------
+// ADMIN CURRICULUM PROSPECTUS MODAL LOGIC
+// ------------------------------------------------------------------
+
+let isAdminProspectusItOnly = false;
+
+async function openAdminProspectusModal() {
+  const modal = document.getElementById('adminProspectusModal');
+  const panel = document.getElementById('adminProspectusModalPanel');
+  const container = document.getElementById('adminProspectusModalBody');
+
+  if (!modal || !container) return;
+
+  container.innerHTML = `
+    <div class="p-8 text-center text-slate-400 animate-pulse text-xs">
+      Loading curriculum prospectus subjects...
+    </div>
+  `;
+
+  modal.classList.remove('hidden');
+  if (panel) {
+    void panel.offsetWidth;
+    panel.classList.remove('opacity-0', 'scale-95');
+  }
+
+  try {
+    const subjectsSnapshot = await db.collection('subjects').get();
+    container.innerHTML = '';
+
+    if (subjectsSnapshot.empty) {
+      container.innerHTML = `
+        <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">
+          No subjects found in the curriculum database.
+        </div>
+      `;
+      return;
+    }
+
+    const groups = groupSubjectsForProspectus(subjectsSnapshot, isAdminProspectusItOnly);
+
+    if (!groups.length) {
+      container.innerHTML = `
+        <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">
+          No matching subjects found.
+        </div>
+      `;
+      return;
+    }
+
+    groups.forEach(({ label, subjects }) => {
+      const section = document.createElement('div');
+      section.className = "space-y-2";
+
+      const heading = document.createElement('h4');
+      heading.className = "text-xs font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-1.5";
+      heading.textContent = label;
+      section.appendChild(heading);
+
+      subjects.forEach((s) => {
+        const row = document.createElement('div');
+        row.className = "flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-800/60 transition-all cursor-pointer";
+        row.title = "Click to select for assignment";
+        row.onclick = () => selectSubjectFromAdminProspectus(s.subjectCode);
+
+        const left = document.createElement('div');
+        left.className = "min-w-0";
+
+        const codeLine = document.createElement('div');
+        codeLine.className = "text-sm font-semibold text-white truncate";
+        codeLine.textContent = `${s.subjectCode} - ${s.subjectName}`;
+
+        const metaLine = document.createElement('div');
+        metaLine.className = "text-xs text-slate-400";
+        const hoursText = (s.lecHrs || s.labHrs) ? ` • ${Number(s.lecHrs) || 0} Lec / ${Number(s.labHrs) || 0} Lab hrs` : '';
+        const prereqText = s.prerequisite ? ` • Prereq: ${s.prerequisite}` : '';
+        metaLine.textContent = `${Number(s.units) || 0} Units${hoursText}${prereqText}`;
+
+        left.appendChild(codeLine);
+        left.appendChild(metaLine);
+        row.appendChild(left);
+
+        const selectBtn = document.createElement('button');
+        selectBtn.type = 'button';
+        selectBtn.className = "shrink-0 px-3 py-1 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-slate-950 font-bold text-xs rounded-lg transition-all border border-emerald-500/30";
+        selectBtn.textContent = "Select Subject";
+        selectBtn.onclick = (e) => {
+          e.stopPropagation();
+          selectSubjectFromAdminProspectus(s.subjectCode);
+        };
+
+        row.appendChild(selectBtn);
+        section.appendChild(row);
+      });
+
+      container.appendChild(section);
+    });
+
+  } catch (err) {
+    console.error("Error loading admin prospectus modal:", err);
+    container.innerHTML = `<div class="p-4 text-xs text-rose-500">Error loading subjects: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function closeAdminProspectusModal() {
+  const modal = document.getElementById('adminProspectusModal');
+  const panel = document.getElementById('adminProspectusModalPanel');
+  if (!modal) return;
+
+  if (panel) panel.classList.add('opacity-0', 'scale-95');
+  setTimeout(() => modal.classList.add('hidden'), 200);
+}
+
+function toggleAdminProspectusFilter(mode) {
+  isAdminProspectusItOnly = (mode === 'it');
+
+  const btnAll = document.getElementById('adminBtnFilterAll');
+  const btnIT = document.getElementById('adminBtnFilterIT');
+  const ACTIVE = "px-3 py-1 text-xs rounded-lg bg-emerald-600 text-white font-bold transition-all";
+  const INACTIVE = "px-3 py-1 text-xs rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium transition-all";
+
+  if (btnAll) btnAll.className = isAdminProspectusItOnly ? INACTIVE : ACTIVE;
+  if (btnIT) btnIT.className = isAdminProspectusItOnly ? ACTIVE : INACTIVE;
+
+  openAdminProspectusModal();
+}
+
+function selectSubjectFromAdminProspectus(subjectCode) {
+  const select = document.getElementById('assignSubjectSelect');
+  if (select) {
+    select.value = subjectCode;
+    handleAssignSubjectSelectChange();
+  }
+  closeAdminProspectusModal();
+}
+
+function handleAssignSubjectSelectChange() {
+  const select = document.getElementById('assignSubjectSelect');
+  const indicator = document.getElementById('selectedSubjectIndicator');
+  if (!select || !indicator) return;
+
+  if (select.value) {
+    const selectedText = select.options[select.selectedIndex]?.text || select.value;
+    indicator.textContent = `Selected: ${selectedText}`;
+    indicator.classList.remove('hidden');
+  } else {
+    indicator.classList.add('hidden');
+  }
+}
+
+async function migrateLegacyAssignmentIds() {
+  try {
+    const snapshot = await db.collection('assignments').get();
+    if (snapshot.empty) return alert("No legacy assignment documents found.");
+
+    let count = 0;
+    const batch = db.batch();
+
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      const canonicalId = buildAssignmentDocId(data.facultyUid, data.subjectCode);
+
+      if (doc.id !== canonicalId && data.facultyUid && data.subjectCode) {
+        batch.set(db.collection('assignments').doc(canonicalId), data);
+        batch.delete(doc.ref);
+        count++;
+      }
+    });
+
+    if (count > 0) {
+      await batch.commit();
+      alert(`Successfully migrated ${count} legacy assignment document(s)!`);
+      loadAdminDashboardData();
+    } else {
+      alert("All assignment documents are already using canonical ID format.");
+    }
+  } catch (err) {
+    console.error("Migration Error:", err);
+    alert("Error migrating assignments: " + err.message);
+  }
+}
+
 async function toggleFacultyStatus(uid, currentStatus) {
   const newStatus = currentStatus === 'disabled' ? 'active' : 'disabled';
   await db.collection('users').doc(uid).update({ status: newStatus });
