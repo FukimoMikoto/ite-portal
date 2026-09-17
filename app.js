@@ -1789,17 +1789,21 @@ async function addSubject() {
 // ------------------------------------------------------------------
 
 /**
- * EVALUATES SEMESTER & YEAR-LEVEL PROGRESSION
+ * EVALUATES SEMESTER & YEAR-LEVEL PROGRESSION AUTOMATICALLY
  */
-function evaluateAcademicProgression(allGrades, currentYearLevel = 1) {
+function evaluateAcademicProgression(allGrades) {
   if (!allGrades || !allGrades.length) {
     return {
+      yearLevel: 1,
+      yearLabel: '1ST YEAR',
       statusLabel: 'ENROLLED (1ST YEAR - 1ST SEMESTER)',
-      badgeClass: 'bg-slate-800 text-slate-400 border-slate-700',
-      standingText: 'Regular Student'
+      badgeLabel: '1ST YEAR - REGULAR',
+      badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+      standingText: 'Regular Student (1st Year)'
     };
   }
 
+  // Identify failed IT subjects
   const failedITSubjects = allGrades.filter(g => {
     const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
     if (!isItSubjectCode(code)) return false;
@@ -1808,6 +1812,18 @@ function evaluateAcademicProgression(allGrades, currentYearLevel = 1) {
     return !stats.isPassing;
   });
 
+  // Collect passed subjects by code
+  const passedSubjectCodes = new Set();
+  allGrades.forEach(g => {
+    const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
+    const finalsVal = g.finals !== undefined ? g.finals : g.final;
+    const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
+    if (stats.isPassing && code) {
+      passedSubjectCodes.add(code);
+    }
+  });
+
+  // Calculate distinct semesters passed
   const passedSemesters = new Set();
   allGrades.forEach(g => {
     const finalsVal = g.finals !== undefined ? g.finals : g.final;
@@ -1819,53 +1835,160 @@ function evaluateAcademicProgression(allGrades, currentYearLevel = 1) {
 
   const hasPassed1stSem = passedSemesters.has('1st Semester');
   const hasPassed2ndSem = passedSemesters.has('2nd Semester');
+  const totalPassedCount = passedSubjectCodes.size;
 
-  if (failedITSubjects.length === 0) {
-    if (hasPassed1stSem && !hasPassed2ndSem) {
-      return {
-        statusLabel: 'PROMOTED TO 1ST YEAR - 2ND SEMESTER',
-        badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-        standingText: 'Good Academic Standing (Eligible for 2nd Semester)'
-      };
-    } else if (hasPassed1stSem && hasPassed2ndSem) {
-      return {
-        statusLabel: `PROMOTED TO 2ND YEAR - 1ST SEMESTER`,
-        badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-        standingText: 'Good Academic Standing (Promoted to 2nd Year)'
-      };
-    }
+  // Determine current year level based on passed credits/subjects
+  let calculatedYearLevel = 1;
+
+  // Automatic Year-Level Progression Thresholds (Adjust subject thresholds if needed)
+  if (totalPassedCount >= 18 && hasPassed2ndSem) {
+    calculatedYearLevel = 4;
+  } else if (totalPassedCount >= 12 && hasPassed2ndSem) {
+    calculatedYearLevel = 3;
+  } else if (totalPassedCount >= 6 && hasPassed1stSem) {
+    calculatedYearLevel = 2;
   }
 
-  if (failedITSubjects.length <= 2) {
+  const yearNames = { 1: '1ST YEAR', 2: '2ND YEAR', 3: '3RD YEAR', 4: '4TH YEAR' };
+  const currentYearName = yearNames[calculatedYearLevel] || '1ST YEAR';
+
+  // Handle Irregular Standing (Failed IT subjects)
+  if (failedITSubjects.length > 0) {
     return {
-      statusLabel: `PROMOTED (IRREGULAR)`,
+      yearLevel: calculatedYearLevel,
+      yearLabel: currentYearName,
+      statusLabel: `${currentYearName} - IRREGULAR`,
+      badgeLabel: `${currentYearName} - IRREGULAR`,
       badgeClass: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
       standingText: `Warning: ${failedITSubjects.length} IT Deficiency Subject(s) to Retake`
     };
   }
 
+  // Handle Regular Promotion Progression
+  if (hasPassed1stSem && !hasPassed2ndSem) {
+    return {
+      yearLevel: calculatedYearLevel,
+      yearLabel: currentYearName,
+      statusLabel: `PROMOTED TO ${currentYearName} - 2ND SEMESTER`,
+      badgeLabel: `${currentYearName} - REGULAR`,
+      badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+      standingText: `Good Academic Standing (Eligible for ${currentYearName} 2nd Semester)`
+    };
+  } else if (hasPassed1stSem && hasPassed2ndSem) {
+    return {
+      yearLevel: calculatedYearLevel,
+      yearLabel: currentYearName,
+      statusLabel: `PROMOTED TO ${currentYearName}`,
+      badgeLabel: `${currentYearName} - REGULAR`,
+      badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+      standingText: `Good Academic Standing (Promoted to ${currentYearName})`
+    };
+  }
+
   return {
-    statusLabel: `RETAINED (YEAR ${currentYearLevel})`,
-    badgeClass: 'bg-rose-500/20 text-rose-400 border-rose-500/30',
-    standingText: `Academic Probation: ${failedITSubjects.length} Failed IT Subjects`
+    yearLevel: 1,
+    yearLabel: '1ST YEAR',
+    statusLabel: 'ENROLLED (1ST YEAR - 1ST SEMESTER)',
+    badgeLabel: '1ST YEAR - REGULAR',
+    badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+    standingText: 'Regular Student (1st Year)'
   };
 }
 
 /**
- * RENDERS YEAR-LEVEL PROGRESSION BANNER ON DASHBOARD
+ * UPDATES BANNER AND TOP PROFILE CARD BADGE AUTOMATICALLY
  */
 function renderYearLevelProgressionBanner(allGrades) {
   const banner = document.getElementById('studentProgressionBanner');
   const badge = document.getElementById('studentProgressionBadge');
   const text = document.getElementById('studentStandingText');
 
-  if (!banner || !badge || !text) return;
+  const profileSubtext = document.getElementById('profileStandingSubtext');
+  const profileBadge = document.getElementById('profileYearLevelBadge');
 
-  const progression = evaluateAcademicProgression(allGrades, 1);
-  banner.classList.remove('hidden');
-  badge.className = `px-3.5 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-wider border ${progression.badgeClass}`;
-  badge.textContent = progression.statusLabel;
-  text.textContent = progression.standingText;
+  const progression = evaluateAcademicProgression(allGrades);
+
+  // Update Progression Banner
+  if (banner && badge && text) {
+    banner.classList.remove('hidden');
+    badge.className = `px-3.5 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-wider border ${progression.badgeClass}`;
+    badge.textContent = progression.statusLabel;
+    text.textContent = progression.standingText;
+  }
+
+  // Calculate failed IT count
+  const failedITCount = (allGrades || []).filter(g => {
+    const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
+    if (!isItSubjectCode(code)) return false;
+    const finalsVal = g.finals !== undefined ? g.finals : g.final;
+    const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
+    return !stats.isPassing;
+  }).length;
+
+  // Update Profile Header Card Subtext
+  if (profileSubtext) {
+    if (failedITCount > 0) {
+      profileSubtext.textContent = `${failedITCount} Deficiency Subject(s)`;
+      profileSubtext.className = "text-xs font-semibold text-rose-400";
+    } else {
+      profileSubtext.textContent = "No Academic Deficiencies";
+      profileSubtext.className = "text-xs text-slate-300";
+    }
+  }
+
+  // Update Profile Header Card Year Level Badge automatically
+  if (profileBadge) {
+    profileBadge.textContent = progression.badgeLabel;
+    profileBadge.className = `px-4 py-2 rounded-xl text-xs font-extrabold uppercase border ${progression.badgeClass}`;
+  }
+}
+
+/**
+ * UPDATES BANNER AND TOP PROFILE CARD BADGE AUTOMATICALLY
+ */
+function renderYearLevelProgressionBanner(allGrades) {
+  const banner = document.getElementById('studentProgressionBanner');
+  const badge = document.getElementById('studentProgressionBadge');
+  const text = document.getElementById('studentStandingText');
+
+  const profileSubtext = document.getElementById('profileStandingSubtext');
+  const profileBadge = document.getElementById('profileYearLevelBadge');
+
+  const progression = evaluateAcademicProgression(allGrades);
+
+  // Update Progression Banner
+  if (banner && badge && text) {
+    banner.classList.remove('hidden');
+    badge.className = `px-3.5 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-wider border ${progression.badgeClass}`;
+    badge.textContent = progression.statusLabel;
+    text.textContent = progression.standingText;
+  }
+
+  // Calculate failed IT count
+  const failedITCount = (allGrades || []).filter(g => {
+    const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
+    if (!isItSubjectCode(code)) return false;
+    const finalsVal = g.finals !== undefined ? g.finals : g.final;
+    const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
+    return !stats.isPassing;
+  }).length;
+
+  // Update Profile Header Card Subtext
+  if (profileSubtext) {
+    if (failedITCount > 0) {
+      profileSubtext.textContent = `${failedITCount} Deficiency Subject(s)`;
+      profileSubtext.className = "text-xs font-semibold text-rose-400";
+    } else {
+      profileSubtext.textContent = "No Academic Deficiencies";
+      profileSubtext.className = "text-xs text-slate-300";
+    }
+  }
+
+  // Update Profile Header Card Year Level Badge automatically
+  if (profileBadge) {
+    profileBadge.textContent = progression.badgeLabel;
+    profileBadge.className = `px-4 py-2 rounded-xl text-xs font-extrabold uppercase border ${progression.badgeClass}`;
+  }
 }
 
 /**
