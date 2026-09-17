@@ -1825,7 +1825,7 @@ async function loadAvailableSubjectsForStudent() {
   if (!container || !currentUserId) return;
 
   try {
-    // 1. Fetch subjects and student enrollments in parallel (these always pass security rules for students)
+    // 1. Fetch subjects and student enrollments in parallel
     const [subjectsSnapshot, enrollmentsSnapshot] = await Promise.all([
       db.collection('subjects').get(),
       db.collection('enrollments').where('studentUid', '==', currentUserId).get()
@@ -1840,6 +1840,7 @@ async function loadAvailableSubjectsForStudent() {
 
     // 2. Safely fetch student's grades ONLY if identifiers are present
     const passedSubjects = new Set();
+    let hasAnyFailedGrades = false;
     const cleanStudentId = String(currentStudentSchoolId || '').trim();
     const cleanFullName = String(currentStudentFullName || '').trim();
 
@@ -1860,8 +1861,13 @@ async function loadAvailableSubjectsForStudent() {
               const g = doc.data();
               if (g.isReleased === true) {
                 const stats = computeGradeStats(g.prelim, g.midterm, g.finals !== undefined ? g.finals : g.final);
+                const codeKey = g.subjectCode || g.classId;
+
                 if (stats.isPassing) {
-                  passedSubjects.add(g.classId);
+                  if (codeKey) passedSubjects.add(codeKey);
+                  if (g.classId) passedSubjects.add(g.classId);
+                } else {
+                  hasAnyFailedGrades = true;
                 }
               }
             });
@@ -1882,6 +1888,9 @@ async function loadAvailableSubjectsForStudent() {
       return;
     }
 
+    // Flag to track locked prerequisites across all rendered subjects
+    let hasAnyLockedPrerequisites = false;
+
     const renderGroup = (label, subjects) => {
       const section = document.createElement('div');
       section.className = "space-y-2";
@@ -1901,6 +1910,7 @@ async function loadAvailableSubjectsForStudent() {
           const requiredCode = s.prerequisite.trim();
           if (!passedSubjects.has(requiredCode)) {
             hasUnmetPrerequisite = true;
+            hasAnyLockedPrerequisites = true; // Mark student as having blocked subjects
             prereqMessage = `Prerequisite not met: Failed or missing ${requiredCode}`;
           }
         }
@@ -1918,7 +1928,6 @@ async function loadAvailableSubjectsForStudent() {
           checkbox.dataset.subjectCode = s.subjectCode;
           left.appendChild(checkbox);
         } else if (hasUnmetPrerequisite && !status) {
-          // Disabled placeholder box for blocked prerequisite
           const disabledBox = document.createElement('div');
           disabledBox.className = "w-4 h-4 rounded bg-slate-800 border border-slate-700 shrink-0 flex items-center justify-center text-[10px] text-slate-500";
           disabledBox.textContent = "🔒";
@@ -1980,6 +1989,22 @@ async function loadAvailableSubjectsForStudent() {
         renderGroup(label, subjects);
       });
     }
+
+    // UPDATE STATUS BADGE ACCURATELY AFTER ALL GROUPS RENDER
+    const statusBadge = document.getElementById('academicStatusBadge');
+    if (statusBadge) {
+      statusBadge.classList.remove('hidden');
+      const isIrregular = hasAnyFailedGrades || hasAnyLockedPrerequisites;
+
+      if (isIrregular) {
+        statusBadge.textContent = "STATUS: IRREGULAR";
+        statusBadge.className = "shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase bg-amber-500/20 text-amber-400 border border-amber-500/30";
+      } else {
+        statusBadge.textContent = "STATUS: REGULAR";
+        statusBadge.className = "shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+      }
+    }
+
   } catch (err) {
     console.error("Error loading available subjects:", err);
     container.innerHTML = '';
