@@ -567,6 +567,7 @@ async function selectSubject(code, title, cardElement) {
 
   loadInstructorGradesFromFirestore(code);
   loadPendingEnrollments(code);
+  loadOfficiallyEnrolledStudents(code);
 }
 
 function setActiveSemester(sem) {
@@ -1641,7 +1642,7 @@ async function migrateLegacyAssignmentIds() {
 // PROGRESSION & STUDENT DASHBOARD ENGINE
 // ------------------------------------------------------------------
 
-function evaluateAcademicProgression(allGrades, entryYearLevel = 1) {
+function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap = {}) {
   const baseYear = parseInt(entryYearLevel) || 1;
   const yearNames = { 1: '1ST YEAR', 2: '2ND YEAR', 3: '3RD YEAR', 4: '4TH YEAR' };
 
@@ -1656,6 +1657,54 @@ function evaluateAcademicProgression(allGrades, entryYearLevel = 1) {
     };
   }
 
+  // Filter out duplicate grade records by subject code so counts are exact
+  const uniquePassedSubjects = new Map();
+  const passedSemesters = new Set();
+  const secondSemSubjects = new Set(['IS 2', 'MS 1', 'PROG 2', 'IS2', 'MS1', 'PROG2']);
+
+  allGrades.forEach(g => {
+    const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
+    if (!code) return;
+
+    const finalsVal = g.finals !== undefined ? g.finals : g.final;
+    const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
+
+    if (stats.isPassing) {
+      uniquePassedSubjects.set(code, true);
+
+      let sem = normalizeSemester(g.semester);
+      if (subjectMap[code] && subjectMap[code].semester) {
+        sem = normalizeSemester(subjectMap[code].semester);
+      } else if (secondSemSubjects.has(code)) {
+        sem = '2nd Semester';
+      }
+
+      if (sem) passedSemesters.add(sem);
+    }
+  });
+
+  const passedCount = uniquePassedSubjects.size;
+  const hasPassed1stSem = passedSemesters.has('1st Semester');
+  const hasPassed2ndSem = passedSemesters.has('2nd Semester');
+
+  // STRICT PROGRESSION CALCULATION
+  let calculatedYearLevel = baseYear;
+
+  // Level 1: Completing 1st Year (both 1st & 2nd sem subjects passed) promotes to 2nd Year
+  if (hasPassed1stSem && hasPassed2ndSem) {
+    calculatedYearLevel = Math.max(baseYear, 2);
+  }
+
+  // Level 2: Only promote to 3rd Year if >= 12 UNIQUE subjects AND 2nd year terms completed
+  if (passedCount >= 12 && hasPassed2ndSem && calculatedYearLevel >= 2) {
+    calculatedYearLevel = 3;
+  }
+
+  // Level 3: 4th Year requirement
+  if (passedCount >= 18 && calculatedYearLevel >= 3) {
+    calculatedYearLevel = 4;
+  }
+
   const failedITSubjects = allGrades.filter(g => {
     const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
     if (!isItSubjectCode(code)) return false;
@@ -1663,29 +1712,6 @@ function evaluateAcademicProgression(allGrades, entryYearLevel = 1) {
     const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
     return !stats.isPassing;
   });
-
-  const passedSubjectCodes = new Set();
-  const passedSemesters = new Set();
-
-  allGrades.forEach(g => {
-    const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
-    const finalsVal = g.finals !== undefined ? g.finals : g.final;
-    const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
-    if (stats.isPassing) {
-      if (code) passedSubjectCodes.add(code);
-      if (g.semester) passedSemesters.add(normalizeSemester(g.semester));
-    }
-  });
-
-  const hasPassed1stSem = passedSemesters.has('1st Semester');
-  const hasPassed2ndSem = passedSemesters.has('2nd Semester');
-
-  let calculatedYearLevel = baseYear;
-  if (passedSubjectCodes.size >= 12 && hasPassed2ndSem) {
-    calculatedYearLevel = Math.max(baseYear, 3);
-  } else if (passedSubjectCodes.size >= 6 && hasPassed1stSem && hasPassed2ndSem) {
-    calculatedYearLevel = Math.max(baseYear, 2);
-  }
 
   const currentYearName = yearNames[calculatedYearLevel] || '1ST YEAR';
 
@@ -1699,23 +1725,33 @@ function evaluateAcademicProgression(allGrades, entryYearLevel = 1) {
     };
   }
 
-  if (hasPassed1stSem && !hasPassed2ndSem) {
+  // Correct display badges
+  if (hasPassed1stSem && hasPassed2ndSem && calculatedYearLevel === 2) {
     return {
-      yearLevel: calculatedYearLevel,
-      statusLabel: `PROMOTED TO ${currentYearName} - 2ND SEMESTER`,
-      badgeLabel: `${currentYearName} - REGULAR`,
+      yearLevel: 2,
+      statusLabel: `PROMOTED TO 2ND YEAR - 1ST SEMESTER`,
+      badgeLabel: `2ND YEAR - REGULAR`,
       badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-      standingText: `Good Academic Standing (Eligible for ${currentYearName} 2nd Semester)`
+      standingText: `Good Academic Standing (Eligible for 2ND YEAR)`
     };
   }
 
-  const nextYearName = yearNames[Math.min(calculatedYearLevel + 1, 4)];
+  if (hasPassed1stSem && !hasPassed2ndSem) {
+    return {
+      yearLevel: 1,
+      statusLabel: `PROMOTED TO 1ST YEAR - 2ND SEMESTER`,
+      badgeLabel: `1ST YEAR - REGULAR`,
+      badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+      standingText: `Good Academic Standing (Eligible for 1ST YEAR 2nd Semester)`
+    };
+  }
+
   return {
     yearLevel: calculatedYearLevel,
-    statusLabel: `PROMOTED TO ${nextYearName} - 1ST SEMESTER`,
+    statusLabel: `PROMOTED TO ${currentYearName} - 1ST SEMESTER`,
     badgeLabel: `${currentYearName} - REGULAR`,
     badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-    standingText: `Good Academic Standing (Eligible for ${nextYearName})`
+    standingText: `Good Academic Standing`
   };
 }
 
@@ -2366,6 +2402,7 @@ async function batchUpdatePendingEnrollments(newStatus) {
     if (selectAllCb) selectAllCb.checked = false;
 
     loadPendingEnrollments(activeSubjectCode);
+    loadOfficiallyEnrolledStudents(activeSubjectCode);
   } catch (err) {
     console.error("Batch Enrollment Update Error:", err);
     alert("Error updating enrollments: " + err.message);
@@ -2445,6 +2482,89 @@ async function loadPendingEnrollments(subjectCode) {
   }
 }
 
+async function loadOfficiallyEnrolledStudents(subjectCode) {
+  const container = document.getElementById('officiallyEnrolledList');
+  const countBadge = document.getElementById('enrolledCountBadge');
+  if (!container) return;
+
+  try {
+    const snapshot = await db.collection('enrollments')
+      .where('subjectCode', '==', subjectCode)
+      .where('status', '==', 'approved')
+      .get();
+
+    container.innerHTML = '';
+
+    if (countBadge) {
+      countBadge.textContent = `${snapshot.size} Enrolled`;
+    }
+
+    if (snapshot.empty) {
+      container.innerHTML = `
+        <div class="p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">
+          No officially enrolled students for this class.
+        </div>
+      `;
+      return;
+    }
+
+    snapshot.forEach((doc) => {
+      const e = doc.data();
+      const docId = doc.id;
+
+      const row = document.createElement('div');
+      row.className = "flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950 hover:bg-slate-900/60 transition-all";
+
+      const info = document.createElement('div');
+      info.className = "min-w-0";
+      info.innerHTML = `
+        <div class="text-sm font-semibold text-white truncate">${escapeHtml(e.fullName || 'Student')}</div>
+        <div class="text-xs text-slate-400 font-mono">${escapeHtml(e.studentId || 'N/A')}</div>
+      `;
+
+      const right = document.createElement('div');
+      right.className = "flex items-center gap-2 shrink-0";
+
+      const badge = document.createElement('span');
+      badge.className = "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+      badge.textContent = "ENROLLED";
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = "px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white font-bold text-xs rounded-lg transition-all border border-rose-500/30";
+      removeBtn.textContent = "Drop";
+      removeBtn.onclick = () => dropEnrolledStudent(docId, subjectCode, e.fullName);
+
+      right.appendChild(badge);
+      right.appendChild(removeBtn);
+
+      row.appendChild(info);
+      row.appendChild(right);
+
+      container.appendChild(row);
+    });
+  } catch (err) {
+    console.error("Error loading officially enrolled students:", err);
+  }
+}
+
+async function dropEnrolledStudent(enrollmentId, subjectCode, studentName) {
+  const confirmed = confirm(`Are you sure you want to drop ${studentName || 'this student'} from ${subjectCode}?`);
+  if (!confirmed) return;
+
+  try {
+    await db.collection('enrollments').doc(enrollmentId).update({
+      status: 'rejected',
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await logActivity(currentUserEmail, `Dropped ${studentName || enrollmentId} from ${subjectCode}`);
+    loadOfficiallyEnrolledStudents(subjectCode);
+  } catch (err) {
+    console.error("Error dropping student:", err);
+    alert("Error dropping student: " + err.message);
+  }
+}
+
 async function updateEnrollmentStatus(enrollmentId, newStatus, subjectCode) {
   try {
     await db.collection('enrollments').doc(enrollmentId).update({
@@ -2453,6 +2573,7 @@ async function updateEnrollmentStatus(enrollmentId, newStatus, subjectCode) {
     });
     await logActivity(currentUserEmail, `Set enrollment ${enrollmentId} status to ${newStatus}`);
     loadPendingEnrollments(subjectCode || activeSubjectCode);
+    loadOfficiallyEnrolledStudents(subjectCode || activeSubjectCode);
   } catch (err) {
     console.error("Update Enrollment Status Error:", err);
     alert("Error updating enrollment: " + err.message);
