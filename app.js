@@ -683,7 +683,7 @@ async function loadInstructorGradesFromFirestore(subjectCode) {
 }
 
 // ------------------------------------------------------------------
-// ANALYTICS & CHARTS ENGINE (STRICT CONTAINER BOUNDS)
+// ANALYTICS & CHARTS ENGINE
 // ------------------------------------------------------------------
 
 function destroyChartSafely(chartInstance) {
@@ -1922,7 +1922,6 @@ async function openStudentGradeBreakdownModal(g) {
 
   body.innerHTML = '';
 
-  // 1. Term Average Card
   const summary = document.createElement('div');
   summary.className = "flex items-center justify-between p-3.5 rounded-xl border border-slate-800 bg-slate-950 mb-3";
   summary.innerHTML = `
@@ -1958,7 +1957,6 @@ async function openStudentGradeBreakdownModal(g) {
     return sec;
   };
 
-  // 2. Major Exams Section
   const examsSec = document.createElement('div');
   examsSec.className = "space-y-1.5 mb-3";
   examsSec.innerHTML = `
@@ -1980,7 +1978,6 @@ async function openStudentGradeBreakdownModal(g) {
   `;
   body.appendChild(examsSec);
 
-  // 3. Quizzes Section
   const quizzes = g.quizzes || [
     { label: 'Quiz 1', score: '14 / 15' },
     { label: 'Quiz 2', score: '13 / 15' },
@@ -1988,19 +1985,16 @@ async function openStudentGradeBreakdownModal(g) {
   ];
   body.appendChild(createItemList('Quizzes', quizzes));
 
-  // 4. Assignments & Seatworks Section
   const assignments = g.assignments || [
     { label: 'Assignments / Seatwork', score: '48 / 50' }
   ];
   body.appendChild(createItemList('Assignments & Seatworks', assignments));
 
-  // 5. Laboratory Exercises Section
   const labExercises = g.labExercises || [
     { label: 'Lab Exercise', score: '95 / 100' }
   ];
   body.appendChild(createItemList('Laboratory Exercises', labExercises));
 
-  // 6. Attendance / Participation
   const att = g.attendance || '93%';
   const attSec = document.createElement('div');
   attSec.className = "space-y-1.5 mb-2";
@@ -2013,7 +2007,6 @@ async function openStudentGradeBreakdownModal(g) {
   `;
   body.appendChild(attSec);
 
-  // 7. Course Evaluation Weights Footer
   const formulaInfo = document.createElement('div');
   formulaInfo.className = "p-3 rounded-xl border border-slate-800/80 bg-slate-900/40 space-y-2 mt-4";
   formulaInfo.innerHTML = `
@@ -2334,9 +2327,57 @@ async function applySelectedSubjects() {
   }
 }
 
+function toggleSelectAllPendingEnrollments(checked) {
+  const checkboxes = document.querySelectorAll('.pending-enrollment-checkbox');
+  checkboxes.forEach((cb) => {
+    cb.checked = checked;
+  });
+}
+
+async function batchUpdatePendingEnrollments(newStatus) {
+  if (!activeSubjectCode) return alert("Select an active subject first.");
+
+  const checkedBoxes = Array.from(document.querySelectorAll('.pending-enrollment-checkbox:checked'));
+  if (!checkedBoxes.length) {
+    return alert(`Please select at least one student application to ${newStatus}.`);
+  }
+
+  const confirmed = confirm(`Are you sure you want to ${newStatus} ${checkedBoxes.length} enrollment request(s)?`);
+  if (!confirmed) return;
+
+  try {
+    const batch = db.batch();
+    checkedBoxes.forEach((cb) => {
+      const enrollmentId = cb.dataset.enrollmentId;
+      if (enrollmentId) {
+        const ref = db.collection('enrollments').doc(enrollmentId);
+        batch.update(ref, {
+          status: newStatus,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      }
+    });
+
+    await batch.commit();
+    await logActivity(currentUserEmail, `Batch ${newStatus} ${checkedBoxes.length} enrollment(s) for ${activeSubjectCode}`);
+    alert(`Successfully updated ${checkedBoxes.length} student application(s) to ${newStatus.toUpperCase()}.`);
+
+    const selectAllCb = document.getElementById('pendingSelectAllCheckbox');
+    if (selectAllCb) selectAllCb.checked = false;
+
+    loadPendingEnrollments(activeSubjectCode);
+  } catch (err) {
+    console.error("Batch Enrollment Update Error:", err);
+    alert("Error updating enrollments: " + err.message);
+  }
+}
+
 async function loadPendingEnrollments(subjectCode) {
   const container = document.getElementById('pendingEnrollmentsList');
   if (!container) return;
+
+  const selectAllCb = document.getElementById('pendingSelectAllCheckbox');
+  if (selectAllCb) selectAllCb.checked = false;
 
   try {
     const snapshot = await db.collection('enrollments')
@@ -2353,22 +2394,54 @@ async function loadPendingEnrollments(subjectCode) {
 
     snapshot.forEach((doc) => {
       const e = doc.data();
+      const docId = doc.id;
+
       const row = document.createElement('div');
-      row.className = "flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950";
-      row.innerHTML = `
-        <div>
-          <div class="text-sm font-semibold text-white">${escapeHtml(e.fullName || '')}</div>
-          <div class="text-xs text-slate-400 font-mono">${escapeHtml(e.studentId || '')}</div>
-        </div>
-        <div class="flex gap-2">
-          <button onclick="updateEnrollmentStatus('${doc.id}', 'approved', '${subjectCode}')" class="px-2.5 py-1 bg-emerald-500/10 text-emerald-400 font-bold text-xs rounded-lg">Approve</button>
-          <button onclick="updateEnrollmentStatus('${doc.id}', 'rejected', '${subjectCode}')" class="px-2.5 py-1 bg-rose-500/10 text-rose-400 font-bold text-xs rounded-lg">Reject</button>
-        </div>
+      row.className = "flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950 hover:bg-slate-900/60 transition-all";
+
+      const left = document.createElement('div');
+      left.className = "flex items-center gap-3 min-w-0";
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = "pending-enrollment-checkbox w-4 h-4 accent-emerald-500 shrink-0 cursor-pointer";
+      checkbox.dataset.enrollmentId = docId;
+
+      const info = document.createElement('div');
+      info.className = "min-w-0";
+      info.innerHTML = `
+        <div class="text-sm font-semibold text-white truncate">${escapeHtml(e.fullName || 'Student')}</div>
+        <div class="text-xs text-slate-400 font-mono">${escapeHtml(e.studentId || 'N/A')}</div>
       `;
+
+      left.appendChild(checkbox);
+      left.appendChild(info);
+
+      const right = document.createElement('div');
+      right.className = "flex items-center gap-2 shrink-0";
+
+      const approveBtn = document.createElement('button');
+      approveBtn.type = 'button';
+      approveBtn.className = "px-3 py-1 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 font-bold text-xs rounded-lg transition-all border border-emerald-500/30";
+      approveBtn.textContent = "Approve";
+      approveBtn.onclick = () => updateEnrollmentStatus(docId, 'approved', subjectCode);
+
+      const rejectBtn = document.createElement('button');
+      rejectBtn.type = 'button';
+      rejectBtn.className = "px-3 py-1 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white font-bold text-xs rounded-lg transition-all border border-rose-500/30";
+      rejectBtn.textContent = "Reject";
+      rejectBtn.onclick = () => updateEnrollmentStatus(docId, 'rejected', subjectCode);
+
+      right.appendChild(approveBtn);
+      right.appendChild(rejectBtn);
+
+      row.appendChild(left);
+      row.appendChild(right);
+
       container.appendChild(row);
     });
   } catch (err) {
-    console.error(err);
+    console.error("Error loading pending enrollments:", err);
   }
 }
 
@@ -2378,9 +2451,11 @@ async function updateEnrollmentStatus(enrollmentId, newStatus, subjectCode) {
       status: newStatus,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
-    loadPendingEnrollments(subjectCode);
+    await logActivity(currentUserEmail, `Set enrollment ${enrollmentId} status to ${newStatus}`);
+    loadPendingEnrollments(subjectCode || activeSubjectCode);
   } catch (err) {
-    alert("Error: " + err.message);
+    console.error("Update Enrollment Status Error:", err);
+    alert("Error updating enrollment: " + err.message);
   }
 }
 
