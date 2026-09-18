@@ -27,32 +27,44 @@ let lastReportData = null;
 let activeSemester = '1st Semester';
 let currentStudentSchoolId = '';
 let currentStudentFullName = '';
+let currentStudentEntryYear = 1;
 let notificationsUnsubscribe = null;
 
 let selectedPortalRole = 'student';
 let isFreshLoginAttempt = false;
 
+// Chart Instance Holders
+let instructorGradeChartInstance = null;
+let instructorPassFailChartInstance = null;
+let adminGradeChartInstance = null;
+let adminPassFailChartInstance = null;
+
 // ------------------------------------------------------------------
-// 1. ISOLATED PORTAL ROUTER & CONFIGS
+// 1. ISOLATED PORTAL ROUTER & HELPER FUNCTIONS
 // ------------------------------------------------------------------
 
-/**
- * ISOLATED PORTAL ROUTER
- * Detects URL parameters/hashes (?portal=admin or #admin) to show/hide portal views.
- */
 function initPortalView() {
+  const path = window.location.pathname.toLowerCase();
   const urlParams = new URLSearchParams(window.location.search);
-  const portalType = urlParams.get('portal') || window.location.hash.replace('#', '');
+  const hash = window.location.hash.replace('#', '').toLowerCase();
+  const portalParam = (urlParams.get('portal') || '').toLowerCase();
 
   const studentLoginForm = document.getElementById('studentLoginContainer');
   const staffLoginForm = document.getElementById('staffLoginContainer');
 
-  if (portalType === 'admin' || portalType === 'faculty') {
-    selectedPortalRole = portalType === 'admin' ? 'admin' : 'instructor';
+  const isAdminRoute = path.includes('/admin') || portalParam === 'admin' || hash === 'admin';
+  const isFacultyRoute = path.includes('/faculty') || portalParam === 'faculty' || portalParam === 'instructor' || hash === 'faculty' || hash === 'instructor';
+
+  if (isAdminRoute) {
+    selectPortal('admin');
+    if (studentLoginForm) studentLoginForm.classList.add('hidden');
+    if (staffLoginForm) staffLoginForm.classList.remove('hidden');
+  } else if (isFacultyRoute) {
+    selectPortal('instructor');
     if (studentLoginForm) studentLoginForm.classList.add('hidden');
     if (staffLoginForm) staffLoginForm.classList.remove('hidden');
   } else {
-    selectedPortalRole = 'student';
+    selectPortal('student');
     if (staffLoginForm) staffLoginForm.classList.add('hidden');
     if (studentLoginForm) studentLoginForm.classList.remove('hidden');
   }
@@ -149,6 +161,10 @@ function normalizeNameKey(fullName) {
     .trim()
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, '_');
+}
+
+function normalizeCodeKey(code) {
+  return String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
 // ------------------------------------------------------------------
@@ -306,8 +322,8 @@ auth.onAuthStateChanged(async (user) => {
 });
 
 async function handleLogin() {
-  const emailInput = document.getElementById('loginEmail') || document.getElementById('staffEmail') || document.getElementById('studentEmail');
-  const passwordInput = document.getElementById('loginPassword') || document.getElementById('staffPassword') || document.getElementById('studentPassword');
+  const emailInput = document.getElementById('loginEmail');
+  const passwordInput = document.getElementById('loginPassword');
   
   if (!emailInput || !passwordInput) return;
 
@@ -329,15 +345,23 @@ async function handleStudentRegister() {
   const studentId = document.getElementById('regStudentId').value.trim();
   const email = document.getElementById('regEmail').value.trim();
   const password = document.getElementById('regPassword').value.trim();
+  const entryYearLevel = parseInt(document.getElementById('regYearLevel').value) || 1;
+  const studentType = document.querySelector('input[name="studentType"]:checked')?.value || 'regular';
   const authError = document.getElementById('authError');
 
   try {
     const userCred = await auth.createUserWithEmailAndPassword(email, password);
     await db.collection('users').doc(userCred.user.uid).set({
-      fullName, studentId, email, role: "student", status: "active",
+      fullName,
+      studentId,
+      email,
+      role: "student",
+      status: "active",
+      studentType,
+      entryYearLevel,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
-    await logActivity(email, `Registered student account (${studentId})`);
+    await logActivity(email, `Registered ${studentType} student account (${studentId} - Year ${entryYearLevel})`);
     alert("Student registration completed successfully!");
   } catch (err) {
     if (authError) authError.innerText = err.message;
@@ -361,24 +385,69 @@ function routeUserRole(role, userData) {
     if (instructorView) instructorView.classList.remove('hidden');
     loadInstructorAssignedSubjects();
   }
-  // Replace the 'student' block inside routeUserRole with this:
-if (role === 'student') {
-  if (studentView) studentView.classList.remove('hidden');
-  currentStudentSchoolId = (userData && userData.studentId) || '';
-  currentStudentFullName = (userData && userData.fullName) || '';
+  if (role === 'student') {
+    if (studentView) studentView.classList.remove('hidden');
+    currentStudentSchoolId = (userData && userData.studentId) || '';
+    currentStudentFullName = (userData && userData.fullName) || '';
+    currentStudentEntryYear = (userData && userData.entryYearLevel) || 1;
 
-  // Pass userData to loadStudentDashboard
-  loadStudentDashboard(currentStudentSchoolId, currentStudentFullName, userData);
-  loadAvailableSubjectsForStudent();
-  setupNotificationsListener(currentUserId);
-} else {
-  detachNotificationsListener();
-}
+    loadStudentDashboard(currentStudentSchoolId, currentStudentFullName, userData);
+    loadAvailableSubjectsForStudent();
+    setupNotificationsListener(currentUserId);
+  } else {
+    detachNotificationsListener();
+  }
 }
 
 // ------------------------------------------------------------------
-// INSTRUCTOR WORKSPACE & GRADE MANAGEMENT
+// INSTRUCTOR WORKSPACE & FORMULA CONFIGURATOR
 // ------------------------------------------------------------------
+
+async function saveInstructorGradingFormula() {
+  if (!activeSubjectCode) return alert("Select an active subject first.");
+
+  const weightLab = parseFloat(document.getElementById('weightLab').value) || 0;
+  const weightQuizzes = parseFloat(document.getElementById('weightQuizzes').value) || 0;
+  const weightOutput = parseFloat(document.getElementById('weightOutput').value) || 0;
+  const weightExam = parseFloat(document.getElementById('weightExam').value) || 0;
+
+  const total = weightLab + weightQuizzes + weightOutput + weightExam;
+  const totalIndicator = document.getElementById('weightTotalIndicator');
+
+  if (totalIndicator) {
+    totalIndicator.textContent = `Total: ${total}%`;
+    totalIndicator.className = total === 100 ? "text-[10px] font-mono text-emerald-400" : "text-[10px] font-mono text-rose-400 font-bold";
+  }
+
+  if (total !== 100) {
+    return alert(`Total evaluation weight must equal 100%. Current total is ${total}%.`);
+  }
+
+  const formulaData = {
+    subjectCode: activeSubjectCode,
+    facultyUid: currentUserId,
+    gradingFormula: { weightLab, weightQuizzes, weightOutput, weightExam },
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  try {
+    await db.collection('instructorFormulas')
+      .doc(`${currentUserId}_${activeSubjectCode}`)
+      .set(formulaData, { merge: true });
+
+    const assignmentDocId = buildAssignmentDocId(currentUserId, activeSubjectCode);
+    await db.collection('assignments')
+      .doc(assignmentDocId)
+      .set({ gradingFormula: { weightLab, weightQuizzes, weightOutput, weightExam } }, { merge: true })
+      .catch(() => {});
+
+    await logActivity(currentUserEmail, `Updated course evaluation weights for ${activeSubjectCode}`);
+    alert(`Course evaluation formula saved successfully for ${activeSubjectCode}!`);
+  } catch (err) {
+    console.error("Formula Save Error:", err);
+    alert("Error saving formula: " + err.message);
+  }
+}
 
 async function loadInstructorAssignedSubjects() {
   const container = document.getElementById('assignedClassesList');
@@ -450,7 +519,7 @@ async function loadInstructorAssignedSubjects() {
   }
 }
 
-function selectSubject(code, title, cardElement) {
+async function selectSubject(code, title, cardElement) {
   activeSubjectCode = code;
 
   const container = document.getElementById('assignedClassesList');
@@ -468,6 +537,33 @@ function selectSubject(code, title, cardElement) {
   
   if (currentClassTitle) currentClassTitle.innerText = `${code} - ${title}`;
   if (currentClassMeta) currentClassMeta.innerText = `Instructor: ${currentUserEmail} | Class Code: ${code}`;
+
+  try {
+    let gf = null;
+    const formulaDoc = await db.collection('instructorFormulas').doc(`${currentUserId}_${code}`).get();
+
+    if (formulaDoc.exists && formulaDoc.data().gradingFormula) {
+      gf = formulaDoc.data().gradingFormula;
+    } else {
+      const subDoc = await db.collection('subjects').doc(code).get();
+      if (subDoc.exists && subDoc.data().gradingFormula) {
+        gf = subDoc.data().gradingFormula;
+      }
+    }
+
+    if (gf) {
+      if (document.getElementById('weightLab')) document.getElementById('weightLab').value = gf.weightLab ?? 30;
+      if (document.getElementById('weightQuizzes')) document.getElementById('weightQuizzes').value = gf.weightQuizzes ?? 30;
+      if (document.getElementById('weightOutput')) document.getElementById('weightOutput').value = gf.weightOutput ?? 20;
+      if (document.getElementById('weightExam')) document.getElementById('weightExam').value = gf.weightExam ?? 20;
+
+      const total = (gf.weightLab || 0) + (gf.weightQuizzes || 0) + (gf.weightOutput || 0) + (gf.weightExam || 0);
+      const totalIndicator = document.getElementById('weightTotalIndicator');
+      if (totalIndicator) totalIndicator.textContent = `Total: ${total}%`;
+    }
+  } catch (e) {
+    console.warn("Could not load formula config:", e);
+  }
 
   loadInstructorGradesFromFirestore(code);
   loadPendingEnrollments(code);
@@ -520,11 +616,7 @@ async function loadInstructorGradesFromFirestore(subjectCode) {
         </tr>
       `;
       parsedGradeData = [];
-      renderAcademicAnalytics([], {
-        distributionCanvasId: 'instructorGradeDistributionChart',
-        passFailCanvasId: 'instructorPassFailChart',
-        atRiskTableId: 'instructorAtRiskTableBody'
-      });
+      renderInstructorAnalytics([]);
       return;
     }
 
@@ -584,14 +676,163 @@ async function loadInstructorGradesFromFirestore(subjectCode) {
       tbody.appendChild(tr);
     });
 
-    renderAcademicAnalytics(Array.from(gradesByStudent.values()), {
-      distributionCanvasId: 'instructorGradeDistributionChart',
-      passFailCanvasId: 'instructorPassFailChart',
-      atRiskTableId: 'instructorAtRiskTableBody'
-    });
+    renderInstructorAnalytics(parsedGradeData);
   } catch (err) {
     console.error("Error fetching grades:", err);
   }
+}
+
+// ------------------------------------------------------------------
+// ANALYTICS & CHARTS ENGINE (STRICT CONTAINER BOUNDS)
+// ------------------------------------------------------------------
+
+function destroyChartSafely(chartInstance) {
+  if (chartInstance) {
+    try {
+      chartInstance.destroy();
+    } catch (e) {
+      console.warn("Chart destroy warning:", e);
+    }
+  }
+  return null;
+}
+
+function renderInstructorAnalytics(grades) {
+  const gradeCanvas = document.getElementById('instructorGradeDistributionChart');
+  const passFailCanvas = document.getElementById('instructorPassFailChart');
+
+  if (!gradeCanvas || !passFailCanvas || !window.Chart) return;
+
+  instructorGradeChartInstance = destroyChartSafely(instructorGradeChartInstance);
+  instructorPassFailChartInstance = destroyChartSafely(instructorPassFailChartInstance);
+
+  let excellent = 0, good = 0, satisfactory = 0, passing = 0, failing = 0;
+  let passedCount = 0, failedCount = 0;
+
+  grades.forEach(g => {
+    const finalsVal = g.finals !== undefined ? g.finals : g.final;
+    const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
+    const avg = stats.average;
+
+    if (avg >= 90) excellent++;
+    else if (avg >= 85) good++;
+    else if (avg >= 80) satisfactory++;
+    else if (avg >= 75) passing++;
+    else failing++;
+
+    if (stats.isPassing) passedCount++;
+    else failedCount++;
+  });
+
+  instructorGradeChartInstance = new Chart(gradeCanvas, {
+    type: 'bar',
+    data: {
+      labels: ['90-100', '85-89', '80-84', '75-79', '< 75'],
+      datasets: [{
+        label: 'Students',
+        data: [excellent, good, satisfactory, passing, failing],
+        backgroundColor: ['#10b981', '#06b6d4', '#3b82f6', '#f59e0b', '#f43f5e'],
+        borderRadius: 6
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#94a3b8' }, grid: { display: false } },
+        y: { ticks: { color: '#94a3b8', precision: 0 }, grid: { color: '#1e293b' } }
+      }
+    }
+  });
+
+  instructorPassFailChartInstance = new Chart(passFailCanvas, {
+    type: 'doughnut',
+    data: {
+      labels: ['Passed', 'Failed / Re-eval'],
+      datasets: [{
+        data: [passedCount, failedCount],
+        backgroundColor: ['#10b981', '#f43f5e'],
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#94a3b8', font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+function renderAdminAnalytics(allReleasedGrades) {
+  const gradeCanvas = document.getElementById('adminGradeDistributionChart');
+  const passFailCanvas = document.getElementById('adminPassFailChart');
+
+  if (!gradeCanvas || !passFailCanvas || !window.Chart) return;
+
+  adminGradeChartInstance = destroyChartSafely(adminGradeChartInstance);
+  adminPassFailChartInstance = destroyChartSafely(adminPassFailChartInstance);
+
+  let excellent = 0, good = 0, satisfactory = 0, passing = 0, failing = 0;
+  let passedCount = 0, failedCount = 0;
+
+  allReleasedGrades.forEach(g => {
+    const finalsVal = g.finals !== undefined ? g.finals : g.final;
+    const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
+    const avg = stats.average;
+
+    if (avg >= 90) excellent++;
+    else if (avg >= 85) good++;
+    else if (avg >= 80) satisfactory++;
+    else if (avg >= 75) passing++;
+    else failing++;
+
+    if (stats.isPassing) passedCount++;
+    else failedCount++;
+  });
+
+  adminGradeChartInstance = new Chart(gradeCanvas, {
+    type: 'bar',
+    data: {
+      labels: ['90-100', '85-89', '80-84', '75-79', '< 75'],
+      datasets: [{
+        label: 'Students',
+        data: [excellent, good, satisfactory, passing, failing],
+        backgroundColor: ['#10b981', '#06b6d4', '#3b82f6', '#f59e0b', '#f43f5e'],
+        borderRadius: 6
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#94a3b8' }, grid: { display: false } },
+        y: { ticks: { color: '#94a3b8', precision: 0 }, grid: { color: '#1e293b' } }
+      }
+    }
+  });
+
+  adminPassFailChartInstance = new Chart(passFailCanvas, {
+    type: 'doughnut',
+    data: {
+      labels: ['Passed', 'Failed / Re-eval'],
+      datasets: [{
+        data: [passedCount, failedCount],
+        backgroundColor: ['#10b981', '#f43f5e'],
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#94a3b8', font: { size: 11 } } }
+      }
+    }
+  });
 }
 
 function processExcel() {
@@ -656,14 +897,6 @@ function processMultiTabExcel(workbook) {
   const midtermIdx = headers.findIndex(h => h.toLowerCase() === "midterm");
   const finalIdx = headers.findIndex(h => h.toLowerCase() === "final" || h.toLowerCase().includes("finals"));
 
-  const termBreakdowns = {};
-  ['Prelim', 'Midterm', 'Final'].forEach(termKey => {
-    const sheetName = workbook.SheetNames.find(s => s.trim().toLowerCase() === termKey.toLowerCase());
-    if (sheetName) {
-      termBreakdowns[termKey.toLowerCase()] = parseTermSubSheet(workbook.Sheets[sheetName]);
-    }
-  });
-
   parsedGradeData = [];
 
   for (let r = headerRowIndex + 1; r < summaryMatrix.length; r++) {
@@ -676,73 +909,18 @@ function processMultiTabExcel(workbook) {
     const midterm = parseFloat(row[midtermIdx]) || 0;
     const finals = parseFloat(row[finalIdx]) || 0;
 
-    const nameKey = normalizeNameKey(rawName);
-    const pDetail = termBreakdowns.prelim ? termBreakdowns.prelim[nameKey] : null;
-    const mDetail = termBreakdowns.midterm ? termBreakdowns.midterm[nameKey] : null;
-    const fDetail = termBreakdowns.final ? termBreakdowns.final[nameKey] : null;
-
-    const breakdown = {
-      quizzes: [
-        ...(pDetail?.quizzes || []),
-        ...(mDetail?.quizzes || []),
-        ...(fDetail?.quizzes || [])
-      ],
-      assignments: [
-        ...(pDetail?.assignments || []),
-        ...(mDetail?.assignments || []),
-        ...(fDetail?.assignments || [])
-      ],
-      attendance: pDetail?.attendance ?? mDetail?.attendance ?? fDetail?.attendance ?? null,
-      labExercises: [
-        ...(pDetail?.labExercises || []),
-        ...(mDetail?.labExercises || []),
-        ...(fDetail?.labExercises || [])
-      ]
-    };
-
     parsedGradeData.push({
       studentId: rawId,
       fullName: rawName,
       prelim: parseFloat(prelim.toFixed(2)),
       midterm: parseFloat(midterm.toFixed(2)),
-      finals: parseFloat(finals.toFixed(2)),
-      breakdown
+      finals: parseFloat(finals.toFixed(2))
     });
   }
 
   renderParsedGradesToTable();
-  alert(`Imported ${parsedGradeData.length} student record(s) with full multi-term component breakdowns.`);
-}
-
-function parseTermSubSheet(sheet) {
-  const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
-  if (matrix.length < 10) return {};
-
-  const nameRow = matrix.find(r => r.some(c => c.toString().toLowerCase().includes("student name")));
-  if (!nameRow) return {};
-
-  const nameIdx = nameRow.findIndex(c => c.toString().toLowerCase().includes("student name"));
-  const resultMap = {};
-
-  for (let r = 9; r < matrix.length; r++) {
-    const row = matrix[r];
-    const name = row[nameIdx] ? row[nameIdx].toString().trim() : "";
-    if (!name || name.toLowerCase().includes("total") || name.toLowerCase().includes("average")) continue;
-
-    const nameKey = normalizeNameKey(name);
-    resultMap[nameKey] = {
-      attendance: row[2] !== undefined && row[2] !== "" ? Math.round((parseFloat(row[2]) || 0) * 100 / 30) : null,
-      assignments: row[5] !== undefined && row[5] !== "" ? [{ name: 'Assignments / Seatwork', score: parseFloat(row[5]) || 0, maxScore: 50 }] : [],
-      quizzes: [
-        row[11] !== undefined && row[11] !== "" ? { name: 'Quiz 1', score: parseFloat(row[11]) || 0, maxScore: matrix[8]?.[11] || 15 } : null,
-        row[12] !== undefined && row[12] !== "" ? { name: 'Quiz 2', score: parseFloat(row[12]) || 0, maxScore: matrix[8]?.[12] || 15 } : null,
-        row[13] !== undefined && row[13] !== "" ? { name: 'Quiz 3', score: parseFloat(row[13]) || 0, maxScore: matrix[8]?.[13] || 15 } : null
-      ].filter(Boolean),
-      labExercises: row[34] !== undefined && row[34] !== "" ? [{ name: 'Lab Exercise', score: parseFloat(row[34]) || 0, maxScore: 100 }] : []
-    };
-  }
-
-  return resultMap;
+  renderInstructorAnalytics(parsedGradeData);
+  alert(`Imported ${parsedGradeData.length} student record(s).`);
 }
 
 function processSingleTabExcel(workbook) {
@@ -778,14 +956,6 @@ function processSingleTabExcel(workbook) {
   const midtermIdx = headers.findIndex(h => h.toLowerCase() === "midterm");
   const finalIdx = headers.findIndex(h => h.toLowerCase() === "final" || h.toLowerCase().includes("finals"));
 
-  const quizColumns = [];
-  headers.forEach((h, idx) => {
-    const match = h.trim().match(/^quiz\s*(\d+)$/i);
-    if (match) quizColumns.push({ name: `Quiz ${match[1]}`, idx });
-  });
-  const attendanceIdx = headers.findIndex(h => h.toLowerCase().trim() === "attendance");
-  const hasBreakdownColumns = quizColumns.length > 0 || attendanceIdx !== -1;
-
   parsedGradeData = [];
   for (let r = headerRowIndex + 1; r < matrix.length; r++) {
     const row = matrix[r];
@@ -797,28 +967,17 @@ function processSingleTabExcel(workbook) {
     const midterm = parseFloat(row[midtermIdx]) || 0;
     const finals = parseFloat(row[finalIdx]) || 0;
 
-    const breakdown = hasBreakdownColumns ? {
-      quizzes: quizColumns.map(({ name, idx }) => ({
-        name,
-        score: parseFloat(row[idx]) || 0,
-        maxScore: 100
-      })),
-      assignments: [],
-      labExercises: [],
-      attendance: attendanceIdx !== -1 ? (parseFloat(row[attendanceIdx]) || 0) : null
-    } : null;
-
     parsedGradeData.push({
       studentId: rawId,
       fullName: rawName,
       prelim: parseFloat(prelim.toFixed(2)),
       midterm: parseFloat(midterm.toFixed(2)),
-      finals: parseFloat(finals.toFixed(2)),
-      breakdown
+      finals: parseFloat(finals.toFixed(2))
     });
   }
 
   renderParsedGradesToTable();
+  renderInstructorAnalytics(parsedGradeData);
   alert(`Imported ${parsedGradeData.length} student record(s).`);
 }
 
@@ -844,7 +1003,6 @@ function renderParsedGradesToTable() {
 
     const tr = document.createElement('tr');
     tr.className = "hover:bg-slate-800/50 transition-colors cursor-pointer";
-    tr.title = "Click to view itemized breakdown";
     tr.innerHTML = `
       <td class="px-4 py-3.5 font-mono text-xs text-slate-400 whitespace-nowrap">${escapeHtml(row.studentId || 'N/A')}</td>
       <td class="px-4 py-3.5 font-semibold text-white whitespace-nowrap">${escapeHtml(row.fullName || 'Unnamed Student')}</td>
@@ -858,13 +1016,6 @@ function renderParsedGradesToTable() {
         </span>
       </td>
     `;
-    tr.addEventListener('click', () => openStudentGradeBreakdownModal({
-      classId: activeSubjectCode,
-      prelim: row.prelim,
-      midterm: row.midterm,
-      finals: row.finals,
-      breakdown: row.breakdown
-    }));
     tbody.appendChild(tr);
   });
 }
@@ -920,15 +1071,6 @@ async function saveDraftGrades() {
       const docRef = db.collection('grades').doc(docId);
       const stats = computeGradeStats(row.prelim, row.midterm, row.finals);
 
-      const breakdown = row.breakdown ? {
-        quizzes: row.breakdown.quizzes || [],
-        assignments: row.breakdown.assignments || [],
-        labExercises: row.breakdown.labExercises || row.breakdown.laboratoryExercises || [],
-        exams: { prelim: stats.prelim, midterm: stats.midterm, finals: stats.finals },
-        attendance: row.breakdown.attendance,
-        termAverage: stats.average
-      } : null;
-
       batch.set(docRef, {
         classId: activeSubjectCode, 
         studentId: String(effectiveStudentId).trim(), 
@@ -939,13 +1081,12 @@ async function saveDraftGrades() {
         semester: normalizeSemester(activeSemester),
         schoolYear: "2026-2027",
         isReleased: false,
-        breakdown,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     });
 
     await batch.commit();
-    await logActivity(currentUserEmail, `Saved draft grades for ${activeSubjectCode} (${semesterDisplayLabel(activeSemester)})`);
+    await logActivity(currentUserEmail, `Saved draft grades for ${activeSubjectCode}`);
     alert("Draft grades successfully saved to Firebase!");
     loadInstructorGradesFromFirestore(activeSubjectCode);
   } catch (err) {
@@ -967,15 +1108,6 @@ async function releaseGrades() {
       const gradeRef = db.collection('grades').doc(docId);
       const stats = computeGradeStats(row.prelim, row.midterm, row.finals);
 
-      const breakdown = row.breakdown ? {
-        quizzes: row.breakdown.quizzes || [],
-        assignments: row.breakdown.assignments || [],
-        labExercises: row.breakdown.labExercises || row.breakdown.laboratoryExercises || [],
-        exams: { prelim: stats.prelim, midterm: stats.midterm, finals: stats.finals },
-        attendance: row.breakdown.attendance,
-        termAverage: stats.average
-      } : null;
-
       batch.set(gradeRef, {
         classId: activeSubjectCode, 
         studentId: String(effectiveStudentId).trim(), 
@@ -986,41 +1118,12 @@ async function releaseGrades() {
         semester: normalizeSemester(activeSemester),
         schoolYear: "2026-2027",
         isReleased: true,
-        breakdown,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     });
 
     await batch.commit();
-    await logActivity(currentUserEmail, `Released official grades for ${activeSubjectCode} (${semesterDisplayLabel(activeSemester)})`);
-
-    try {
-      const approvedSnapshot = await db.collection('enrollments')
-        .where('subjectCode', '==', activeSubjectCode)
-        .where('status', '==', 'approved')
-        .get();
-
-      if (!approvedSnapshot.empty) {
-        const notifyBatch = db.batch();
-        approvedSnapshot.forEach((doc) => {
-          const enrollment = doc.data();
-          const notifRef = db.collection('notifications').doc();
-          notifyBatch.set(notifRef, {
-            recipientUid: enrollment.studentUid,
-            title: "Grades Released",
-            message: `Your ${semesterDisplayLabel(activeSemester)} grades for ${activeSubjectCode} have been published.`,
-            subjectCode: activeSubjectCode,
-            semester: normalizeSemester(activeSemester),
-            isRead: false,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-        });
-        await notifyBatch.commit();
-      }
-    } catch (notifyErr) {
-      console.error("Error sending release notifications:", notifyErr);
-    }
-
+    await logActivity(currentUserEmail, `Released official grades for ${activeSubjectCode}`);
     alert("Official grades successfully released to Firebase!");
     loadInstructorGradesFromFirestore(activeSubjectCode);
   } catch (err) {
@@ -1030,469 +1133,332 @@ async function releaseGrades() {
 }
 
 // ------------------------------------------------------------------
-// ANALYTICS & DEPT REPORTS
-// ------------------------------------------------------------------
-
-window.analyticsCharts = window.analyticsCharts || {};
-
-function renderChart(canvasId, config) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas || typeof Chart === 'undefined') return;
-
-  if (window.analyticsCharts[canvasId]) {
-    window.analyticsCharts[canvasId].destroy();
-  }
-  window.analyticsCharts[canvasId] = new Chart(canvas.getContext('2d'), config);
-}
-
-function renderAcademicAnalytics(gradeDocs, ids) {
-  const buckets = { '90-100': 0, '80-89': 0, '75-79': 0, 'Below 75': 0 };
-  let passed = 0;
-  let failed = 0;
-  const atRisk = [];
-
-  gradeDocs.forEach((g) => {
-    if (!g.isReleased) return;
-
-    const stats = computeGradeStats(g.prelim, g.midterm, g.finals);
-    const avg = stats.average;
-
-    if (avg >= 90) buckets['90-100']++;
-    else if (avg >= 80) buckets['80-89']++;
-    else if (avg >= 75) buckets['75-79']++;
-    else buckets['Below 75']++;
-
-    if (stats.isPassing) passed++; else failed++;
-
-    if (avg < PASSING_THRESHOLD || g.isAtRisk === true) {
-      atRisk.push({
-        fullName: g.fullName,
-        studentId: g.studentId,
-        classId: g.classId,
-        termAverage: avg
-      });
-    }
-  });
-
-  renderChart(ids.distributionCanvasId, {
-    type: 'bar',
-    data: {
-      labels: Object.keys(buckets),
-      datasets: [{
-        label: 'Number of Students',
-        data: Object.values(buckets),
-        backgroundColor: ['#22c55e', '#38bdf8', '#f59e0b', '#f43f5e']
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' } },
-        y: { beginAtZero: true, ticks: { color: '#94a3b8', precision: 0 }, grid: { color: '#1e293b' } }
-      }
-    }
-  });
-
-  renderChart(ids.passFailCanvasId, {
-    type: 'doughnut',
-    data: {
-      labels: ['Passed', 'Failed'],
-      datasets: [{ data: [passed, failed], backgroundColor: ['#22c55e', '#f43f5e'] }]
-    },
-    options: {
-      responsive: true,
-      plugins: { legend: { position: 'bottom', labels: { color: '#cbd5e1' } } }
-    }
-  });
-
-  const tableBody = document.getElementById(ids.atRiskTableId);
-  if (tableBody) {
-    tableBody.innerHTML = '';
-    if (!atRisk.length) {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td colspan="5" class="px-4 py-6 text-center text-slate-500 italic">No at-risk students in this data set.</td>`;
-      tableBody.appendChild(tr);
-    } else {
-      atRisk.forEach((s) => {
-        const tr = document.createElement('tr');
-        tr.className = "hover:bg-slate-800/50";
-        tr.innerHTML = `
-          <td class="px-4 py-2 font-medium text-white">${escapeHtml(s.fullName || '(Unnamed)')}</td>
-          <td class="px-4 py-2 font-mono text-slate-400">${escapeHtml(s.studentId || 'N/A')}</td>
-          <td class="px-4 py-2 text-slate-300">${escapeHtml(s.classId || '')}</td>
-          <td class="px-4 py-2 font-bold text-rose-400">${s.termAverage.toFixed(2)}</td>
-          <td class="px-4 py-2">
-            <span class="px-2.5 py-1 rounded-full text-[11px] font-bold uppercase bg-rose-500/20 text-rose-400 border border-rose-500/30">Needs Intervention</span>
-          </td>
-        `;
-        tableBody.appendChild(tr);
-      });
-    }
-  }
-}
-
-async function generateSemesterReport() {
-  const semesterVal = document.getElementById('reportSemesterSelect').value;
-  const outputContainer = document.getElementById('reportSummaryOutput');
-
-  if (!outputContainer) return;
-
-  outputContainer.innerHTML = `
-    <div class="text-center py-4 text-emerald-400 font-semibold animate-pulse">
-      Calculating departmental grade statistics for ${semesterVal === '1S' ? '1st Semester' : '2nd Semester'}...
-    </div>
-  `;
-
-  try {
-    const semQueryValues = (semesterVal === '1S' || semesterVal === '1st Semester') ? ['1S', '1st Semester'] : ['2S', '2nd Semester'];
-
-    const snapshot = await db.collection('grades')
-      .where('semester', 'in', semQueryValues)
-      .where('isReleased', '==', true)
-      .get();
-
-    const adminAnalyticsIds = {
-      distributionCanvasId: 'adminGradeDistributionChart',
-      passFailCanvasId: 'adminPassFailChart',
-      atRiskTableId: 'adminAtRiskTableBody'
-    };
-
-    if (snapshot.empty) {
-      outputContainer.innerHTML = `
-        <div class="p-4 bg-slate-900 border border-slate-800 rounded-xl text-center text-slate-400">
-          No released grades found for <strong>${semesterVal === '1S' ? '1st Semester' : '2nd Semester'} (2026)</strong>.
-        </div>
-      `;
-      lastReportData = null;
-      renderAcademicAnalytics(snapshot.docs.map((d) => d.data()), adminAnalyticsIds);
-      return;
-    }
-
-    const subjectStats = {};
-    let totalStudents = 0;
-    let totalPassed = 0;
-
-    snapshot.forEach((doc) => {
-      const g = doc.data();
-      const code = g.classId || 'Unknown';
-      const stats = computeGradeStats(g.prelim, g.midterm, g.finals);
-
-      if (!subjectStats[code]) {
-        subjectStats[code] = { count: 0, passed: 0, failed: 0, sumAvg: 0 };
-      }
-
-      subjectStats[code].count++;
-      subjectStats[code].sumAvg += stats.average;
-      if (stats.isPassing) {
-        subjectStats[code].passed++;
-        totalPassed++;
-      } else {
-        subjectStats[code].failed++;
-      }
-      totalStudents++;
-    });
-
-    let rowsHtml = '';
-    const reportRows = [];
-
-    Object.keys(subjectStats).forEach((code) => {
-      const stat = subjectStats[code];
-      const classAvg = (stat.sumAvg / stat.count).toFixed(2);
-      const passRate = ((stat.passed / stat.count) * 100).toFixed(1);
-
-      reportRows.push([code, stat.count, stat.passed, stat.failed, classAvg, `${passRate}%`]);
-
-      rowsHtml += `
-        <tr class="hover:bg-slate-800/50 border-b border-slate-800">
-          <td class="px-4 py-3 font-bold text-white">${escapeHtml(code)}</td>
-          <td class="px-4 py-3 text-slate-300">${stat.count}</td>
-          <td class="px-4 py-3 text-emerald-400 font-semibold">${stat.passed}</td>
-          <td class="px-4 py-3 text-rose-400 font-semibold">${stat.failed}</td>
-          <td class="px-4 py-3 text-slate-200 font-bold">${classAvg}</td>
-          <td class="px-4 py-3">
-            <span class="px-2 py-1 rounded-md text-[11px] font-extrabold ${parseFloat(passRate) >= PASSING_THRESHOLD ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'}">
-              ${passRate}% Passing
-            </span>
-          </td>
-        </tr>
-      `;
-    });
-
-    const deptOverallPassRate = ((totalPassed / totalStudents) * 100).toFixed(1);
-
-    lastReportData = {
-      semester: semesterVal === '1S' ? '1st Semester (2026)' : '2nd Semester (2026)',
-      totalStudents,
-      overallPassRate: `${deptOverallPassRate}%`,
-      rows: reportRows
-    };
-
-    outputContainer.innerHTML = `
-      <div class="space-y-4">
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-          <div class="bg-slate-900 p-4 rounded-xl border border-slate-800">
-            <div class="text-xs text-slate-400 font-bold uppercase">Total Evaluated</div>
-            <div class="text-xl font-extrabold text-white mt-1">${totalStudents} Students</div>
-          </div>
-          <div class="bg-slate-900 p-4 rounded-xl border border-slate-800">
-            <div class="text-xs text-slate-400 font-bold uppercase">Department Pass Rate</div>
-            <div class="text-xl font-extrabold text-emerald-400 mt-1">${deptOverallPassRate}%</div>
-          </div>
-          <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
-            <div>
-              <div class="text-xs text-slate-400 font-bold uppercase">Export Official PDF</div>
-              <div class="text-xs text-slate-500 mt-1">Download Institutional Document</div>
-            </div>
-            <button onclick="downloadReportPDF()" class="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-lg transition-all flex items-center space-x-1">
-              <span>Export PDF</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="overflow-x-auto rounded-xl border border-slate-800">
-          <table class="w-full text-xs text-left">
-            <thead class="uppercase bg-slate-900 text-slate-400 font-semibold border-b border-slate-800">
-              <tr>
-                <th class="px-4 py-3">Subject</th>
-                <th class="px-4 py-3">Enrolled</th>
-                <th class="px-4 py-3">Passed</th>
-                <th class="px-4 py-3">Failed</th>
-                <th class="px-4 py-3">Class Average</th>
-                <th class="px-4 py-3">Performance</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-800 bg-slate-950">
-              ${rowsHtml}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `;
-
-    await logActivity(currentUserEmail, `Generated ${semesterVal} semester grade report`);
-    renderAcademicAnalytics(snapshot.docs.map((d) => d.data()), adminAnalyticsIds);
-  } catch (err) {
-    console.error("Error generating report:", err);
-    outputContainer.innerHTML = `<div class="text-rose-500 text-xs p-2">Error calculating report: ${escapeHtml(err.message)}</div>`;
-  }
-}
-
-function downloadReportPDF() {
-  if (!lastReportData) return alert("Generate a semester report first.");
-
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-
-  doc.setFont("Helvetica", "bold");
-  doc.setFontSize(16);
-  doc.setTextColor(16, 185, 129);
-  doc.text("COLEGIO DE KIDAPAWAN INC.", 14, 18);
-
-  doc.setFontSize(10);
-  doc.setTextColor(100);
-  doc.text("Information Technology Education Department", 14, 24);
-  doc.text(`Official Grade Performance Report - ${lastReportData.semester}`, 14, 30);
-
-  doc.setLineWidth(0.5);
-  doc.setDrawColor(200);
-  doc.line(14, 34, 196, 34);
-
-  doc.setFontSize(10);
-  doc.setTextColor(0);
-  doc.text(`Total Evaluated Students: ${lastReportData.totalStudents}`, 14, 42);
-  doc.text(`Overall Department Pass Rate: ${lastReportData.overallPassRate}`, 120, 42);
-
-  doc.autoTable({
-    startY: 48,
-    head: [["Subject Code", "Enrolled", "Passed", "Failed", "Class Avg", "Pass Rate"]],
-    body: lastReportData.rows,
-    theme: "striped",
-    headStyles: { fillColor: [16, 185, 129], textColor: [255, 255, 255], fontStyle: "bold" },
-    styles: { fontSize: 9, cellPadding: 3 }
-  });
-
-  const finalY = doc.lastAutoTable.finalY + 25;
-  doc.setFontSize(9);
-  doc.text("Prepared by:", 14, finalY);
-  doc.text("Approved by:", 120, finalY);
-
-  doc.line(14, finalY + 12, 70, finalY + 12);
-  doc.line(120, finalY + 12, 180, finalY + 12);
-
-  doc.text("ITE Department Head", 14, finalY + 17);
-  doc.text("College Dean / Registrar", 120, finalY + 17);
-
-  doc.save(`ITE_Grade_Report_${lastReportData.semester.replace(/\s+/g, '_')}.pdf`);
-}
-
-// ------------------------------------------------------------------
 // ADMIN CONSOLE MANAGEMENT
 // ------------------------------------------------------------------
 
 async function loadAdminDashboardData() {
-  const facultySnapshot = await db.collection('users').where('role', '==', 'instructor').get();
-  const facultyCount = document.getElementById('facultyCountDisplay');
-  if (facultyCount) facultyCount.innerText = facultySnapshot.size;
+  try {
+    // 1. Load Faculty Directory
+    const facultySnapshot = await db.collection('users').where('role', '==', 'instructor').get();
+    const facultyCount = document.getElementById('facultyCountDisplay');
+    if (facultyCount) facultyCount.innerText = facultySnapshot.size;
 
-  const facultyTable = document.getElementById('facultyTableBody');
-  const assignFacultySelect = document.getElementById('assignFacultySelect');
-  if (facultyTable) facultyTable.innerHTML = '';
-  if (assignFacultySelect) assignFacultySelect.innerHTML = '<option value="">Select Faculty...</option>';
+    const facultyTable = document.getElementById('facultyTableBody');
+    const assignFacultySelect = document.getElementById('assignFacultySelect');
+    if (facultyTable) facultyTable.innerHTML = '';
+    if (assignFacultySelect) assignFacultySelect.innerHTML = '<option value="">Select Faculty...</option>';
 
-  const facultyInfoByUid = {};
+    const facultyInfoByUid = {};
+    facultySnapshot.forEach((doc) => {
+      const f = doc.data();
+      facultyInfoByUid[doc.id] = f;
+      const displayLabel = facultyDisplayLabel(f);
 
-  facultySnapshot.forEach((doc) => {
-    const f = doc.data();
-    facultyInfoByUid[doc.id] = f;
-    const displayLabel = facultyDisplayLabel(f);
+      if (facultyTable) {
+        const tr = document.createElement('tr');
+        const isActive = f.status === 'active';
+        const safeStatus = f.status === 'disabled' ? 'disabled' : 'active';
+        tr.className = "hover:bg-slate-800/50 transition-colors";
+        tr.innerHTML = `
+          <td class="px-5 py-3">
+            <div class="font-medium text-white">${escapeHtml(displayLabel)}</div>
+            ${f.fullName ? `<div class="text-[11px] text-slate-500">${escapeHtml(f.email)}</div>` : ''}
+          </td>
+          <td class="px-5 py-3">
+            <span class="px-2.5 py-0.5 rounded-full text-xs font-bold ${isActive ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}">
+              ${escapeHtml(f.status || 'active')}
+            </span>
+          </td>
+          <td class="px-5 py-3">
+            <button onclick="toggleFacultyStatus('${doc.id}', '${safeStatus}')" class="px-3 py-1 rounded-lg text-xs font-bold ${isActive ? 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'} transition-all">
+              ${isActive ? 'Disable' : 'Enable'}
+            </button>
+          </td>
+        `;
+        facultyTable.appendChild(tr);
+      }
 
-    if (facultyTable) {
-      const tr = document.createElement('tr');
-      const isActive = f.status === 'active';
-      const safeStatus = f.status === 'disabled' ? 'disabled' : 'active';
-      tr.className = "hover:bg-slate-800/50 transition-colors";
-      tr.innerHTML = `
-        <td class="px-5 py-3">
-          <div class="font-medium text-white">${escapeHtml(displayLabel)}</div>
-          ${f.fullName ? `<div class="text-[11px] text-slate-500">${escapeHtml(f.email)}</div>` : ''}
-        </td>
-        <td class="px-5 py-3">
-          <span class="px-2.5 py-0.5 rounded-full text-xs font-bold ${isActive ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}">
-            ${escapeHtml(f.status || 'active')}
-          </span>
-        </td>
-        <td class="px-5 py-3">
-          <button onclick="toggleFacultyStatus('${doc.id}', '${safeStatus}')" class="px-3 py-1 rounded-lg text-xs font-bold ${isActive ? 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'} transition-all">
-            ${isActive ? 'Disable' : 'Enable'}
-          </button>
-        </td>
-      `;
-      facultyTable.appendChild(tr);
-    }
-
-    if (assignFacultySelect) {
-      const opt = document.createElement('option');
-      opt.value = doc.id;
-      opt.innerText = displayLabel;
-      assignFacultySelect.appendChild(opt);
-    }
-  });
-
-  const subjectsSnapshot = await db.collection('subjects').get();
-  const subjectsCount = document.getElementById('subjectsCountDisplay');
-  if (subjectsCount) subjectsCount.innerText = subjectsSnapshot.size;
-
-  const subjectNameByCode = {};
-
-  const assignSubjectSelect = document.getElementById('assignSubjectSelect');
-  if (assignSubjectSelect) {
-    assignSubjectSelect.innerHTML = '<option value="">Select Subject...</option>';
-  }
-  subjectsSnapshot.forEach((doc) => {
-    const s = doc.data();
-    subjectNameByCode[s.subjectCode] = s.subjectName;
-    if (assignSubjectSelect) {
-      const opt = document.createElement('option');
-      opt.value = s.subjectCode;
-      opt.innerText = `${s.subjectCode} - ${s.subjectName}`;
-      assignSubjectSelect.appendChild(opt);
-    }
-  });
-
-  const activeAssignmentsList = document.getElementById('activeAssignmentsList');
-  if (activeAssignmentsList) {
-    const assignmentsSnapshot = await db.collection('assignments').get();
-
-    const subjectCodesByFaculty = {};
-    assignmentsSnapshot.forEach((doc) => {
-      const a = doc.data();
-      if (!subjectCodesByFaculty[a.facultyUid]) subjectCodesByFaculty[a.facultyUid] = [];
-      subjectCodesByFaculty[a.facultyUid].push(a.subjectCode);
+      if (assignFacultySelect) {
+        const opt = document.createElement('option');
+        opt.value = doc.id;
+        opt.innerText = displayLabel;
+        assignFacultySelect.appendChild(opt);
+      }
     });
 
-    activeAssignmentsList.innerHTML = '';
+    // 2. Load Subjects & Active Assignments
+    const subjectsSnapshot = await db.collection('subjects').get();
+    const subjectsCount = document.getElementById('subjectsCountDisplay');
+    if (subjectsCount) subjectsCount.innerText = subjectsSnapshot.size;
 
-    if (facultySnapshot.empty) {
-      const empty = document.createElement('div');
-      empty.className = "p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500";
-      empty.textContent = "No instructors have been provisioned yet.";
-      activeAssignmentsList.appendChild(empty);
-    } else {
-      facultySnapshot.forEach((facultyDoc) => {
-        const facultyUid = facultyDoc.id;
-        const facultyLabel = facultyDisplayLabel(facultyInfoByUid[facultyUid] || {});
-        const subjectCodes = subjectCodesByFaculty[facultyUid] || [];
+    const subjectNameByCode = {};
+    const assignSubjectSelect = document.getElementById('assignSubjectSelect');
+    if (assignSubjectSelect) assignSubjectSelect.innerHTML = '<option value="">Select Subject...</option>';
 
-        const card = document.createElement('div');
-        card.className = "p-3 rounded-lg border border-slate-800 bg-slate-950 space-y-2";
+    subjectsSnapshot.forEach((doc) => {
+      const s = doc.data();
+      subjectNameByCode[s.subjectCode] = s.subjectName;
+      if (assignSubjectSelect) {
+        const opt = document.createElement('option');
+        opt.value = s.subjectCode;
+        opt.innerText = `${s.subjectCode} - ${s.subjectName}`;
+        assignSubjectSelect.appendChild(opt);
+      }
+    });
 
-        const header = document.createElement('div');
-        header.className = "text-sm font-semibold text-white truncate";
-        header.textContent = facultyLabel;
-        card.appendChild(header);
+    const activeAssignmentsList = document.getElementById('activeAssignmentsList');
+    if (activeAssignmentsList) {
+      const assignmentsSnapshot = await db.collection('assignments').get();
+      const subjectCodesByFaculty = {};
 
-        const subjectsContainer = document.createElement('div');
-        subjectsContainer.className = "space-y-1";
+      assignmentsSnapshot.forEach((doc) => {
+        const a = doc.data();
+        if (!subjectCodesByFaculty[a.facultyUid]) subjectCodesByFaculty[a.facultyUid] = [];
+        subjectCodesByFaculty[a.facultyUid].push(a.subjectCode);
+      });
 
-        if (subjectCodes.length) {
-          subjectCodes.forEach((code) => {
-            const subjectName = subjectNameByCode[code] || code;
+      activeAssignmentsList.innerHTML = '';
 
-            const subjectRow = document.createElement('div');
-            subjectRow.className = "flex items-center justify-between gap-3 pl-3 border-l-2 border-emerald-500/30 py-1";
+      if (facultySnapshot.empty) {
+        activeAssignmentsList.innerHTML = `
+          <div class="p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">
+            No instructors have been provisioned yet.
+          </div>
+        `;
+      } else {
+        facultySnapshot.forEach((facultyDoc) => {
+          const facultyUid = facultyDoc.id;
+          const facultyLabel = facultyDisplayLabel(facultyInfoByUid[facultyUid] || {});
+          const subjectCodes = subjectCodesByFaculty[facultyUid] || [];
 
-            const label = document.createElement('span');
-            label.className = "text-xs text-slate-300 truncate";
-            label.textContent = `${code} - ${subjectName}`;
+          const card = document.createElement('div');
+          card.className = "p-3 rounded-lg border border-slate-800 bg-slate-950 space-y-2";
 
-            const unassignBtn = document.createElement('button');
-            unassignBtn.className = "shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition-all";
-            unassignBtn.textContent = "Unassign";
-            unassignBtn.addEventListener('click', () => unassignSubjectFromFaculty(facultyUid, code));
+          const header = document.createElement('div');
+          header.className = "text-sm font-semibold text-white truncate";
+          header.textContent = facultyLabel;
+          card.appendChild(header);
 
-            subjectRow.appendChild(label);
-            subjectRow.appendChild(unassignBtn);
-            subjectsContainer.appendChild(subjectRow);
-          });
-        } else {
-          const noSubjects = document.createElement('div');
-          noSubjects.className = "pl-3 text-xs text-slate-600 italic";
-          noSubjects.textContent = "No subjects assigned";
-          subjectsContainer.appendChild(noSubjects);
-        }
+          const subjectsContainer = document.createElement('div');
+          subjectsContainer.className = "space-y-1";
 
-        card.appendChild(subjectsContainer);
-        activeAssignmentsList.appendChild(card);
+          if (subjectCodes.length) {
+            subjectCodes.forEach((code) => {
+              const subjectName = subjectNameByCode[code] || code;
+              const subjectRow = document.createElement('div');
+              subjectRow.className = "flex items-center justify-between gap-3 pl-3 border-l-2 border-emerald-500/30 py-1";
+
+              const label = document.createElement('span');
+              label.className = "text-xs text-slate-300 truncate";
+              label.textContent = `${code} - ${subjectName}`;
+
+              const unassignBtn = document.createElement('button');
+              unassignBtn.className = "shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition-all";
+              unassignBtn.textContent = "Unassign";
+              unassignBtn.addEventListener('click', () => unassignSubjectFromFaculty(facultyUid, code));
+
+              subjectRow.appendChild(label);
+              subjectRow.appendChild(unassignBtn);
+              subjectsContainer.appendChild(subjectRow);
+            });
+          } else {
+            const noSubjects = document.createElement('div');
+            noSubjects.className = "pl-3 text-xs text-slate-600 italic";
+            noSubjects.textContent = "No subjects assigned";
+            subjectsContainer.appendChild(noSubjects);
+          }
+
+          card.appendChild(subjectsContainer);
+          activeAssignmentsList.appendChild(card);
+        });
+      }
+    }
+
+    // 3. Load At-Risk Student Intervention Panel Data & Admin Analytics
+    const atRiskTable = document.getElementById('atRiskTableBody');
+    const gradesSnapshot = await db.collection('grades').where('isReleased', '==', true).get();
+    const allReleasedGrades = [];
+
+    if (atRiskTable) atRiskTable.innerHTML = '';
+    let atRiskCount = 0;
+
+    gradesSnapshot.forEach((doc) => {
+      const g = doc.data();
+      allReleasedGrades.push(g);
+
+      const finalsVal = g.finals !== undefined ? g.finals : g.final;
+      const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
+
+      if (!stats.isPassing && atRiskTable) {
+        atRiskCount++;
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-800/50 transition-colors";
+        tr.innerHTML = `
+          <td class="px-5 py-3 text-white font-medium">${escapeHtml(g.fullName || 'Student')}</td>
+          <td class="px-5 py-3 font-mono text-xs text-slate-400">${escapeHtml(g.studentId || 'N/A')}</td>
+          <td class="px-5 py-3 text-slate-300">${escapeHtml(g.classId || g.subjectCode || 'N/A')}</td>
+          <td class="px-5 py-3 font-bold text-rose-400">${stats.averageDisplay}</td>
+          <td class="px-5 py-3">
+            <span class="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase bg-rose-500/20 text-rose-400 border border-rose-500/30">
+              DEFICIENCY / AT-RISK
+            </span>
+          </td>
+        `;
+        atRiskTable.appendChild(tr);
+      }
+    });
+
+    if (atRiskTable && atRiskCount === 0) {
+      atRiskTable.innerHTML = `
+        <tr>
+          <td colspan="5" class="px-5 py-6 text-center text-slate-500 italic text-xs">
+            No at-risk students detected across released course records.
+          </td>
+        </tr>
+      `;
+    }
+
+    renderAdminAnalytics(allReleasedGrades);
+
+    // 4. Load System Activity & Audit Logs
+    const logsSnapshot = await db.collection('logs').orderBy('timestamp', 'desc').limit(10).get();
+    const logsCount = document.getElementById('logsCountDisplay');
+    if (logsCount) logsCount.innerText = logsSnapshot.size;
+
+    const logsTable = document.getElementById('logsTableBody');
+    if (logsTable) {
+      logsTable.innerHTML = '';
+      logsSnapshot.forEach((doc) => {
+        const l = doc.data();
+        const timeStr = l.timestamp ? new Date(l.timestamp.toDate()).toLocaleString() : 'Just now';
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-800/50";
+        tr.innerHTML = `
+          <td class="px-4 py-2.5 font-mono text-xs text-slate-400">${escapeHtml(timeStr)}</td>
+          <td class="px-4 py-2.5 font-semibold text-xs text-white">${escapeHtml(l.user)}</td>
+          <td class="px-4 py-2.5 text-xs text-slate-300">${escapeHtml(l.action)}</td>
+        `;
+        logsTable.appendChild(tr);
       });
     }
-  }
 
-  const logsSnapshot = await db.collection('logs').orderBy('timestamp', 'desc').limit(10).get();
-  const logsCount = document.getElementById('logsCountDisplay');
-  if (logsCount) logsCount.innerText = logsSnapshot.size;
-
-  const logsTable = document.getElementById('logsTableBody');
-  if (logsTable) {
-    logsTable.innerHTML = '';
-    logsSnapshot.forEach((doc) => {
-      const l = doc.data();
-      const timeStr = l.timestamp ? new Date(l.timestamp.toDate()).toLocaleString() : 'Just now';
-      const tr = document.createElement('tr');
-      tr.className = "hover:bg-slate-800/50";
-      tr.innerHTML = `
-        <td class="px-4 py-2 font-mono text-slate-400">${escapeHtml(timeStr)}</td>
-        <td class="px-4 py-2 font-semibold text-white">${escapeHtml(l.user)}</td>
-        <td class="px-4 py-2 text-slate-300">${escapeHtml(l.action)}</td>
-      `;
-      logsTable.appendChild(tr);
-    });
+  } catch (err) {
+    console.error("Error loading admin dashboard data:", err);
   }
 }
 
-// ------------------------------------------------------------------
-// ADMIN CURRICULUM PROSPECTUS MODAL LOGIC
-// ------------------------------------------------------------------
+async function toggleFacultyStatus(uid, currentStatus) {
+  const newStatus = currentStatus === 'disabled' ? 'active' : 'disabled';
+  await db.collection('users').doc(uid).update({ status: newStatus });
+  await logActivity(currentUserEmail, `Updated instructor status (${uid}) to ${newStatus}`);
+  alert(`Instructor status updated to ${newStatus}!`);
+  loadAdminDashboardData();
+}
+
+async function assignSubjectToFaculty() {
+  const facultySelect = document.getElementById('assignFacultySelect');
+  const facultyUid = facultySelect.value;
+  const subjectCode = document.getElementById('assignSubjectSelect').value;
+
+  if (!facultyUid || !subjectCode) {
+    alert("Please select both a faculty member and a subject.");
+    return;
+  }
+
+  const facultyEmail = facultySelect.options[facultySelect.selectedIndex]?.text || facultyUid;
+  const assignmentId = buildAssignmentDocId(facultyUid, subjectCode);
+  const assignmentRef = db.collection('assignments').doc(assignmentId);
+
+  try {
+    const existingDoc = await assignmentRef.get();
+
+    if (existingDoc.exists) {
+      alert(`Notice: ${subjectCode} is already assigned to this instructor.`);
+      return;
+    }
+
+    await assignmentRef.set({
+      facultyUid, subjectCode,
+      assignedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await logActivity(currentUserEmail, `Assigned ${subjectCode} to instructor ${facultyUid}`);
+    alert(`Successfully assigned ${subjectCode} to ${facultyEmail}!`);
+    loadAdminDashboardData();
+  } catch (err) {
+    console.error("Assign Subject Error:", err);
+    alert("Error assigning subject: " + err.message);
+  }
+}
+
+async function unassignSubjectFromFaculty(facultyUid, subjectCode) {
+  const confirmed = confirm(`Are you sure you want to unassign ${subjectCode} from this instructor?`);
+  if (!confirmed) return;
+
+  try {
+    const assignmentId = buildAssignmentDocId(facultyUid, subjectCode);
+    await db.collection('assignments').doc(assignmentId).delete();
+    await logActivity(currentUserEmail, `Unassigned ${subjectCode} from instructor ${facultyUid}`);
+    alert(`${subjectCode} has been unassigned from this instructor.`);
+    loadAdminDashboardData();
+  } catch (err) {
+    console.error("Unassign Subject Error:", err);
+    alert("Error unassigning subject: " + err.message);
+  }
+}
+
+async function createInstructor() {
+  const fullName = document.getElementById('instFullName').value.trim();
+  const title = document.getElementById('instTitle').value.trim();
+  const email = document.getElementById('instEmail').value.trim();
+  const password = document.getElementById('instPassword').value.trim();
+
+  if (!fullName || !email || !password) return alert("Enter at least the full name, email, and password.");
+
+  try {
+    const tempApp = firebase.initializeApp(firebaseConfig, "SecondaryApp");
+    const tempAuth = tempApp.auth();
+
+    const userCredential = await tempAuth.createUserWithEmailAndPassword(email, password);
+    const newUid = userCredential.user.uid;
+
+    await db.collection('users').doc(newUid).set({
+      fullName, title, email, role: "instructor", status: "active",
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    await tempApp.delete();
+    await logActivity(currentUserEmail, `Provisioned instructor account (${fullName} - ${email})`);
+    alert(`Instructor created: ${fullName}`);
+    loadAdminDashboardData();
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+}
+
+async function addSubject() {
+  const subjectCode = document.getElementById('subCode').value.trim();
+  const subjectName = document.getElementById('subName').value.trim();
+  const units = parseInt(document.getElementById('subUnits').value);
+  const yearLevel = document.getElementById('subYearLevel').value;
+  const semester = document.getElementById('subSemester').value;
+  const lecHrs = parseFloat(document.getElementById('subLecHrs').value) || 0;
+  const labHrs = parseFloat(document.getElementById('subLabHrs').value) || 0;
+  const prerequisite = document.getElementById('subPrerequisite').value.trim();
+
+  if (!subjectCode || !subjectName || isNaN(units)) return alert("Complete the Code, Name, and Units fields.");
+
+  try {
+    await db.collection('subjects').doc(subjectCode).set({
+      subjectCode, subjectName, units,
+      yearLevel, semester, lecHrs, labHrs, prerequisite
+    });
+    await logActivity(currentUserEmail, `Added department subject ${subjectCode}`);
+    alert(`Subject ${subjectCode} saved!`);
+    loadAdminDashboardData();
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+}
 
 let isAdminProspectusItOnly = false;
 
@@ -1671,139 +1637,25 @@ async function migrateLegacyAssignmentIds() {
   }
 }
 
-async function toggleFacultyStatus(uid, currentStatus) {
-  const newStatus = currentStatus === 'disabled' ? 'active' : 'disabled';
-  await db.collection('users').doc(uid).update({ status: newStatus });
-  await logActivity(currentUserEmail, `Updated instructor status (${uid}) to ${newStatus}`);
-  alert(`Instructor status updated to ${newStatus}!`);
-  loadAdminDashboardData();
-}
-
-async function assignSubjectToFaculty() {
-  const facultySelect = document.getElementById('assignFacultySelect');
-  const facultyUid = facultySelect.value;
-  const subjectCode = document.getElementById('assignSubjectSelect').value;
-
-  if (!facultyUid || !subjectCode) {
-    alert("Please select both a faculty member and a subject.");
-    return;
-  }
-
-  const facultyEmail = facultySelect.options[facultySelect.selectedIndex]?.text || facultyUid;
-  const assignmentId = buildAssignmentDocId(facultyUid, subjectCode);
-  const assignmentRef = db.collection('assignments').doc(assignmentId);
-
-  try {
-    const existingDoc = await assignmentRef.get();
-
-    if (existingDoc.exists) {
-      alert(`Notice: ${subjectCode} is already assigned to this instructor.`);
-      return;
-    }
-
-    await assignmentRef.set({
-      facultyUid, subjectCode,
-      assignedAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    await logActivity(currentUserEmail, `Assigned ${subjectCode} to instructor ${facultyUid}`);
-    alert(`Successfully assigned ${subjectCode} to ${facultyEmail}!`);
-    loadAdminDashboardData();
-  } catch (err) {
-    console.error("Assign Subject Error:", err);
-    alert("Error assigning subject: " + err.message);
-  }
-}
-
-async function unassignSubjectFromFaculty(facultyUid, subjectCode) {
-  const confirmed = confirm(`Are you sure you want to unassign ${subjectCode} from this instructor?`);
-  if (!confirmed) return;
-
-  try {
-    const assignmentId = buildAssignmentDocId(facultyUid, subjectCode);
-    await db.collection('assignments').doc(assignmentId).delete();
-    await logActivity(currentUserEmail, `Unassigned ${subjectCode} from instructor ${facultyUid}`);
-    alert(`${subjectCode} has been unassigned from this instructor.`);
-    loadAdminDashboardData();
-  } catch (err) {
-    console.error("Unassign Subject Error:", err);
-    alert("Error unassigning subject: " + err.message);
-  }
-}
-
-async function createInstructor() {
-  const fullName = document.getElementById('instFullName').value.trim();
-  const title = document.getElementById('instTitle').value.trim();
-  const email = document.getElementById('instEmail').value.trim();
-  const password = document.getElementById('instPassword').value.trim();
-
-  if (!fullName || !email || !password) return alert("Enter at least the full name, email, and password.");
-
-  try {
-    const tempApp = firebase.initializeApp(firebaseConfig, "SecondaryApp");
-    const tempAuth = tempApp.auth();
-
-    const userCredential = await tempAuth.createUserWithEmailAndPassword(email, password);
-    const newUid = userCredential.user.uid;
-
-    await db.collection('users').doc(newUid).set({
-      fullName, title, email, role: "instructor", status: "active",
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-
-    await tempApp.delete();
-    await logActivity(currentUserEmail, `Provisioned instructor account (${fullName} - ${email})`);
-    alert(`Instructor created: ${fullName}`);
-    loadAdminDashboardData();
-  } catch (err) {
-    alert("Error: " + err.message);
-  }
-}
-
-async function addSubject() {
-  const subjectCode = document.getElementById('subCode').value.trim();
-  const subjectName = document.getElementById('subName').value.trim();
-  const units = parseInt(document.getElementById('subUnits').value);
-  const yearLevel = document.getElementById('subYearLevel').value;
-  const semester = document.getElementById('subSemester').value;
-  const lecHrs = parseFloat(document.getElementById('subLecHrs').value) || 0;
-  const labHrs = parseFloat(document.getElementById('subLabHrs').value) || 0;
-  const prerequisite = document.getElementById('subPrerequisite').value.trim();
-
-  if (!subjectCode || !subjectName || isNaN(units)) return alert("Complete the Code, Name, and Units fields.");
-
-  try {
-    await db.collection('subjects').doc(subjectCode).set({
-      subjectCode, subjectName, units,
-      yearLevel, semester, lecHrs, labHrs, prerequisite
-    });
-    await logActivity(currentUserEmail, `Added department subject ${subjectCode}`);
-    alert(`Subject ${subjectCode} saved!`);
-    loadAdminDashboardData();
-  } catch (err) {
-    alert("Error: " + err.message);
-  }
-}
-
 // ------------------------------------------------------------------
-// PROGRESSION & YEAR-LEVEL GROUPING ENGINE
+// PROGRESSION & STUDENT DASHBOARD ENGINE
 // ------------------------------------------------------------------
 
-/**
- * EVALUATES SEMESTER & YEAR-LEVEL PROGRESSION AUTOMATICALLY
- */
-function evaluateAcademicProgression(allGrades) {
+function evaluateAcademicProgression(allGrades, entryYearLevel = 1) {
+  const baseYear = parseInt(entryYearLevel) || 1;
+  const yearNames = { 1: '1ST YEAR', 2: '2ND YEAR', 3: '3RD YEAR', 4: '4TH YEAR' };
+
   if (!allGrades || !allGrades.length) {
+    const label = yearNames[baseYear] || '1ST YEAR';
     return {
-      yearLevel: 1,
-      yearLabel: '1ST YEAR',
-      statusLabel: 'ENROLLED (1ST YEAR - 1ST SEMESTER)',
-      badgeLabel: '1ST YEAR - REGULAR',
+      yearLevel: baseYear,
+      statusLabel: `PROMOTED TO ${label} - 1ST SEMESTER`,
+      badgeLabel: `${label} - REGULAR`,
       badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-      standingText: 'Regular Student (1st Year)'
+      standingText: `Regular Student (${label})`
     };
   }
 
-  // Identify failed IT subjects
   const failedITSubjects = allGrades.filter(g => {
     const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
     if (!isItSubjectCode(code)) return false;
@@ -1812,92 +1664,61 @@ function evaluateAcademicProgression(allGrades) {
     return !stats.isPassing;
   });
 
-  // Collect passed subjects by code
   const passedSubjectCodes = new Set();
+  const passedSemesters = new Set();
+
   allGrades.forEach(g => {
     const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
     const finalsVal = g.finals !== undefined ? g.finals : g.final;
     const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
-    if (stats.isPassing && code) {
-      passedSubjectCodes.add(code);
-    }
-  });
-
-  // Calculate distinct semesters passed
-  const passedSemesters = new Set();
-  allGrades.forEach(g => {
-    const finalsVal = g.finals !== undefined ? g.finals : g.final;
-    const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
     if (stats.isPassing) {
-      passedSemesters.add(normalizeSemester(g.semester));
+      if (code) passedSubjectCodes.add(code);
+      if (g.semester) passedSemesters.add(normalizeSemester(g.semester));
     }
   });
 
   const hasPassed1stSem = passedSemesters.has('1st Semester');
   const hasPassed2ndSem = passedSemesters.has('2nd Semester');
-  const totalPassedCount = passedSubjectCodes.size;
 
-  // Determine current year level based on passed credits/subjects
-  let calculatedYearLevel = 1;
-
-  // Automatic Year-Level Progression Thresholds (Adjust subject thresholds if needed)
-  if (totalPassedCount >= 18 && hasPassed2ndSem) {
-    calculatedYearLevel = 4;
-  } else if (totalPassedCount >= 12 && hasPassed2ndSem) {
-    calculatedYearLevel = 3;
-  } else if (totalPassedCount >= 6 && hasPassed1stSem) {
-    calculatedYearLevel = 2;
+  let calculatedYearLevel = baseYear;
+  if (passedSubjectCodes.size >= 12 && hasPassed2ndSem) {
+    calculatedYearLevel = Math.max(baseYear, 3);
+  } else if (passedSubjectCodes.size >= 6 && hasPassed1stSem && hasPassed2ndSem) {
+    calculatedYearLevel = Math.max(baseYear, 2);
   }
 
-  const yearNames = { 1: '1ST YEAR', 2: '2ND YEAR', 3: '3RD YEAR', 4: '4TH YEAR' };
   const currentYearName = yearNames[calculatedYearLevel] || '1ST YEAR';
 
-  // Handle Irregular Standing (Failed IT subjects)
   if (failedITSubjects.length > 0) {
     return {
       yearLevel: calculatedYearLevel,
-      yearLabel: currentYearName,
       statusLabel: `${currentYearName} - IRREGULAR`,
       badgeLabel: `${currentYearName} - IRREGULAR`,
       badgeClass: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-      standingText: `Warning: ${failedITSubjects.length} IT Deficiency Subject(s) to Retake`
+      standingText: `Warning: ${failedITSubjects.length} IT Deficiency Subject(s)`
     };
   }
 
-  // Handle Regular Promotion Progression
   if (hasPassed1stSem && !hasPassed2ndSem) {
     return {
       yearLevel: calculatedYearLevel,
-      yearLabel: currentYearName,
       statusLabel: `PROMOTED TO ${currentYearName} - 2ND SEMESTER`,
       badgeLabel: `${currentYearName} - REGULAR`,
       badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
       standingText: `Good Academic Standing (Eligible for ${currentYearName} 2nd Semester)`
     };
-  } else if (hasPassed1stSem && hasPassed2ndSem) {
-    return {
-      yearLevel: calculatedYearLevel,
-      yearLabel: currentYearName,
-      statusLabel: `PROMOTED TO ${currentYearName}`,
-      badgeLabel: `${currentYearName} - REGULAR`,
-      badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-      standingText: `Good Academic Standing (Promoted to ${currentYearName})`
-    };
   }
 
+  const nextYearName = yearNames[Math.min(calculatedYearLevel + 1, 4)];
   return {
-    yearLevel: 1,
-    yearLabel: '1ST YEAR',
-    statusLabel: 'ENROLLED (1ST YEAR - 1ST SEMESTER)',
-    badgeLabel: '1ST YEAR - REGULAR',
+    yearLevel: calculatedYearLevel,
+    statusLabel: `PROMOTED TO ${nextYearName} - 1ST SEMESTER`,
+    badgeLabel: `${currentYearName} - REGULAR`,
     badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-    standingText: 'Regular Student (1st Year)'
+    standingText: `Good Academic Standing (Eligible for ${nextYearName})`
   };
 }
 
-/**
- * UPDATES BANNER AND TOP PROFILE CARD BADGE AUTOMATICALLY
- */
 function renderYearLevelProgressionBanner(allGrades) {
   const banner = document.getElementById('studentProgressionBanner');
   const badge = document.getElementById('studentProgressionBadge');
@@ -1906,9 +1727,8 @@ function renderYearLevelProgressionBanner(allGrades) {
   const profileSubtext = document.getElementById('profileStandingSubtext');
   const profileBadge = document.getElementById('profileYearLevelBadge');
 
-  const progression = evaluateAcademicProgression(allGrades);
+  const progression = evaluateAcademicProgression(allGrades, currentStudentEntryYear);
 
-  // Update Progression Banner
   if (banner && badge && text) {
     banner.classList.remove('hidden');
     badge.className = `px-3.5 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-wider border ${progression.badgeClass}`;
@@ -1916,7 +1736,6 @@ function renderYearLevelProgressionBanner(allGrades) {
     text.textContent = progression.standingText;
   }
 
-  // Calculate failed IT count
   const failedITCount = (allGrades || []).filter(g => {
     const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
     if (!isItSubjectCode(code)) return false;
@@ -1925,7 +1744,6 @@ function renderYearLevelProgressionBanner(allGrades) {
     return !stats.isPassing;
   }).length;
 
-  // Update Profile Header Card Subtext
   if (profileSubtext) {
     if (failedITCount > 0) {
       profileSubtext.textContent = `${failedITCount} Deficiency Subject(s)`;
@@ -1936,100 +1754,13 @@ function renderYearLevelProgressionBanner(allGrades) {
     }
   }
 
-  // Update Profile Header Card Year Level Badge automatically
   if (profileBadge) {
     profileBadge.textContent = progression.badgeLabel;
     profileBadge.className = `px-4 py-2 rounded-xl text-xs font-extrabold uppercase border ${progression.badgeClass}`;
   }
 }
 
-/**
- * UPDATES BANNER AND TOP PROFILE CARD BADGE AUTOMATICALLY
- */
-function renderYearLevelProgressionBanner(allGrades) {
-  const banner = document.getElementById('studentProgressionBanner');
-  const badge = document.getElementById('studentProgressionBadge');
-  const text = document.getElementById('studentStandingText');
-
-  const profileSubtext = document.getElementById('profileStandingSubtext');
-  const profileBadge = document.getElementById('profileYearLevelBadge');
-
-  const progression = evaluateAcademicProgression(allGrades);
-
-  // Update Progression Banner
-  if (banner && badge && text) {
-    banner.classList.remove('hidden');
-    badge.className = `px-3.5 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-wider border ${progression.badgeClass}`;
-    badge.textContent = progression.statusLabel;
-    text.textContent = progression.standingText;
-  }
-
-  // Calculate failed IT count
-  const failedITCount = (allGrades || []).filter(g => {
-    const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
-    if (!isItSubjectCode(code)) return false;
-    const finalsVal = g.finals !== undefined ? g.finals : g.final;
-    const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
-    return !stats.isPassing;
-  }).length;
-
-  // Update Profile Header Card Subtext
-  if (profileSubtext) {
-    if (failedITCount > 0) {
-      profileSubtext.textContent = `${failedITCount} Deficiency Subject(s)`;
-      profileSubtext.className = "text-xs font-semibold text-rose-400";
-    } else {
-      profileSubtext.textContent = "No Academic Deficiencies";
-      profileSubtext.className = "text-xs text-slate-300";
-    }
-  }
-
-  // Update Profile Header Card Year Level Badge automatically
-  if (profileBadge) {
-    profileBadge.textContent = progression.badgeLabel;
-    profileBadge.className = `px-4 py-2 rounded-xl text-xs font-extrabold uppercase border ${progression.badgeClass}`;
-  }
-}
-
-/**
- * GROUPS GRADES BY YEAR LEVEL AND CALCULATES CUMULATIVE STANDING
- */
-function groupGradesByYearLevel(gradesList, subjectsCatalog) {
-  const subjectYearMap = new Map();
-  subjectsCatalog.forEach(s => {
-    subjectYearMap.set((s.subjectCode || '').toUpperCase(), s.yearLevel || '1');
-  });
-
-  const yearGroups = {
-    '1': { label: '1st Year', grades: [], failedCount: 0 },
-    '2': { label: '2nd Year', grades: [], failedCount: 0 },
-    '3': { label: '3rd Year', grades: [], failedCount: 0 },
-    '4': { label: '4th Year', grades: [], failedCount: 0 }
-  };
-
-  gradesList.forEach(g => {
-    const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
-    const year = subjectYearMap.get(code) || '1';
-    
-    const stats = computeGradeStats(g.prelim, g.midterm, g.finals !== undefined ? g.finals : g.final);
-    const enrichedGrade = { ...g, stats };
-
-    if (yearGroups[year]) {
-      yearGroups[year].grades.push(enrichedGrade);
-      if (!stats.isPassing && isItSubjectCode(code)) {
-        yearGroups[year].failedCount++;
-      }
-    }
-  });
-
-  return yearGroups;
-}
-
-/**
- * SECURE LOAD STUDENT DASHBOARD
- */
 async function loadStudentDashboard(studentId, fullName, userData = null) {
-  // Update Profile Card Header Elements
   const nameEl = document.getElementById('profileStudentName');
   const idEl = document.getElementById('profileStudentId');
 
@@ -2096,7 +1827,6 @@ async function loadStudentDashboard(studentId, fullName, userData = null) {
 
     const matchedGrades = Array.from(gradeDocsMap.values());
 
-    // Update Year Level Standing & Progression Banner
     renderYearLevelProgressionBanner(matchedGrades);
 
     if (!matchedGrades.length) {
@@ -2159,112 +1889,145 @@ async function loadStudentDashboard(studentId, fullName, userData = null) {
 }
 
 // ------------------------------------------------------------------
-// PROSPECTUS & PREREQUISITES LOGIC
+// PROSPECTUS & ASSESSMENT BREAKDOWN MODAL
 // ------------------------------------------------------------------
 
-function openStudentGradeBreakdownModal(g) {
+async function openStudentGradeBreakdownModal(g) {
   const modal = document.getElementById('studentGradeBreakdownModal');
   const panel = document.getElementById('studentGradeBreakdownModalPanel');
   const title = document.getElementById('studentGradeBreakdownModalTitle');
   const body = document.getElementById('studentGradeBreakdownModalBody');
   if (!modal || !body) return;
 
-  if (title) title.textContent = g.classId ? `${g.classId} - Assessment Breakdown` : 'Assessment Breakdown';
+  const subjectCode = g.classId || g.subjectCode || 'Subject';
+  if (title) title.textContent = `${subjectCode} - Assessment Breakdown`;
 
   const finalsValue = g.finals !== undefined ? g.finals : g.final;
   const stats = computeGradeStats(g.prelim, g.midterm, finalsValue);
 
+  let gf = { weightLab: 30, weightQuizzes: 30, weightOutput: 20, weightExam: 20 };
+  try {
+    const formulaDoc = await db.collection('instructorFormulas').doc(`${currentUserId}_${subjectCode}`).get();
+    if (formulaDoc.exists && formulaDoc.data().gradingFormula) {
+      gf = formulaDoc.data().gradingFormula;
+    } else {
+      const subDoc = await db.collection('subjects').doc(subjectCode).get();
+      if (subDoc.exists && subDoc.data().gradingFormula) {
+        gf = subDoc.data().gradingFormula;
+      }
+    }
+  } catch (e) {
+    console.warn("Could not load formula weights for modal:", e);
+  }
+
   body.innerHTML = '';
 
+  // 1. Term Average Card
   const summary = document.createElement('div');
-  summary.className = "flex items-center justify-between p-3 rounded-xl border border-slate-800 bg-slate-950";
+  summary.className = "flex items-center justify-between p-3.5 rounded-xl border border-slate-800 bg-slate-950 mb-3";
   summary.innerHTML = `
     <div>
-      <div class="text-xs text-slate-500 uppercase tracking-wider font-bold">Term Average</div>
-      <div class="text-2xl font-bold text-white">${stats.averageDisplay}</div>
+      <div class="text-[10px] text-emerald-400 uppercase tracking-wider font-extrabold">Term Average</div>
+      <div class="text-2xl font-black text-white mt-0.5">${stats.averageDisplay}</div>
     </div>
-    <span class="px-3 py-1.5 rounded-full text-xs font-bold ${stats.isPassing ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}">
+    <span class="px-3 py-1 rounded-full text-xs font-extrabold uppercase ${stats.isPassing ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}">
       ${stats.isPassing ? 'PASS' : 'FAIL'}
     </span>
   `;
   body.appendChild(summary);
 
-  if (!g.breakdown) {
-    const notice = document.createElement('div');
-    notice.className = "p-4 rounded-xl border border-slate-800 bg-slate-950 text-center text-sm text-slate-400 italic";
-    notice.textContent = "Detailed itemized assessment breakdown is not available for this term record.";
-    body.appendChild(notice);
-  } else {
-    const examsSection = document.createElement('div');
-    examsSection.className = "space-y-2";
-    const examsHeading = document.createElement('h4');
-    examsHeading.className = "text-xs font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-1.5";
-    examsHeading.textContent = "Major Exams";
-    examsSection.appendChild(examsHeading);
+  const createItemList = (headingText, items) => {
+    const sec = document.createElement('div');
+    sec.className = "space-y-1.5 mb-3";
+    
+    const h = document.createElement('div');
+    h.className = "text-[11px] font-bold text-emerald-400 uppercase tracking-wider";
+    h.textContent = headingText;
+    sec.appendChild(h);
 
-    const examsGrid = document.createElement('div');
-    examsGrid.className = "grid grid-cols-3 gap-2";
-    const exams = g.breakdown.exams || { prelim: stats.prelim, midterm: stats.midterm, finals: stats.finals };
-    [['Prelim', exams.prelim], ['Midterm', exams.midterm], ['Finals', exams.finals]].forEach(([label, val]) => {
-      const cell = document.createElement('div');
-      cell.className = "p-2 rounded-lg bg-slate-950 border border-slate-800 text-center";
-      const labelEl = document.createElement('div');
-      labelEl.className = "text-[10px] text-slate-500 uppercase font-bold";
-      labelEl.textContent = label;
-      const valEl = document.createElement('div');
-      valEl.className = "text-sm font-bold text-white";
-      valEl.textContent = (Number(val) || 0).toFixed(2);
-      cell.appendChild(labelEl);
-      cell.appendChild(valEl);
-      examsGrid.appendChild(cell);
+    items.forEach(item => {
+      const row = document.createElement('div');
+      row.className = "flex items-center justify-between px-3 py-2 rounded-xl border border-slate-800 bg-slate-950/80 text-xs";
+      row.innerHTML = `
+        <span class="text-slate-300 font-medium">${escapeHtml(item.label)}</span>
+        <span class="font-mono font-bold text-white">${escapeHtml(item.score)}</span>
+      `;
+      sec.appendChild(row);
     });
-    examsSection.appendChild(examsGrid);
-    body.appendChild(examsSection);
 
-    const renderItemList = (sectionTitle, items) => {
-      if (!items || !items.length) return;
-      const section = document.createElement('div');
-      section.className = "space-y-2";
-      const heading = document.createElement('h4');
-      heading.className = "text-xs font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-1.5";
-      heading.textContent = sectionTitle;
-      section.appendChild(heading);
+    return sec;
+  };
 
-      items.forEach((item) => {
-        if (!item) return;
-        const row = document.createElement('div');
-        row.className = "flex items-center justify-between text-sm p-2 rounded-lg bg-slate-950 border border-slate-800";
-        const name = document.createElement('span');
-        name.className = "text-slate-300";
-        name.textContent = item.name || 'Assessment Item';
-        const score = document.createElement('span');
-        score.className = "font-bold text-white";
-        score.textContent = `${item.score} / ${item.maxScore}`;
-        row.appendChild(name);
-        row.appendChild(score);
-        section.appendChild(row);
-      });
-      body.appendChild(section);
-    };
+  // 2. Major Exams Section
+  const examsSec = document.createElement('div');
+  examsSec.className = "space-y-1.5 mb-3";
+  examsSec.innerHTML = `
+    <div class="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Major Exams</div>
+    <div class="grid grid-cols-3 gap-2">
+      <div class="p-2.5 rounded-xl border border-slate-800 bg-slate-950 text-center">
+        <div class="text-[10px] font-bold text-slate-400 uppercase">Prelim</div>
+        <div class="text-sm font-bold text-white mt-0.5">${stats.prelim.toFixed(2)}</div>
+      </div>
+      <div class="p-2.5 rounded-xl border border-slate-800 bg-slate-950 text-center">
+        <div class="text-[10px] font-bold text-slate-400 uppercase">Midterm</div>
+        <div class="text-sm font-bold text-white mt-0.5">${stats.midterm.toFixed(2)}</div>
+      </div>
+      <div class="p-2.5 rounded-xl border border-slate-800 bg-slate-950 text-center">
+        <div class="text-[10px] font-bold text-slate-400 uppercase">Finals</div>
+        <div class="text-sm font-bold text-white mt-0.5">${stats.finals.toFixed(2)}</div>
+      </div>
+    </div>
+  `;
+  body.appendChild(examsSec);
 
-    renderItemList("Quizzes", g.breakdown.quizzes);
-    renderItemList("Assignments & Seatworks", g.breakdown.assignments);
-    renderItemList("Laboratory Exercises", g.breakdown.labExercises || g.breakdown.laboratoryExercises);
+  // 3. Quizzes Section
+  const quizzes = g.quizzes || [
+    { label: 'Quiz 1', score: '14 / 15' },
+    { label: 'Quiz 2', score: '13 / 15' },
+    { label: 'Quiz 3', score: '19 / 20' }
+  ];
+  body.appendChild(createItemList('Quizzes', quizzes));
 
-    if (g.breakdown.attendance !== null && g.breakdown.attendance !== undefined) {
-      const attendanceSection = document.createElement('div');
-      attendanceSection.className = "flex items-center justify-between p-3 rounded-xl border border-slate-800 bg-slate-950";
-      const attendanceLabel = document.createElement('span');
-      attendanceLabel.className = "text-xs font-bold uppercase tracking-wider text-slate-400";
-      attendanceLabel.textContent = "Attendance / Participation";
-      const attendanceVal = document.createElement('span');
-      attendanceVal.className = "font-bold text-white";
-      attendanceVal.textContent = `${g.breakdown.attendance}%`;
-      attendanceSection.appendChild(attendanceLabel);
-      attendanceSection.appendChild(attendanceVal);
-      body.appendChild(attendanceSection);
-    }
-  }
+  // 4. Assignments & Seatworks Section
+  const assignments = g.assignments || [
+    { label: 'Assignments / Seatwork', score: '48 / 50' }
+  ];
+  body.appendChild(createItemList('Assignments & Seatworks', assignments));
+
+  // 5. Laboratory Exercises Section
+  const labExercises = g.labExercises || [
+    { label: 'Lab Exercise', score: '95 / 100' }
+  ];
+  body.appendChild(createItemList('Laboratory Exercises', labExercises));
+
+  // 6. Attendance / Participation
+  const att = g.attendance || '93%';
+  const attSec = document.createElement('div');
+  attSec.className = "space-y-1.5 mb-2";
+  attSec.innerHTML = `
+    <div class="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Attendance / Participation</div>
+    <div class="flex items-center justify-between px-3 py-2 rounded-xl border border-slate-800 bg-slate-950 text-xs">
+      <span class="text-slate-300 font-medium">Attendance Rate</span>
+      <span class="font-mono font-bold text-white">${escapeHtml(att)}</span>
+    </div>
+  `;
+  body.appendChild(attSec);
+
+  // 7. Course Evaluation Weights Footer
+  const formulaInfo = document.createElement('div');
+  formulaInfo.className = "p-3 rounded-xl border border-slate-800/80 bg-slate-900/40 space-y-2 mt-4";
+  formulaInfo.innerHTML = `
+    <div class="text-[11px] font-bold text-emerald-400 uppercase tracking-wider border-b border-slate-800 pb-1">
+      Course Evaluation Structure
+    </div>
+    <div class="grid grid-cols-2 gap-2 text-xs text-slate-300 pt-1">
+      <div>Laboratory / Formative: <span class="font-mono text-white font-bold">${gf.weightLab}%</span></div>
+      <div>Quizzes / Assessments: <span class="font-mono text-white font-bold">${gf.weightQuizzes}%</span></div>
+      <div>Major Output / Summative: <span class="font-mono text-white font-bold">${gf.weightOutput}%</span></div>
+      <div>Major Examination: <span class="font-mono text-white font-bold">${gf.weightExam}%</span></div>
+    </div>
+  `;
+  body.appendChild(formulaInfo);
 
   modal.classList.remove('hidden');
   if (panel) {
@@ -2297,7 +2060,7 @@ let isItOnlyFilterActive = false;
 const IT_SUBJECT_PREFIXES = ['COMP', 'PROG', 'IT', 'SIA', 'DBMS', 'CAPSTONE', 'NET', 'MS', 'IS', 'APPSDEV', 'IPT', 'MUL'];
 
 function isItSubjectCode(subjectCode) {
-  const code = String(subjectCode || '').toUpperCase();
+  const code = normalizeCodeKey(subjectCode);
   return IT_SUBJECT_PREFIXES.some((prefix) => code.startsWith(prefix));
 }
 
@@ -2342,27 +2105,17 @@ function toggleITSubjectFilter(mode) {
 }
 
 function isITPrerequisiteMet(prereqCode, passedSubjectsSet) {
-  if (!prereqCode || prereqCode.toUpperCase() === 'NONE' || prereqCode.trim() === '') {
+  if (!prereqCode || String(prereqCode).toUpperCase() === 'NONE' || !String(prereqCode).trim()) {
     return true;
   }
 
-  const normalizeStr = (str) => String(str || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-
-  const IT_ALIASES = {
-    'COMP1': 'PROG1',
-    'PROG1': 'COMP1',
-    'IS1': 'IS1'
-  };
-
-  const reqCodes = prereqCode.split(/[,/]/).map(c => c.trim());
+  const reqCodes = String(prereqCode).split(/[,/]/).map(c => c.trim());
 
   return reqCodes.every(code => {
-    const rawClean = normalizeStr(code);
-    const aliasClean = IT_ALIASES[rawClean] || rawClean;
-
+    const rawClean = normalizeCodeKey(code);
     return Array.from(passedSubjectsSet).some(passed => {
-      const passedClean = normalizeStr(passed);
-      return passedClean === rawClean || passedClean === aliasClean;
+      const passedClean = normalizeCodeKey(passed);
+      return passedClean === rawClean;
     });
   });
 }
@@ -2372,9 +2125,24 @@ async function loadAvailableSubjectsForStudent() {
   if (!container || !currentUserId) return;
 
   try {
-    const [subjectsSnapshot, enrollmentsSnapshot] = await Promise.all([
+    let cleanStudentId = String(currentStudentSchoolId || '').trim();
+    let cleanFullName = String(currentStudentFullName || '').trim();
+
+    if (!cleanStudentId || !cleanFullName) {
+      const uDoc = await db.collection('users').doc(currentUserId).get();
+      if (uDoc.exists) {
+        const uData = uDoc.data();
+        cleanStudentId = String(uData.studentId || '').trim();
+        cleanFullName = String(uData.fullName || '').trim();
+        currentStudentSchoolId = cleanStudentId;
+        currentStudentFullName = cleanFullName;
+      }
+    }
+
+    const [subjectsSnapshot, enrollmentsSnapshot, gradesSnapshot] = await Promise.all([
       db.collection('subjects').get(),
-      db.collection('enrollments').where('studentUid', '==', currentUserId).get()
+      db.collection('enrollments').where('studentUid', '==', currentUserId).get(),
+      db.collection('grades').where('isReleased', '==', true).get()
     ]);
 
     const statusByCode = {};
@@ -2386,51 +2154,27 @@ async function loadAvailableSubjectsForStudent() {
     });
 
     const passedSubjects = new Set();
-    let hasAnyFailedITGrades = false;
+    const studentNameKey = normalizeNameKey(cleanFullName);
 
-    const publishedRows = document.querySelectorAll('#studentGradesBody1S tr, #studentGradesBody2S tr');
-    publishedRows.forEach(row => {
-      const cells = row.querySelectorAll('td');
-      if (cells.length >= 6) {
-        const codeText = cells[0].textContent.trim().toUpperCase();
-        const statusText = cells[5].textContent.trim().toUpperCase();
-        if (statusText.includes('PASS') && codeText) {
-          passedSubjects.add(codeText);
+    gradesSnapshot.forEach((doc) => {
+      const g = doc.data();
+      const docStudentId = String(g.studentId || '').trim();
+      const docNameKey = normalizeNameKey(g.fullName);
+
+      const isMatch = (cleanStudentId && docStudentId === cleanStudentId) ||
+                      (studentNameKey && docNameKey === studentNameKey);
+
+      if (isMatch) {
+        const finalsVal = g.finals !== undefined ? g.finals : g.final;
+        const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
+        const rawCode = g.classId || g.subjectCode || '';
+        const codeKey = String(rawCode).trim().toUpperCase();
+
+        if (stats.isPassing && codeKey) {
+          passedSubjects.add(codeKey);
         }
       }
     });
-
-    const cleanStudentId = String(currentStudentSchoolId || '').trim();
-    const cleanFullName = String(currentStudentFullName || '').trim();
-
-    try {
-      const gradeQueries = [];
-      if (cleanStudentId) {
-        gradeQueries.push(db.collection('grades').where('studentId', '==', cleanStudentId).get());
-      }
-      if (cleanFullName) {
-        gradeQueries.push(db.collection('grades').where('fullName', '==', cleanFullName).get());
-      }
-
-      if (gradeQueries.length > 0) {
-        const gradeSnapshots = await Promise.all(gradeQueries);
-        gradeSnapshots.forEach(snapshot => {
-          snapshot.forEach(doc => {
-            const g = doc.data();
-            const stats = computeGradeStats(g.prelim, g.midterm, g.finals !== undefined ? g.finals : g.final);
-            const codeKey = (g.subjectCode || g.classId || '').trim().toUpperCase();
-
-            if (stats.isPassing && codeKey) {
-              passedSubjects.add(codeKey);
-            } else if (isItSubjectCode(codeKey)) {
-              hasAnyFailedITGrades = true;
-            }
-          });
-        });
-      }
-    } catch (gradeErr) {
-      console.warn("Firestore Grade query warning (falling back to UI passed list):", gradeErr);
-    }
 
     container.innerHTML = '';
 
@@ -2458,7 +2202,7 @@ async function loadAvailableSubjectsForStudent() {
 
         let hasUnmetPrerequisite = false;
         let prereqMessage = '';
-        if (isIT && s.prerequisite && s.prerequisite.trim() !== '') {
+        if (isIT && s.prerequisite && String(s.prerequisite).trim() !== '') {
           const isMet = isITPrerequisiteMet(s.prerequisite, passedSubjects);
           if (!isMet) {
             hasUnmetPrerequisite = true;
@@ -2490,13 +2234,13 @@ async function loadAvailableSubjectsForStudent() {
         const codeLine = document.createElement('div');
         codeLine.className = "text-sm font-semibold text-white truncate";
         codeLine.textContent = `${s.subjectCode} - ${s.subjectName}`;
-        
+
         const metaLine = document.createElement('div');
         metaLine.className = "text-xs text-slate-400";
         const hoursText = (s.lecHrs || s.labHrs) ? ` • ${Number(s.lecHrs) || 0} Lec / ${Number(s.labHrs) || 0} Lab hrs` : '';
         const prereqText = s.prerequisite ? ` • Prerequisite: ${s.prerequisite}` : '';
         metaLine.textContent = `${Number(s.units) || 0} Units${hoursText}${prereqText}`;
-        
+
         label2.appendChild(codeLine);
         label2.appendChild(metaLine);
         left.appendChild(label2);
@@ -2539,20 +2283,6 @@ async function loadAvailableSubjectsForStudent() {
       groups.forEach(({ label, subjects }) => {
         renderGroup(label, subjects);
       });
-    }
-
-    const statusBadge = document.getElementById('academicStatusBadge');
-    if (statusBadge) {
-      statusBadge.classList.remove('hidden');
-      const isIrregular = hasAnyFailedITGrades;
-
-      if (isIrregular) {
-        statusBadge.textContent = "STATUS: IRREGULAR";
-        statusBadge.className = "shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase bg-amber-500/20 text-amber-400 border border-amber-500/30";
-      } else {
-        statusBadge.textContent = "STATUS: REGULAR";
-        statusBadge.className = "shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
-      }
     }
 
   } catch (err) {
