@@ -194,18 +194,37 @@
                 class="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-emerald-500 focus:outline-none"
               />
             </div>
-            <div>
-              <label
-                class="block text-xs font-bold text-slate-300 uppercase mb-1"
-                >Password</label
-              >
-              <input
-                type="password"
-                id="loginPassword"
-                required
-                placeholder="••••••••"
-                class="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-emerald-500 focus:outline-none"
-              />
+            <!-- LOGIN PASSWORD INPUT WITH TOGGLE & IN-APP RESET TRIGGER -->
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between">
+                <label class="text-xs font-semibold text-slate-300"
+                  >Password</label
+                >
+                <button
+                  type="button"
+                  onclick="openSelfResetModal()"
+                  class="text-[11px] font-semibold text-emerald-400 hover:underline"
+                >
+                  Forgot / Reset password?
+                </button>
+              </div>
+              <div class="relative">
+                <input
+                  id="loginPassword"
+                  type="password"
+                  class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500 pr-10"
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  onclick="
+                    togglePasswordVisibility('loginPassword', 'eyeIconLogin')
+                  "
+                  class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-all"
+                >
+                  <i id="eyeIconLogin" data-lucide="eye" class="w-4 h-4"></i>
+                </button>
+              </div>
             </div>
             <button
               type="submit"
@@ -1387,6 +1406,152 @@
           id="studentGradeBreakdownModalBody"
           class="p-5 space-y-4 overflow-y-auto"
         ></div>
+      </div>
+    </div>
+
+    <!-- SELF-SERVICE IN-APP PASSWORD RESET MODAL -->
+    <div
+      id="selfResetModal"
+      class="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm hidden transition-all duration-200"
+    >
+      <div
+        id="selfResetModalPanel"
+        class="w-full max-w-md p-6 rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl space-y-5 opacity-0 scale-95 transition-all duration-200"
+      >
+        <!-- Modal Header -->
+        <div
+          class="flex items-center justify-between border-b border-slate-800 pb-3"
+        >
+          <div class="flex items-center gap-2">
+            <div
+              class="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400"
+            >
+              <i data-lucide="key-round" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h3 class="text-sm font-bold text-white uppercase tracking-wider">
+                Reset Account Password
+              </h3>
+              <p class="text-[11px] text-slate-400">
+                Update your credentials directly inside the system
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onclick="closeSelfResetModal()"
+            class="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+          >
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <!-- Modal Form -->
+        <form
+          onsubmit="
+            event.preventDefault();
+            handleSelfPasswordReset();
+          "
+          class="space-y-4"
+        >
+          <!-- Target Email -->
+          <div class="space-y-1.5">
+            <label class="text-xs font-semibold text-slate-300"
+              >Account Email Address</label
+            >
+            <input
+              id="resetEmail"
+              type="email"
+              required
+              class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500"
+              placeholder="e.g. student@cdk.edu.ph"
+            />
+          </div>
+
+          <!-- Current Password -->
+          <div class="space-y-1.5">
+            <label class="text-xs font-semibold text-slate-300"
+              >Current Password</label
+            >
+            <div class="relative">
+              <input
+                id="resetCurrentPassword"
+                type="password"
+                required
+                class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500 pr-10"
+                placeholder="••••••••"
+              />
+              <button
+                type="button"
+                onclick="
+                  togglePasswordVisibility(
+                    'resetCurrentPassword',
+                    'eyeIconResetCurrent'
+                  )
+                "
+                class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-all"
+              >
+                <i
+                  id="eyeIconResetCurrent"
+                  data-lucide="eye"
+                  class="w-4 h-4"
+                ></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- New Password -->
+          <div class="space-y-1.5">
+            <label class="text-xs font-semibold text-slate-300"
+              >New Password</label
+            >
+            <div class="relative">
+              <input
+                id="resetNewPassword"
+                type="password"
+                required
+                minlength="6"
+                class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500 pr-10"
+                placeholder="••••••••"
+              />
+              <button
+                type="button"
+                onclick="
+                  togglePasswordVisibility(
+                    'resetNewPassword',
+                    'eyeIconResetNew'
+                  )
+                "
+                class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-all"
+              >
+                <i id="eyeIconResetNew" data-lucide="eye" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Error Indicator -->
+          <div
+            id="resetModalError"
+            class="text-xs text-rose-400 font-semibold empty:hidden"
+          ></div>
+
+          <!-- Action Buttons -->
+          <div class="flex items-center gap-3 pt-2">
+            <button
+              type="button"
+              onclick="closeSelfResetModal()"
+              class="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-all"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              class="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition-all shadow-lg shadow-emerald-500/10"
+            >
+              Update Password
+            </button>
+          </div>
+        </form>
       </div>
     </div>
 

@@ -22,6 +22,7 @@ let parsedGradeData = [];
 let currentUserEmail = '';
 let currentUserId = '';
 let activeSubjectCode = '';
+let activeInstructorSectionFilter = 'ALL';
 let lastReportData = null;
 
 let activeSemester = '1st Semester';
@@ -29,6 +30,8 @@ let currentStudentSchoolId = '';
 let currentStudentFullName = '';
 let currentStudentEntryYear = 1;
 let notificationsUnsubscribe = null;
+let singleSessionUnsubscribe = null;
+let currentSessionId = null;
 
 let selectedPortalRole = 'student';
 let isFreshLoginAttempt = false;
@@ -115,8 +118,9 @@ function semesterDisplayLabel(sem) {
   return norm === '2nd Semester' ? '2nd Semester' : '1st Semester';
 }
 
-function buildEnrollmentDocId(subjectCode, studentUid) {
-  return `${subjectCode}_${studentUid}`;
+function buildEnrollmentDocId(subjectCode, section, studentUid) {
+  const cleanSection = String(section || 'A').trim().toUpperCase();
+  return `${subjectCode}_${cleanSection}_${studentUid}`;
 }
 
 const PASSING_THRESHOLD = 75;
@@ -245,8 +249,156 @@ function switchAuthTab(tab) {
 }
 
 // ------------------------------------------------------------------
-// AUTHENTICATION ENGINE
+// AUTHENTICATION & PASSWORD HELPERS
 // ------------------------------------------------------------------
+
+function togglePasswordVisibility(inputId, iconId) {
+  const input = document.getElementById(inputId);
+  const icon = document.getElementById(iconId);
+  if (!input) return;
+
+  if (input.type === 'password') {
+    input.type = 'text';
+    if (icon) icon.setAttribute('data-lucide', 'eye-off');
+  } else {
+    input.type = 'password';
+    if (icon) icon.setAttribute('data-lucide', 'eye');
+  }
+  if (window.lucide) lucide.createIcons();
+}
+
+function openSelfResetModal() {
+  const modal = document.getElementById('selfResetModal');
+  const panel = document.getElementById('selfResetModalPanel');
+  const loginEmail = document.getElementById('loginEmail');
+  const resetEmail = document.getElementById('resetEmail');
+  const errDiv = document.getElementById('resetModalError');
+
+  if (errDiv) errDiv.innerText = '';
+
+  if (resetEmail && loginEmail && loginEmail.value.trim()) {
+    resetEmail.value = loginEmail.value.trim();
+  }
+
+  if (modal) {
+    modal.classList.remove('hidden');
+    if (panel) {
+      void panel.offsetWidth;
+      panel.classList.remove('opacity-0', 'scale-95');
+    }
+  }
+}
+
+function closeSelfResetModal() {
+  const modal = document.getElementById('selfResetModal');
+  const panel = document.getElementById('selfResetModalPanel');
+  const resetCurrentPassword = document.getElementById('resetCurrentPassword');
+  const resetNewPassword = document.getElementById('resetNewPassword');
+
+  if (resetCurrentPassword) resetCurrentPassword.value = '';
+  if (resetNewPassword) resetNewPassword.value = '';
+
+  if (panel) panel.classList.add('opacity-0', 'scale-95');
+  setTimeout(() => {
+    if (modal) modal.classList.add('hidden');
+  }, 200);
+}
+
+async function handleSelfPasswordReset() {
+  const emailInput = document.getElementById('resetEmail');
+  const currentPasswordInput = document.getElementById('resetCurrentPassword');
+  const newPasswordInput = document.getElementById('resetNewPassword');
+  const errDiv = document.getElementById('resetModalError');
+
+  if (errDiv) errDiv.innerText = '';
+
+  const email = emailInput ? emailInput.value.trim() : '';
+  const currentPassword = currentPasswordInput ? currentPasswordInput.value.trim() : '';
+  const newPassword = newPasswordInput ? newPasswordInput.value.trim() : '';
+
+  if (!email || !currentPassword || !newPassword) {
+    if (errDiv) errDiv.innerText = 'Please complete all required fields.';
+    return;
+  }
+
+  if (newPassword.length < 6) {
+    if (errDiv) errDiv.innerText = 'New password must be at least 6 characters.';
+    return;
+  }
+
+  try {
+    const userCred = await auth.signInWithEmailAndPassword(email, currentPassword);
+    await userCred.user.updatePassword(newPassword);
+
+    await logActivity(email, 'Self-service password reset completed successfully');
+    await auth.signOut();
+
+    closeSelfResetModal();
+    alert('Password reset successfully! Please log in with your new password.');
+  } catch (err) {
+    console.error("Password Reset Error:", err);
+    if (errDiv) {
+      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        errDiv.innerText = 'Incorrect current password or account details.';
+      } else {
+        errDiv.innerText = err.message || 'Failed to update password. Please check your credentials.';
+      }
+    }
+  }
+}
+
+async function handleForgotPassword() {
+  const emailInput = document.getElementById('loginEmail');
+  const email = emailInput ? emailInput.value.trim() : '';
+
+  if (!email) {
+    const promptEmail = prompt("Please enter your registered email address to receive a password reset link:");
+    if (!promptEmail) return;
+    return sendResetLink(promptEmail.trim());
+  }
+
+  sendResetLink(email);
+}
+
+async function sendResetLink(email) {
+  try {
+    await auth.sendPasswordResetEmail(email);
+    alert(`Password reset link sent to ${email}. Please check your inbox or spam folder.`);
+  } catch (err) {
+    console.error("Password Reset Error:", err);
+    alert("Error sending password reset email: " + err.message);
+  }
+}
+
+// ------------------------------------------------------------------
+// SINGLE SESSION CONCURRENT LOGIN GUARD (FREE TIER)
+// ------------------------------------------------------------------
+
+function setupSingleSessionGuard(uid) {
+  detachSingleSessionGuard();
+  if (!uid) return;
+
+  singleSessionUnsubscribe = db.collection('users').doc(uid).onSnapshot(
+    (snapshot) => {
+      if (!snapshot.exists) return;
+      const data = snapshot.data();
+      if (currentSessionId && data.activeSessionId && data.activeSessionId !== currentSessionId) {
+        detachSingleSessionGuard();
+        detachNotificationsListener();
+        alert("Your account has been logged in on another device or browser. You have been logged out.");
+        auth.signOut();
+      }
+    },
+    (err) => console.error("Single session guard error:", err)
+  );
+}
+
+function detachSingleSessionGuard() {
+  if (typeof singleSessionUnsubscribe === 'function') {
+    singleSessionUnsubscribe();
+  }
+  singleSessionUnsubscribe = null;
+}
 
 auth.onAuthStateChanged(async (user) => {
   const authContainer = document.getElementById('authContainer');
@@ -293,6 +445,19 @@ auth.onAuthStateChanged(async (user) => {
           return;
         }
 
+        if (!currentSessionId) {
+          currentSessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+          try {
+            await db.collection('users').doc(user.uid).update({
+              activeSessionId: currentSessionId,
+              lastLoginAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          } catch (sessionErr) {
+            console.warn("Session tracking update skipped due to permissions:", sessionErr);
+          }
+        }
+
+        setupSingleSessionGuard(user.uid);
         showDashboard();
 
         if (userInfo) {
@@ -305,16 +470,20 @@ auth.onAuthStateChanged(async (user) => {
         routeUserRole(data.role, data);
       } else {
         isFreshLoginAttempt = false;
+        detachSingleSessionGuard();
         detachNotificationsListener();
         showAuthContainer();
       }
     } catch (err) {
       console.error(err);
       isFreshLoginAttempt = false;
+      detachSingleSessionGuard();
       detachNotificationsListener();
       showAuthContainer();
     }
   } else {
+    currentSessionId = null;
+    detachSingleSessionGuard();
     detachNotificationsListener();
     showAuthContainer();
     if (userInfo) userInfo.innerHTML = '';
@@ -324,7 +493,7 @@ auth.onAuthStateChanged(async (user) => {
 async function handleLogin() {
   const emailInput = document.getElementById('loginEmail');
   const passwordInput = document.getElementById('loginPassword');
-  
+
   if (!emailInput || !passwordInput) return;
 
   const email = emailInput.value.trim();
@@ -333,6 +502,7 @@ async function handleLogin() {
 
   try {
     isFreshLoginAttempt = true;
+    currentSessionId = null;
     await auth.signInWithEmailAndPassword(email, password);
   } catch (err) {
     isFreshLoginAttempt = false;
@@ -519,6 +689,14 @@ async function loadInstructorAssignedSubjects() {
   }
 }
 
+function filterInstructorRosterBySection(section) {
+  activeInstructorSectionFilter = section;
+  if (activeSubjectCode) {
+    loadPendingEnrollments(activeSubjectCode);
+    loadOfficiallyEnrolledStudents(activeSubjectCode);
+  }
+}
+
 async function selectSubject(code, title, cardElement) {
   activeSubjectCode = code;
 
@@ -534,7 +712,7 @@ async function selectSubject(code, title, cardElement) {
 
   const currentClassTitle = document.getElementById('currentClassTitle');
   const currentClassMeta = document.getElementById('currentClassMeta');
-  
+
   if (currentClassTitle) currentClassTitle.innerText = `${code} - ${title}`;
   if (currentClassMeta) currentClassMeta.innerText = `Instructor: ${currentUserEmail} | Class Code: ${code}`;
 
@@ -1139,7 +1317,6 @@ async function releaseGrades() {
 
 async function loadAdminDashboardData() {
   try {
-    // 1. Load Faculty Directory
     const facultySnapshot = await db.collection('users').where('role', '==', 'instructor').get();
     const facultyCount = document.getElementById('facultyCountDisplay');
     if (facultyCount) facultyCount.innerText = facultySnapshot.size;
@@ -1187,7 +1364,6 @@ async function loadAdminDashboardData() {
       }
     });
 
-    // 2. Load Subjects & Active Assignments
     const subjectsSnapshot = await db.collection('subjects').get();
     const subjectsCount = document.getElementById('subjectsCountDisplay');
     if (subjectsCount) subjectsCount.innerText = subjectsSnapshot.size;
@@ -1275,7 +1451,6 @@ async function loadAdminDashboardData() {
       }
     }
 
-    // 3. Load At-Risk Student Intervention Panel Data & Admin Analytics
     const atRiskTable = document.getElementById('atRiskTableBody');
     const gradesSnapshot = await db.collection('grades').where('isReleased', '==', true).get();
     const allReleasedGrades = [];
@@ -1321,7 +1496,6 @@ async function loadAdminDashboardData() {
 
     renderAdminAnalytics(allReleasedGrades);
 
-    // 4. Load System Activity & Audit Logs
     const logsSnapshot = await db.collection('logs').orderBy('timestamp', 'desc').limit(10).get();
     const logsCount = document.getElementById('logsCountDisplay');
     if (logsCount) logsCount.innerText = logsSnapshot.size;
@@ -1650,17 +1824,18 @@ function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap =
     const label = yearNames[baseYear] || '1ST YEAR';
     return {
       yearLevel: baseYear,
+      unitsCompleted: 0,
       statusLabel: `PROMOTED TO ${label} - 1ST SEMESTER`,
       badgeLabel: `${label} - REGULAR`,
       badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-      standingText: `Regular Student (${label})`
+      standingText: `Regular Student (${label}) • 0 Units Completed`
     };
   }
 
-  // Filter out duplicate grade records by subject code so counts are exact
   const uniquePassedSubjects = new Map();
   const passedSemesters = new Set();
   const secondSemSubjects = new Set(['IS 2', 'MS 1', 'PROG 2', 'IS2', 'MS1', 'PROG2']);
+  let totalUnitsEarned = 0;
 
   allGrades.forEach(g => {
     const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
@@ -1669,8 +1844,11 @@ function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap =
     const finalsVal = g.finals !== undefined ? g.finals : g.final;
     const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
 
-    if (stats.isPassing) {
+    if (stats.isPassing && !uniquePassedSubjects.has(code)) {
       uniquePassedSubjects.set(code, true);
+
+      const subjectUnits = subjectMap[code] ? Number(subjectMap[code].units) || 0 : 3;
+      totalUnitsEarned += subjectUnits;
 
       let sem = normalizeSemester(g.semester);
       if (subjectMap[code] && subjectMap[code].semester) {
@@ -1687,20 +1865,16 @@ function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap =
   const hasPassed1stSem = passedSemesters.has('1st Semester');
   const hasPassed2ndSem = passedSemesters.has('2nd Semester');
 
-  // STRICT PROGRESSION CALCULATION
   let calculatedYearLevel = baseYear;
 
-  // Level 1: Completing 1st Year (both 1st & 2nd sem subjects passed) promotes to 2nd Year
   if (hasPassed1stSem && hasPassed2ndSem) {
     calculatedYearLevel = Math.max(baseYear, 2);
   }
 
-  // Level 2: Only promote to 3rd Year if >= 12 UNIQUE subjects AND 2nd year terms completed
   if (passedCount >= 12 && hasPassed2ndSem && calculatedYearLevel >= 2) {
     calculatedYearLevel = 3;
   }
 
-  // Level 3: 4th Year requirement
   if (passedCount >= 18 && calculatedYearLevel >= 3) {
     calculatedYearLevel = 4;
   }
@@ -1718,44 +1892,47 @@ function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap =
   if (failedITSubjects.length > 0) {
     return {
       yearLevel: calculatedYearLevel,
+      unitsCompleted: totalUnitsEarned,
       statusLabel: `${currentYearName} - IRREGULAR`,
       badgeLabel: `${currentYearName} - IRREGULAR`,
       badgeClass: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-      standingText: `Warning: ${failedITSubjects.length} IT Deficiency Subject(s)`
+      standingText: `Warning: ${failedITSubjects.length} IT Deficiency Subject(s) • ${totalUnitsEarned} Units Completed`
     };
   }
 
-  // Correct display badges
   if (hasPassed1stSem && hasPassed2ndSem && calculatedYearLevel === 2) {
     return {
       yearLevel: 2,
+      unitsCompleted: totalUnitsEarned,
       statusLabel: `PROMOTED TO 2ND YEAR - 1ST SEMESTER`,
       badgeLabel: `2ND YEAR - REGULAR`,
       badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-      standingText: `Good Academic Standing (Eligible for 2ND YEAR)`
+      standingText: `Good Academic Standing (${totalUnitsEarned} Units Completed)`
     };
   }
 
   if (hasPassed1stSem && !hasPassed2ndSem) {
     return {
       yearLevel: 1,
+      unitsCompleted: totalUnitsEarned,
       statusLabel: `PROMOTED TO 1ST YEAR - 2ND SEMESTER`,
       badgeLabel: `1ST YEAR - REGULAR`,
       badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-      standingText: `Good Academic Standing (Eligible for 1ST YEAR 2nd Semester)`
+      standingText: `Good Academic Standing (${totalUnitsEarned} Units Completed)`
     };
   }
 
   return {
     yearLevel: calculatedYearLevel,
+    unitsCompleted: totalUnitsEarned,
     statusLabel: `PROMOTED TO ${currentYearName} - 1ST SEMESTER`,
     badgeLabel: `${currentYearName} - REGULAR`,
     badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-    standingText: `Good Academic Standing`
+    standingText: `Good Academic Standing (${totalUnitsEarned} Units Completed)`
   };
 }
 
-function renderYearLevelProgressionBanner(allGrades) {
+function renderYearLevelProgressionBanner(allGrades, subjectMap = {}) {
   const banner = document.getElementById('studentProgressionBanner');
   const badge = document.getElementById('studentProgressionBadge');
   const text = document.getElementById('studentStandingText');
@@ -1763,7 +1940,7 @@ function renderYearLevelProgressionBanner(allGrades) {
   const profileSubtext = document.getElementById('profileStandingSubtext');
   const profileBadge = document.getElementById('profileYearLevelBadge');
 
-  const progression = evaluateAcademicProgression(allGrades, currentStudentEntryYear);
+  const progression = evaluateAcademicProgression(allGrades, currentStudentEntryYear, subjectMap);
 
   if (banner && badge && text) {
     banner.classList.remove('hidden');
@@ -1782,10 +1959,10 @@ function renderYearLevelProgressionBanner(allGrades) {
 
   if (profileSubtext) {
     if (failedITCount > 0) {
-      profileSubtext.textContent = `${failedITCount} Deficiency Subject(s)`;
+      profileSubtext.textContent = `${failedITCount} Deficiency Subject(s) • ${progression.unitsCompleted} Units Completed`;
       profileSubtext.className = "text-xs font-semibold text-rose-400";
     } else {
-      profileSubtext.textContent = "No Academic Deficiencies";
+      profileSubtext.textContent = `No Academic Deficiencies • ${progression.unitsCompleted} Units Completed`;
       profileSubtext.className = "text-xs text-slate-300";
     }
   }
@@ -1834,36 +2011,40 @@ async function loadStudentDashboard(studentId, fullName, userData = null) {
       return;
     }
 
-    const queries = [];
-    if (cleanStudentId) {
-      queries.push(
-        db.collection('grades')
-          .where('isReleased', '==', true)
-          .where('studentId', '==', cleanStudentId)
-          .get()
-      );
-    }
-    if (cleanFullName) {
-      queries.push(
-        db.collection('grades')
-          .where('isReleased', '==', true)
-          .where('fullName', '==', cleanFullName)
-          .get()
-      );
-    }
+    const [subjectsSnapshot, gradeSnapshots] = await Promise.all([
+      db.collection('subjects').get(),
+      Promise.all([
+        cleanStudentId ? db.collection('grades').where('isReleased', '==', true).where('studentId', '==', cleanStudentId).get() : null,
+        cleanFullName ? db.collection('grades').where('isReleased', '==', true).where('fullName', '==', cleanFullName).get() : null
+      ])
+    ]);
 
-    const snapshots = await Promise.all(queries);
+    const subjectMap = {};
+    subjectsSnapshot.forEach((doc) => {
+      const data = doc.data();
+      if (data.subjectCode) {
+        subjectMap[data.subjectCode.toUpperCase().trim()] = data;
+      }
+    });
+
     const gradeDocsMap = new Map();
-
-    snapshots.forEach((snapshot) => {
-      snapshot.forEach((doc) => {
-        gradeDocsMap.set(doc.id, doc.data());
-      });
+    gradeSnapshots.forEach((snapshot) => {
+      if (snapshot) {
+        snapshot.forEach((doc) => {
+          gradeDocsMap.set(doc.id, doc.data());
+        });
+      }
     });
 
     const matchedGrades = Array.from(gradeDocsMap.values());
 
-    renderYearLevelProgressionBanner(matchedGrades);
+    const progression = evaluateAcademicProgression(matchedGrades, currentStudentEntryYear, subjectMap);
+    const unitsDisplay = document.getElementById('profileUnitsCompleted');
+    if (unitsDisplay) {
+      unitsDisplay.textContent = `${progression.unitsCompleted} Units Completed`;
+    }
+
+    renderYearLevelProgressionBanner(matchedGrades, subjectMap);
 
     if (!matchedGrades.length) {
       const renderEmpty = (container) => {
@@ -1974,7 +2155,7 @@ async function openStudentGradeBreakdownModal(g) {
   const createItemList = (headingText, items) => {
     const sec = document.createElement('div');
     sec.className = "space-y-1.5 mb-3";
-    
+
     const h = document.createElement('div');
     h.className = "text-[11px] font-bold text-emerald-400 uppercase tracking-wider";
     h.textContent = headingText;
@@ -2178,7 +2359,13 @@ async function loadAvailableSubjectsForStudent() {
     enrollmentsSnapshot.forEach((doc) => {
       const e = doc.data();
       if (e.subjectCode) {
-        statusByCode[e.subjectCode.trim().toUpperCase()] = e.status;
+        const codeKey = e.subjectCode.trim().toUpperCase();
+        const existingStatus = statusByCode[codeKey];
+
+        // Prioritize 'pending' and 'approved' over stale 'rejected' records
+        if (!existingStatus || existingStatus === 'rejected' || e.status === 'pending' || e.status === 'approved') {
+          statusByCode[codeKey] = e.status;
+        }
       }
     });
 
@@ -2245,13 +2432,15 @@ async function loadAvailableSubjectsForStudent() {
         const left = document.createElement('div');
         left.className = "flex items-center gap-3 min-w-0";
 
-        if (!status && !hasUnmetPrerequisite) {
+        const isEligibleToApply = (!status || status === 'rejected') && !hasUnmetPrerequisite;
+
+        if (isEligibleToApply) {
           const checkbox = document.createElement('input');
           checkbox.type = 'checkbox';
-          checkbox.className = "prospectus-checkbox w-4 h-4 accent-emerald-500 shrink-0";
+          checkbox.className = "prospectus-checkbox w-4 h-4 accent-emerald-500 shrink-0 cursor-pointer";
           checkbox.dataset.subjectCode = s.subjectCode;
           left.appendChild(checkbox);
-        } else if (hasUnmetPrerequisite && !status) {
+        } else if (hasUnmetPrerequisite && (!status || status === 'rejected')) {
           const disabledBox = document.createElement('div');
           disabledBox.className = "w-4 h-4 rounded bg-slate-800 border border-slate-700 shrink-0 flex items-center justify-center text-[10px] text-slate-500";
           disabledBox.textContent = "🔒";
@@ -2279,7 +2468,7 @@ async function loadAvailableSubjectsForStudent() {
           const badgeConfig = {
             pending: { label: 'PENDING APPROVAL', cls: 'bg-amber-500/20 text-amber-400 border border-amber-500/30' },
             approved: { label: 'ENROLLED', cls: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' },
-            rejected: { label: 'NOT APPROVED', cls: 'bg-rose-500/20 text-rose-400 border border-rose-500/30' }
+            rejected: { label: 'NOT APPROVED (RE-APPLY)', cls: 'bg-rose-500/20 text-rose-400 border border-rose-500/30' }
           }[status] || { label: String(status).toUpperCase(), cls: 'bg-slate-700/40 text-slate-300 border border-slate-700' };
 
           const badge = document.createElement('span');
@@ -2329,33 +2518,63 @@ async function applySelectedSubjects() {
   const checkedBoxes = Array.from(document.querySelectorAll('.prospectus-checkbox:checked'));
   if (!checkedBoxes.length) return alert("Check at least one subject before applying.");
 
+  const selectedSection = prompt("Enter your designated class Section (e.g., BSIT-1A, BSIT-1B, BSIT-1C):", "BSIT-1A");
+  if (!selectedSection || !selectedSection.trim()) {
+    return alert("Section selection is required to submit an enrollment request.");
+  }
+
+  const cleanSection = selectedSection.trim().toUpperCase();
+
   try {
+    const existingEnrollmentsSnapshot = await db.collection('enrollments')
+      .where('studentUid', '==', currentUserId)
+      .get();
+
+    const existingDocsByCode = new Map();
+    existingEnrollmentsSnapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.subjectCode) {
+        existingDocsByCode.set(data.subjectCode.trim().toUpperCase(), doc.id);
+      }
+    });
+
     const batch = db.batch();
     const subjectCodes = [];
 
     checkedBoxes.forEach((checkbox) => {
       const subjectCode = checkbox.dataset.subjectCode;
       if (!subjectCode) return;
+
+      const cleanCode = subjectCode.trim().toUpperCase();
       subjectCodes.push(subjectCode);
 
-      const enrollmentId = buildEnrollmentDocId(subjectCode, currentUserId);
-      const ref = db.collection('enrollments').doc(enrollmentId);
+      const targetDocId = buildEnrollmentDocId(subjectCode, cleanSection, currentUserId);
+      const previousDocId = existingDocsByCode.get(cleanCode);
+
+      // Clean up previous enrollment documents if section changed
+      if (previousDocId && previousDocId !== targetDocId) {
+        batch.delete(db.collection('enrollments').doc(previousDocId));
+      }
+
+      const ref = db.collection('enrollments').doc(targetDocId);
+
       batch.set(ref, {
         subjectCode,
+        section: cleanSection,
         studentUid: currentUserId,
         studentId: currentStudentSchoolId || '',
         fullName: currentStudentFullName || '',
         status: 'pending',
         enrolledBy: 'student',
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
+      }, { merge: true });
     });
 
     if (!subjectCodes.length) return;
 
     await batch.commit();
-    await logActivity(currentUserEmail, `Requested enrollment in ${subjectCodes.join(', ')}`);
-    alert(`Enrollment requests sent for: ${subjectCodes.join(', ')}.`);
+    await logActivity(currentUserEmail, `Requested enrollment in ${subjectCodes.join(', ')} for Section ${cleanSection}`);
+    alert(`Enrollment request(s) submitted for: ${subjectCodes.join(', ')} (Section: ${cleanSection}).`);
     loadAvailableSubjectsForStudent();
   } catch (err) {
     console.error("Error applying for selected subjects:", err);
@@ -2424,14 +2643,21 @@ async function loadPendingEnrollments(subjectCode) {
 
     container.innerHTML = '';
 
-    if (snapshot.empty) {
-      container.innerHTML = `<div class="p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">No pending roster requests.</div>`;
+    const pendingDocs = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (activeInstructorSectionFilter === 'ALL' || data.section === activeInstructorSectionFilter) {
+        pendingDocs.push({ id: doc.id, ...data });
+      }
+    });
+
+    if (pendingDocs.length === 0) {
+      container.innerHTML = `<div class="p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">No pending roster requests for Section [${activeInstructorSectionFilter}].</div>`;
       return;
     }
 
-    snapshot.forEach((doc) => {
-      const e = doc.data();
-      const docId = doc.id;
+    pendingDocs.forEach((e) => {
+      const docId = e.id;
 
       const row = document.createElement('div');
       row.className = "flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950 hover:bg-slate-900/60 transition-all";
@@ -2447,7 +2673,10 @@ async function loadPendingEnrollments(subjectCode) {
       const info = document.createElement('div');
       info.className = "min-w-0";
       info.innerHTML = `
-        <div class="text-sm font-semibold text-white truncate">${escapeHtml(e.fullName || 'Student')}</div>
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-semibold text-white truncate">${escapeHtml(e.fullName || 'Student')}</span>
+          <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-emerald-400 border border-slate-700">${escapeHtml(e.section || 'N/A')}</span>
+        </div>
         <div class="text-xs text-slate-400 font-mono">${escapeHtml(e.studentId || 'N/A')}</div>
       `;
 
@@ -2495,22 +2724,29 @@ async function loadOfficiallyEnrolledStudents(subjectCode) {
 
     container.innerHTML = '';
 
+    const enrolledDocs = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (activeInstructorSectionFilter === 'ALL' || data.section === activeInstructorSectionFilter) {
+        enrolledDocs.push({ id: doc.id, ...data });
+      }
+    });
+
     if (countBadge) {
-      countBadge.textContent = `${snapshot.size} Enrolled`;
+      countBadge.textContent = `${enrolledDocs.length} Enrolled (${activeInstructorSectionFilter})`;
     }
 
-    if (snapshot.empty) {
+    if (enrolledDocs.length === 0) {
       container.innerHTML = `
         <div class="p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">
-          No officially enrolled students for this class.
+          No officially enrolled students for Section [${activeInstructorSectionFilter}].
         </div>
       `;
       return;
     }
 
-    snapshot.forEach((doc) => {
-      const e = doc.data();
-      const docId = doc.id;
+    enrolledDocs.forEach((e) => {
+      const docId = e.id;
 
       const row = document.createElement('div');
       row.className = "flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950 hover:bg-slate-900/60 transition-all";
@@ -2518,7 +2754,10 @@ async function loadOfficiallyEnrolledStudents(subjectCode) {
       const info = document.createElement('div');
       info.className = "min-w-0";
       info.innerHTML = `
-        <div class="text-sm font-semibold text-white truncate">${escapeHtml(e.fullName || 'Student')}</div>
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-semibold text-white truncate">${escapeHtml(e.fullName || 'Student')}</span>
+          <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">${escapeHtml(e.section || 'N/A')}</span>
+        </div>
         <div class="text-xs text-slate-400 font-mono">${escapeHtml(e.studentId || 'N/A')}</div>
       `;
 
@@ -2558,7 +2797,8 @@ async function dropEnrolledStudent(enrollmentId, subjectCode, studentName) {
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     await logActivity(currentUserEmail, `Dropped ${studentName || enrollmentId} from ${subjectCode}`);
-    loadOfficiallyEnrolledStudents(subjectCode);
+    loadPendingEnrollments(subjectCode || activeSubjectCode);
+    loadOfficiallyEnrolledStudents(subjectCode || activeSubjectCode);
   } catch (err) {
     console.error("Error dropping student:", err);
     alert("Error dropping student: " + err.message);
