@@ -155,8 +155,9 @@ function buildGradeDocId(subjectCode, studentId) {
   return `${subjectCode}_${String(studentId).trim()}`;
 }
 
-function buildAssignmentDocId(facultyUid, subjectCode) {
-  return `${facultyUid}_${subjectCode}`;
+function buildAssignmentDocId(facultyUid, subjectCode, section = 'ALL') {
+  const cleanSection = String(section || 'ALL').trim().toUpperCase();
+  return `${facultyUid}_${subjectCode}_${cleanSection}`;
 }
 
 function normalizeNameKey(fullName) {
@@ -605,7 +606,7 @@ async function saveInstructorGradingFormula() {
       .doc(`${currentUserId}_${activeSubjectCode}`)
       .set(formulaData, { merge: true });
 
-    const assignmentDocId = buildAssignmentDocId(currentUserId, activeSubjectCode);
+    const assignmentDocId = buildAssignmentDocId(currentUserId, activeSubjectCode, activeInstructorSectionFilter);
     await db.collection('assignments')
       .doc(assignmentDocId)
       .set({ gradingFormula: { weightLab, weightQuizzes, weightOutput, weightExam } }, { merge: true })
@@ -639,25 +640,19 @@ async function loadInstructorAssignedSubjects() {
       return;
     }
 
-    const bySubjectCode = new Map();
-    for (const doc of assignSnapshot.docs) {
-      const assignment = doc.data();
-      const code = assignment.subjectCode;
-      if (!code) continue;
-
-      const isCanonical = doc.id === buildAssignmentDocId(currentUserId, code);
-      const existing = bySubjectCode.get(code);
-
-      if (!existing || isCanonical) {
-        bySubjectCode.set(code, assignment);
+    const assignmentsList = [];
+    assignSnapshot.forEach((doc) => {
+      const a = doc.data();
+      if (a.subjectCode) {
+        assignmentsList.push({ ...a, section: a.section || 'ALL' });
       }
-    }
+    });
 
-    const uniqueAssignments = Array.from(bySubjectCode.values());
     let isFirst = true;
 
-    for (const assignment of uniqueAssignments) {
+    for (const assignment of assignmentsList) {
       const code = assignment.subjectCode;
+      const section = assignment.section || 'ALL';
 
       let subjectName = code;
       let units = 3;
@@ -671,16 +666,19 @@ async function loadInstructorAssignedSubjects() {
 
       const card = document.createElement('div');
       card.className = `p-4 rounded-xl border ${isFirst ? 'border-emerald-500/50 bg-slate-800/80' : 'border-slate-800 bg-slate-950'} hover:bg-slate-800 cursor-pointer transition-all space-y-1`;
-      card.onclick = () => selectSubject(code, subjectName, card);
+      card.onclick = () => selectSubject(code, subjectName, section, card);
       card.innerHTML = `
-        <div class="font-bold text-sm text-white">${escapeHtml(code)} - ${escapeHtml(subjectName)}</div>
-        <div class="text-xs text-slate-400">${Number(units) || 0} Units • Assigned Subject</div>
+        <div class="flex items-center justify-between gap-2">
+          <div class="font-bold text-sm text-white truncate">${escapeHtml(code)} - ${escapeHtml(subjectName)}</div>
+          <span class="shrink-0 px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">${escapeHtml(section)}</span>
+        </div>
+        <div class="text-xs text-slate-400">${Number(units) || 0} Units • Assigned Section</div>
         <div class="text-xs font-bold text-emerald-400 pt-1">● Active Workspace</div>
       `;
       container.appendChild(card);
 
       if (isFirst) {
-        selectSubject(code, subjectName, card);
+        selectSubject(code, subjectName, section, card);
         isFirst = false;
       }
     }
@@ -692,13 +690,15 @@ async function loadInstructorAssignedSubjects() {
 function filterInstructorRosterBySection(section) {
   activeInstructorSectionFilter = section;
   if (activeSubjectCode) {
+    loadInstructorGradesFromFirestore(activeSubjectCode, section);
     loadPendingEnrollments(activeSubjectCode);
     loadOfficiallyEnrolledStudents(activeSubjectCode);
   }
 }
 
-async function selectSubject(code, title, cardElement) {
+async function selectSubject(code, title, section = 'ALL', cardElement = null) {
   activeSubjectCode = code;
+  activeInstructorSectionFilter = section;
 
   const container = document.getElementById('assignedClassesList');
   if (container) {
@@ -713,8 +713,8 @@ async function selectSubject(code, title, cardElement) {
   const currentClassTitle = document.getElementById('currentClassTitle');
   const currentClassMeta = document.getElementById('currentClassMeta');
 
-  if (currentClassTitle) currentClassTitle.innerText = `${code} - ${title}`;
-  if (currentClassMeta) currentClassMeta.innerText = `Instructor: ${currentUserEmail} | Class Code: ${code}`;
+  if (currentClassTitle) currentClassTitle.innerText = `${code} (${section}) - ${title}`;
+  if (currentClassMeta) currentClassMeta.innerText = `Instructor: ${currentUserEmail} | Subject: ${code} | Section: ${section}`;
 
   try {
     let gf = null;
@@ -743,7 +743,7 @@ async function selectSubject(code, title, cardElement) {
     console.warn("Could not load formula config:", e);
   }
 
-  loadInstructorGradesFromFirestore(code);
+  loadInstructorGradesFromFirestore(code, section);
   loadPendingEnrollments(code);
   loadOfficiallyEnrolledStudents(code);
 }
@@ -762,17 +762,17 @@ function setActiveSemester(sem) {
   if (btn2S) btn2S.classList.add(...(activeSemester === '2nd Semester' ? ACTIVE : INACTIVE));
 
   if (activeSubjectCode) {
-    loadInstructorGradesFromFirestore(activeSubjectCode);
+    loadInstructorGradesFromFirestore(activeSubjectCode, activeInstructorSectionFilter);
   }
 }
 
-async function loadInstructorGradesFromFirestore(subjectCode) {
+async function loadInstructorGradesFromFirestore(subjectCode, section = activeInstructorSectionFilter) {
   const tbody = document.getElementById('previewBody');
   if (!tbody) return;
 
   tbody.innerHTML = `
     <tr>
-      <td colspan="7" class="px-4 py-8 text-center text-slate-400 animate-pulse">Loading grades from Firebase...</td>
+      <td colspan="7" class="px-4 py-8 text-center text-slate-400 animate-pulse">Loading grades for Section ${escapeHtml(section)}...</td>
     </tr>
   `;
 
@@ -780,6 +780,20 @@ async function loadInstructorGradesFromFirestore(subjectCode) {
     const semQueryValues = (activeSemester === '1st Semester' || activeSemester === '1S')
       ? ['1S', '1st Semester']
       : ['2S', '2nd Semester'];
+
+    let sectionStudentIds = null;
+    if (section && section !== 'ALL') {
+      const enrollSnap = await db.collection('enrollments')
+        .where('subjectCode', '==', subjectCode)
+        .where('section', '==', section)
+        .get();
+
+      sectionStudentIds = new Set();
+      enrollSnap.forEach(doc => {
+        const data = doc.data();
+        if (data.studentId) sectionStudentIds.add(String(data.studentId).trim());
+      });
+    }
 
     const snapshot = await db.collection('grades')
       .where('classId', '==', subjectCode)
@@ -790,7 +804,7 @@ async function loadInstructorGradesFromFirestore(subjectCode) {
       tbody.innerHTML = `
         <tr>
           <td colspan="7" class="px-4 py-12 text-center text-slate-500 italic">
-            No grades saved for ${escapeHtml(subjectCode)} (${escapeHtml(semesterDisplayLabel(activeSemester))}). Upload an Excel file below to import student grades.
+            No grades saved for ${escapeHtml(subjectCode)} [${escapeHtml(section)}] (${escapeHtml(semesterDisplayLabel(activeSemester))}). Upload an Excel file below to import student grades.
           </td>
         </tr>
       `;
@@ -806,6 +820,12 @@ async function loadInstructorGradesFromFirestore(subjectCode) {
 
     snapshot.forEach((doc) => {
       const g = doc.data();
+      const studentId = String(g.studentId || '').trim();
+
+      if (sectionStudentIds && !sectionStudentIds.has(studentId)) {
+        return;
+      }
+
       const nameKey = normalizeNameKey(g.fullName);
       if (!nameKey) return;
 
@@ -854,6 +874,16 @@ async function loadInstructorGradesFromFirestore(subjectCode) {
       tr.addEventListener('click', () => openStudentGradeBreakdownModal(g));
       tbody.appendChild(tr);
     });
+
+    if (parsedGradeData.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="7" class="px-4 py-12 text-center text-slate-500 italic">
+            No enrolled students in Section [${escapeHtml(section)}] have saved grades yet.
+          </td>
+        </tr>
+      `;
+    }
 
     renderInstructorAnalytics(parsedGradeData);
   } catch (err) {
@@ -1242,18 +1272,41 @@ async function saveDraftGrades() {
   if (!parsedGradeData.length) return alert("Upload an Excel sheet to parse grades first.");
 
   try {
+    let allowedStudentIds = null;
+    if (activeInstructorSectionFilter && activeInstructorSectionFilter !== 'ALL') {
+      const sectionEnrollments = await db.collection('enrollments')
+        .where('subjectCode', '==', activeSubjectCode)
+        .where('section', '==', activeInstructorSectionFilter)
+        .get();
+
+      allowedStudentIds = new Set();
+      sectionEnrollments.forEach(doc => {
+        const data = doc.data();
+        if (data.studentId) allowedStudentIds.add(String(data.studentId).trim());
+      });
+    }
+
     const registeredIndex = await buildRegisteredStudentIndex(activeSubjectCode);
     const batch = db.batch();
+    let savedCount = 0;
+
     parsedGradeData.forEach((row) => {
       const effectiveStudentId = resolveEffectiveStudentId(row, activeSubjectCode, registeredIndex, batch);
-      const docId = buildGradeDocId(activeSubjectCode, effectiveStudentId);
+      const cleanStudentId = String(effectiveStudentId).trim();
+
+      if (allowedStudentIds && allowedStudentIds.size > 0 && !allowedStudentIds.has(cleanStudentId)) {
+        return;
+      }
+
+      const docId = buildGradeDocId(activeSubjectCode, cleanStudentId);
       const docRef = db.collection('grades').doc(docId);
       const stats = computeGradeStats(row.prelim, row.midterm, row.finals);
 
       batch.set(docRef, {
         classId: activeSubjectCode, 
-        studentId: String(effectiveStudentId).trim(), 
+        studentId: cleanStudentId, 
         fullName: row.fullName,
+        section: activeInstructorSectionFilter,
         prelim: stats.prelim, 
         midterm: stats.midterm,
         finals: stats.finals, 
@@ -1262,12 +1315,14 @@ async function saveDraftGrades() {
         isReleased: false,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
+
+      savedCount++;
     });
 
     await batch.commit();
-    await logActivity(currentUserEmail, `Saved draft grades for ${activeSubjectCode}`);
-    alert("Draft grades successfully saved to Firebase!");
-    loadInstructorGradesFromFirestore(activeSubjectCode);
+    await logActivity(currentUserEmail, `Saved draft grades for ${activeSubjectCode} [${activeInstructorSectionFilter}] (${savedCount} records)`);
+    alert(`Draft grades successfully saved for ${savedCount} student(s) in Section ${activeInstructorSectionFilter}!`);
+    loadInstructorGradesFromFirestore(activeSubjectCode, activeInstructorSectionFilter);
   } catch (err) {
     console.error("Save Draft Error:", err);
     alert("Error saving draft: " + err.message);
@@ -1279,18 +1334,41 @@ async function releaseGrades() {
   if (!parsedGradeData.length) return alert("Upload an Excel sheet to parse grades first.");
 
   try {
+    let allowedStudentIds = null;
+    if (activeInstructorSectionFilter && activeInstructorSectionFilter !== 'ALL') {
+      const sectionEnrollments = await db.collection('enrollments')
+        .where('subjectCode', '==', activeSubjectCode)
+        .where('section', '==', activeInstructorSectionFilter)
+        .get();
+
+      allowedStudentIds = new Set();
+      sectionEnrollments.forEach(doc => {
+        const data = doc.data();
+        if (data.studentId) allowedStudentIds.add(String(data.studentId).trim());
+      });
+    }
+
     const registeredIndex = await buildRegisteredStudentIndex(activeSubjectCode);
     const batch = db.batch();
+    let releasedCount = 0;
+
     parsedGradeData.forEach((row) => {
       const effectiveStudentId = resolveEffectiveStudentId(row, activeSubjectCode, registeredIndex, batch);
-      const docId = buildGradeDocId(activeSubjectCode, effectiveStudentId);
+      const cleanStudentId = String(effectiveStudentId).trim();
+
+      if (allowedStudentIds && allowedStudentIds.size > 0 && !allowedStudentIds.has(cleanStudentId)) {
+        return;
+      }
+
+      const docId = buildGradeDocId(activeSubjectCode, cleanStudentId);
       const gradeRef = db.collection('grades').doc(docId);
       const stats = computeGradeStats(row.prelim, row.midterm, row.finals);
 
       batch.set(gradeRef, {
         classId: activeSubjectCode, 
-        studentId: String(effectiveStudentId).trim(), 
+        studentId: cleanStudentId, 
         fullName: row.fullName,
+        section: activeInstructorSectionFilter,
         prelim: stats.prelim, 
         midterm: stats.midterm,
         finals: stats.finals, 
@@ -1299,12 +1377,14 @@ async function releaseGrades() {
         isReleased: true,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
+
+      releasedCount++;
     });
 
     await batch.commit();
-    await logActivity(currentUserEmail, `Released official grades for ${activeSubjectCode}`);
-    alert("Official grades successfully released to Firebase!");
-    loadInstructorGradesFromFirestore(activeSubjectCode);
+    await logActivity(currentUserEmail, `Released official grades for ${activeSubjectCode} [${activeInstructorSectionFilter}] (${releasedCount} records)`);
+    alert(`Official grades successfully released for ${releasedCount} student(s) in Section ${activeInstructorSectionFilter}!`);
+    loadInstructorGradesFromFirestore(activeSubjectCode, activeInstructorSectionFilter);
   } catch (err) {
     console.error("Release Error:", err);
     alert("Error releasing grades: " + err.message);
@@ -1386,12 +1466,12 @@ async function loadAdminDashboardData() {
     const activeAssignmentsList = document.getElementById('activeAssignmentsList');
     if (activeAssignmentsList) {
       const assignmentsSnapshot = await db.collection('assignments').get();
-      const subjectCodesByFaculty = {};
+      const assignmentsByFaculty = {};
 
       assignmentsSnapshot.forEach((doc) => {
         const a = doc.data();
-        if (!subjectCodesByFaculty[a.facultyUid]) subjectCodesByFaculty[a.facultyUid] = [];
-        subjectCodesByFaculty[a.facultyUid].push(a.subjectCode);
+        if (!assignmentsByFaculty[a.facultyUid]) assignmentsByFaculty[a.facultyUid] = [];
+        assignmentsByFaculty[a.facultyUid].push({ ...a, section: a.section || 'ALL' });
       });
 
       activeAssignmentsList.innerHTML = '';
@@ -1406,7 +1486,7 @@ async function loadAdminDashboardData() {
         facultySnapshot.forEach((facultyDoc) => {
           const facultyUid = facultyDoc.id;
           const facultyLabel = facultyDisplayLabel(facultyInfoByUid[facultyUid] || {});
-          const subjectCodes = subjectCodesByFaculty[facultyUid] || [];
+          const assignedSubjects = assignmentsByFaculty[facultyUid] || [];
 
           const card = document.createElement('div');
           card.className = "p-3 rounded-lg border border-slate-800 bg-slate-950 space-y-2";
@@ -1419,20 +1499,23 @@ async function loadAdminDashboardData() {
           const subjectsContainer = document.createElement('div');
           subjectsContainer.className = "space-y-1";
 
-          if (subjectCodes.length) {
-            subjectCodes.forEach((code) => {
+          if (assignedSubjects.length) {
+            assignedSubjects.forEach((assignment) => {
+              const code = assignment.subjectCode;
+              const section = assignment.section || 'ALL';
               const subjectName = subjectNameByCode[code] || code;
+
               const subjectRow = document.createElement('div');
               subjectRow.className = "flex items-center justify-between gap-3 pl-3 border-l-2 border-emerald-500/30 py-1";
 
               const label = document.createElement('span');
               label.className = "text-xs text-slate-300 truncate";
-              label.textContent = `${code} - ${subjectName}`;
+              label.textContent = `${code} (${section}) - ${subjectName}`;
 
               const unassignBtn = document.createElement('button');
               unassignBtn.className = "shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition-all";
               unassignBtn.textContent = "Unassign";
-              unassignBtn.addEventListener('click', () => unassignSubjectFromFaculty(facultyUid, code));
+              unassignBtn.addEventListener('click', () => unassignSubjectFromFaculty(facultyUid, code, section));
 
               subjectRow.appendChild(label);
               subjectRow.appendChild(unassignBtn);
@@ -1532,8 +1615,17 @@ async function toggleFacultyStatus(uid, currentStatus) {
 
 async function assignSubjectToFaculty() {
   const facultySelect = document.getElementById('assignFacultySelect');
-  const facultyUid = facultySelect.value;
-  const subjectCode = document.getElementById('assignSubjectSelect').value;
+  const facultyUid = facultySelect ? facultySelect.value : '';
+  const subjectCode = document.getElementById('assignSubjectSelect') ? document.getElementById('assignSubjectSelect').value : '';
+
+  const sectionInput = document.getElementById('assignSectionInput');
+  let selectedSection = sectionInput ? sectionInput.value.trim().toUpperCase() : '';
+
+  if (!selectedSection) {
+    const promptedSection = prompt("Enter the Section code to assign (e.g., BSIT-1A, BSIT-1B, ALL):", "BSIT-1A");
+    if (!promptedSection) return;
+    selectedSection = promptedSection.trim().toUpperCase();
+  }
 
   if (!facultyUid || !subjectCode) {
     alert("Please select both a faculty member and a subject.");
@@ -1541,23 +1633,26 @@ async function assignSubjectToFaculty() {
   }
 
   const facultyEmail = facultySelect.options[facultySelect.selectedIndex]?.text || facultyUid;
-  const assignmentId = buildAssignmentDocId(facultyUid, subjectCode);
+  const assignmentId = buildAssignmentDocId(facultyUid, subjectCode, selectedSection);
   const assignmentRef = db.collection('assignments').doc(assignmentId);
 
   try {
     const existingDoc = await assignmentRef.get();
 
     if (existingDoc.exists) {
-      alert(`Notice: ${subjectCode} is already assigned to this instructor.`);
+      alert(`Notice: ${subjectCode} [${selectedSection}] is already assigned to this instructor.`);
       return;
     }
 
     await assignmentRef.set({
-      facultyUid, subjectCode,
+      facultyUid, 
+      subjectCode,
+      section: selectedSection,
       assignedAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    await logActivity(currentUserEmail, `Assigned ${subjectCode} to instructor ${facultyUid}`);
-    alert(`Successfully assigned ${subjectCode} to ${facultyEmail}!`);
+    }, { merge: true });
+
+    await logActivity(currentUserEmail, `Assigned ${subjectCode} (${selectedSection}) to instructor ${facultyUid}`);
+    alert(`Successfully assigned ${subjectCode} [Section: ${selectedSection}] to ${facultyEmail}!`);
     loadAdminDashboardData();
   } catch (err) {
     console.error("Assign Subject Error:", err);
@@ -1565,15 +1660,20 @@ async function assignSubjectToFaculty() {
   }
 }
 
-async function unassignSubjectFromFaculty(facultyUid, subjectCode) {
-  const confirmed = confirm(`Are you sure you want to unassign ${subjectCode} from this instructor?`);
+async function unassignSubjectFromFaculty(facultyUid, subjectCode, section = 'ALL') {
+  const confirmed = confirm(`Are you sure you want to unassign ${subjectCode} (${section}) from this instructor?`);
   if (!confirmed) return;
 
   try {
-    const assignmentId = buildAssignmentDocId(facultyUid, subjectCode);
+    const assignmentId = buildAssignmentDocId(facultyUid, subjectCode, section);
     await db.collection('assignments').doc(assignmentId).delete();
-    await logActivity(currentUserEmail, `Unassigned ${subjectCode} from instructor ${facultyUid}`);
-    alert(`${subjectCode} has been unassigned from this instructor.`);
+
+    // Fallback cleanup for unsectioned legacy keys
+    const legacyId = `${facultyUid}_${subjectCode}`;
+    await db.collection('assignments').doc(legacyId).delete().catch(() => {});
+
+    await logActivity(currentUserEmail, `Unassigned ${subjectCode} (${section}) from instructor ${facultyUid}`);
+    alert(`${subjectCode} (${section}) has been unassigned from this instructor.`);
     loadAdminDashboardData();
   } catch (err) {
     console.error("Unassign Subject Error:", err);
@@ -1790,10 +1890,11 @@ async function migrateLegacyAssignmentIds() {
 
     snapshot.forEach((doc) => {
       const data = doc.data();
-      const canonicalId = buildAssignmentDocId(data.facultyUid, data.subjectCode);
+      const targetSection = data.section || 'ALL';
+      const canonicalId = buildAssignmentDocId(data.facultyUid, data.subjectCode, targetSection);
 
       if (doc.id !== canonicalId && data.facultyUid && data.subjectCode) {
-        batch.set(db.collection('assignments').doc(canonicalId), data);
+        batch.set(db.collection('assignments').doc(canonicalId), { ...data, section: targetSection });
         batch.delete(doc.ref);
         count++;
       }
