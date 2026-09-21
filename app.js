@@ -1074,6 +1074,7 @@ function processExcel() {
   reader.readAsArrayBuffer(file);
 }
 
+// === ADDED / MODIFIED SECTION START ===
 function processMultiTabExcel(workbook) {
   const summarySheetName = workbook.SheetNames.find(s => s.toUpperCase().includes("FINAL GRADE")) ||
                            workbook.SheetNames.find(s => s.toUpperCase().includes("AVERAGE")) ||
@@ -1106,6 +1107,25 @@ function processMultiTabExcel(workbook) {
   const midtermIdx = headers.findIndex(h => h.toLowerCase() === "midterm");
   const finalIdx = headers.findIndex(h => h.toLowerCase() === "final" || h.toLowerCase().includes("finals"));
 
+  // Locate Itemized Assessment Column Indices
+  const pQ1Idx = headers.findIndex(h => h.toLowerCase() === "p_q1");
+  const pQ2Idx = headers.findIndex(h => h.toLowerCase() === "p_q2");
+  const pQ3Idx = headers.findIndex(h => h.toLowerCase() === "p_q3");
+  const pAttIdx = headers.findIndex(h => h.toLowerCase() === "p_att");
+  const pExamIdx = headers.findIndex(h => h.toLowerCase() === "p_exam");
+
+  const mQ1Idx = headers.findIndex(h => h.toLowerCase() === "m_q1");
+  const mQ2Idx = headers.findIndex(h => h.toLowerCase() === "m_q2");
+  const mQ3Idx = headers.findIndex(h => h.toLowerCase() === "m_q3");
+  const mAttIdx = headers.findIndex(h => h.toLowerCase() === "m_att");
+  const mExamIdx = headers.findIndex(h => h.toLowerCase() === "m_exam");
+
+  const fQ1Idx = headers.findIndex(h => h.toLowerCase() === "f_q1");
+  const fQ2Idx = headers.findIndex(h => h.toLowerCase() === "f_q2");
+  const fQ3Idx = headers.findIndex(h => h.toLowerCase() === "f_q3");
+  const fAttIdx = headers.findIndex(h => h.toLowerCase() === "f_att");
+  const fExamIdx = headers.findIndex(h => h.toLowerCase() === "f_exam");
+
   parsedGradeData = [];
 
   for (let r = headerRowIndex + 1; r < summaryMatrix.length; r++) {
@@ -1123,7 +1143,26 @@ function processMultiTabExcel(workbook) {
       fullName: rawName,
       prelim: parseFloat(prelim.toFixed(2)),
       midterm: parseFloat(midterm.toFixed(2)),
-      finals: parseFloat(finals.toFixed(2))
+      finals: parseFloat(finals.toFixed(2)),
+
+      // Itemized values
+      p_q1: pQ1Idx !== -1 && row[pQ1Idx] !== "" ? parseFloat(row[pQ1Idx]) : null,
+      p_q2: pQ2Idx !== -1 && row[pQ2Idx] !== "" ? parseFloat(row[pQ2Idx]) : null,
+      p_q3: pQ3Idx !== -1 && row[pQ3Idx] !== "" ? parseFloat(row[pQ3Idx]) : null,
+      p_att: pAttIdx !== -1 && row[pAttIdx] !== "" ? parseFloat(row[pAttIdx]) : null,
+      p_exam: pExamIdx !== -1 && row[pExamIdx] !== "" ? parseFloat(row[pExamIdx]) : null,
+
+      m_q1: mQ1Idx !== -1 && row[mQ1Idx] !== "" ? parseFloat(row[mQ1Idx]) : null,
+      m_q2: mQ2Idx !== -1 && row[mQ2Idx] !== "" ? parseFloat(row[mQ2Idx]) : null,
+      m_q3: mQ3Idx !== -1 && row[mQ3Idx] !== "" ? parseFloat(row[mQ3Idx]) : null,
+      m_att: mAttIdx !== -1 && row[mAttIdx] !== "" ? parseFloat(row[mAttIdx]) : null,
+      m_exam: mExamIdx !== -1 && row[mExamIdx] !== "" ? parseFloat(row[mExamIdx]) : null,
+
+      f_q1: fQ1Idx !== -1 && row[fQ1Idx] !== "" ? parseFloat(row[fQ1Idx]) : null,
+      f_q2: fQ2Idx !== -1 && row[fQ2Idx] !== "" ? parseFloat(row[fQ2Idx]) : null,
+      f_q3: fQ3Idx !== -1 && row[fQ3Idx] !== "" ? parseFloat(row[fQ3Idx]) : null,
+      f_att: fAttIdx !== -1 && row[fAttIdx] !== "" ? parseFloat(row[fAttIdx]) : null,
+      f_exam: fExamIdx !== -1 && row[fExamIdx] !== "" ? parseFloat(row[fExamIdx]) : null
     });
   }
 
@@ -1165,6 +1204,25 @@ function processSingleTabExcel(workbook) {
   const midtermIdx = headers.findIndex(h => h.toLowerCase() === "midterm");
   const finalIdx = headers.findIndex(h => h.toLowerCase() === "final" || h.toLowerCase().includes("finals"));
 
+  // Locate Itemized Assessment Column Indices
+  const pQ1Idx = headers.findIndex(h => h.toLowerCase() === "p_q1");
+  const pQ2Idx = headers.findIndex(h => h.toLowerCase() === "p_q2");
+  const pQ3Idx = headers.findIndex(h => h.toLowerCase() === "p_q3");
+  const pAttIdx = headers.findIndex(h => h.toLowerCase() === "p_att");
+  const pExamIdx = headers.findIndex(h => h.toLowerCase() === "p_exam");
+
+  const mQ1Idx = headers.findIndex(h => h.toLowerCase() === "m_q1");
+  const mQ2Idx = headers.findIndex(h => h.toLowerCase() === "m_q2");
+  const mQ3Idx = headers.findIndex(h => h.toLowerCase() === "m_q3");
+  const mAttIdx = headers.findIndex(h => h.toLowerCase() === "m_att");
+  const mExamIdx = headers.findIndex(h => h.toLowerCase() === "m_exam");
+
+  const fQ1Idx = headers.findIndex(h => h.toLowerCase() === "f_q1");
+  const fQ2Idx = headers.findIndex(h => h.toLowerCase() === "f_q2");
+  const fQ3Idx = headers.findIndex(h => h.toLowerCase() === "f_q3");
+  const fAttIdx = headers.findIndex(h => h.toLowerCase() === "f_att");
+  const fExamIdx = headers.findIndex(h => h.toLowerCase() === "f_exam");
+
   parsedGradeData = [];
   for (let r = headerRowIndex + 1; r < matrix.length; r++) {
     const row = matrix[r];
@@ -1181,7 +1239,26 @@ function processSingleTabExcel(workbook) {
       fullName: rawName,
       prelim: parseFloat(prelim.toFixed(2)),
       midterm: parseFloat(midterm.toFixed(2)),
-      finals: parseFloat(finals.toFixed(2))
+      finals: parseFloat(finals.toFixed(2)),
+
+      // Itemized values
+      p_q1: pQ1Idx !== -1 && row[pQ1Idx] !== "" ? parseFloat(row[pQ1Idx]) : null,
+      p_q2: pQ2Idx !== -1 && row[pQ2Idx] !== "" ? parseFloat(row[pQ2Idx]) : null,
+      p_q3: pQ3Idx !== -1 && row[pQ3Idx] !== "" ? parseFloat(row[pQ3Idx]) : null,
+      p_att: pAttIdx !== -1 && row[pAttIdx] !== "" ? parseFloat(row[pAttIdx]) : null,
+      p_exam: pExamIdx !== -1 && row[pExamIdx] !== "" ? parseFloat(row[pExamIdx]) : null,
+
+      m_q1: mQ1Idx !== -1 && row[mQ1Idx] !== "" ? parseFloat(row[mQ1Idx]) : null,
+      m_q2: mQ2Idx !== -1 && row[mQ2Idx] !== "" ? parseFloat(row[mQ2Idx]) : null,
+      m_q3: mQ3Idx !== -1 && row[mQ3Idx] !== "" ? parseFloat(row[mQ3Idx]) : null,
+      m_att: mAttIdx !== -1 && row[mAttIdx] !== "" ? parseFloat(row[mAttIdx]) : null,
+      m_exam: mExamIdx !== -1 && row[mExamIdx] !== "" ? parseFloat(row[mExamIdx]) : null,
+
+      f_q1: fQ1Idx !== -1 && row[fQ1Idx] !== "" ? parseFloat(row[fQ1Idx]) : null,
+      f_q2: fQ2Idx !== -1 && row[fQ2Idx] !== "" ? parseFloat(row[fQ2Idx]) : null,
+      f_q3: fQ3Idx !== -1 && row[fQ3Idx] !== "" ? parseFloat(row[fQ3Idx]) : null,
+      f_att: fAttIdx !== -1 && row[fAttIdx] !== "" ? parseFloat(row[fAttIdx]) : null,
+      f_exam: fExamIdx !== -1 && row[fExamIdx] !== "" ? parseFloat(row[fExamIdx]) : null
     });
   }
 
@@ -1189,6 +1266,7 @@ function processSingleTabExcel(workbook) {
   renderInstructorAnalytics(parsedGradeData);
   alert(`Imported ${parsedGradeData.length} student record(s).`);
 }
+// === ADDED / MODIFIED SECTION END ===
 
 function renderParsedGradesToTable() {
   const tbody = document.getElementById('previewBody');
@@ -1267,6 +1345,7 @@ function resolveEffectiveStudentId(row, subjectCode, registeredIndex, batch) {
   return match.studentId;
 }
 
+// === ADDED / MODIFIED SECTION START ===
 async function saveDraftGrades() {
   if (!activeSubjectCode) return alert("Select an active subject first.");
   if (!parsedGradeData.length) return alert("Upload an Excel sheet to parse grades first.");
@@ -1310,6 +1389,12 @@ async function saveDraftGrades() {
         prelim: stats.prelim, 
         midterm: stats.midterm,
         finals: stats.finals, 
+
+        // Store Itemized Assessment Breakdown
+        p_q1: row.p_q1 ?? null, p_q2: row.p_q2 ?? null, p_q3: row.p_q3 ?? null, p_att: row.p_att ?? null, p_exam: row.p_exam ?? null,
+        m_q1: row.m_q1 ?? null, m_q2: row.m_q2 ?? null, m_q3: row.m_q3 ?? null, m_att: row.m_att ?? null, m_exam: row.m_exam ?? null,
+        f_q1: row.f_q1 ?? null, f_q2: row.f_q2 ?? null, f_q3: row.f_q3 ?? null, f_att: row.f_att ?? null, f_exam: row.f_exam ?? null,
+
         semester: normalizeSemester(activeSemester),
         schoolYear: "2026-2027",
         isReleased: false,
@@ -1372,6 +1457,12 @@ async function releaseGrades() {
         prelim: stats.prelim, 
         midterm: stats.midterm,
         finals: stats.finals, 
+
+        // Store Itemized Assessment Breakdown
+        p_q1: row.p_q1 ?? null, p_q2: row.p_q2 ?? null, p_q3: row.p_q3 ?? null, p_att: row.p_att ?? null, p_exam: row.p_exam ?? null,
+        m_q1: row.m_q1 ?? null, m_q2: row.m_q2 ?? null, m_q3: row.m_q3 ?? null, m_att: row.m_att ?? null, m_exam: row.m_exam ?? null,
+        f_q1: row.f_q1 ?? null, f_q2: row.f_q2 ?? null, f_q3: row.f_q3 ?? null, f_att: row.f_att ?? null, f_exam: row.f_exam ?? null,
+
         semester: normalizeSemester(activeSemester),
         schoolYear: "2026-2027",
         isReleased: true,
@@ -1390,6 +1481,7 @@ async function releaseGrades() {
     alert("Error releasing grades: " + err.message);
   }
 }
+// === ADDED / MODIFIED SECTION END ===
 
 // ------------------------------------------------------------------
 // ADMIN CONSOLE MANAGEMENT
@@ -2188,6 +2280,7 @@ async function loadStudentDashboard(studentId, fullName, userData = null) {
 // PROSPECTUS & ASSESSMENT BREAKDOWN MODAL
 // ------------------------------------------------------------------
 
+// === ADDED / MODIFIED SECTION START ===
 async function openStudentGradeBreakdownModal(g) {
   const modal = document.getElementById('studentGradeBreakdownModal');
   const panel = document.getElementById('studentGradeBreakdownModalPanel');
@@ -2218,11 +2311,12 @@ async function openStudentGradeBreakdownModal(g) {
 
   body.innerHTML = '';
 
+  // Overall Average Summary Header
   const summary = document.createElement('div');
   summary.className = "flex items-center justify-between p-3.5 rounded-xl border border-slate-800 bg-slate-950 mb-3";
   summary.innerHTML = `
     <div>
-      <div class="text-[10px] text-emerald-400 uppercase tracking-wider font-extrabold">Term Average</div>
+      <div class="text-[10px] text-emerald-400 uppercase tracking-wider font-extrabold">Overall Term Average</div>
       <div class="text-2xl font-black text-white mt-0.5">${stats.averageDisplay}</div>
     </div>
     <span class="px-3 py-1 rounded-full text-xs font-extrabold uppercase ${stats.isPassing ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}">
@@ -2253,56 +2347,64 @@ async function openStudentGradeBreakdownModal(g) {
     return sec;
   };
 
+  // 1. Term Averages & Exams Section
   const examsSec = document.createElement('div');
   examsSec.className = "space-y-1.5 mb-3";
   examsSec.innerHTML = `
-    <div class="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Major Exams</div>
+    <div class="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Term Averages & Exams</div>
     <div class="grid grid-cols-3 gap-2">
       <div class="p-2.5 rounded-xl border border-slate-800 bg-slate-950 text-center">
         <div class="text-[10px] font-bold text-slate-400 uppercase">Prelim</div>
         <div class="text-sm font-bold text-white mt-0.5">${stats.prelim.toFixed(2)}</div>
+        ${g.p_exam !== null && g.p_exam !== undefined ? `<div class="text-[10px] text-slate-500 mt-1">Exam: ${g.p_exam}</div>` : ''}
       </div>
       <div class="p-2.5 rounded-xl border border-slate-800 bg-slate-950 text-center">
         <div class="text-[10px] font-bold text-slate-400 uppercase">Midterm</div>
         <div class="text-sm font-bold text-white mt-0.5">${stats.midterm.toFixed(2)}</div>
+        ${g.m_exam !== null && g.m_exam !== undefined ? `<div class="text-[10px] text-slate-500 mt-1">Exam: ${g.m_exam}</div>` : ''}
       </div>
       <div class="p-2.5 rounded-xl border border-slate-800 bg-slate-950 text-center">
         <div class="text-[10px] font-bold text-slate-400 uppercase">Finals</div>
         <div class="text-sm font-bold text-white mt-0.5">${stats.finals.toFixed(2)}</div>
+        ${g.f_exam !== null && g.f_exam !== undefined ? `<div class="text-[10px] text-slate-500 mt-1">Exam: ${g.f_exam}</div>` : ''}
       </div>
     </div>
   `;
   body.appendChild(examsSec);
 
-  const quizzes = g.quizzes || [
-    { label: 'Quiz 1', score: '14 / 15' },
-    { label: 'Quiz 2', score: '13 / 15' },
-    { label: 'Quiz 3', score: '19 / 20' }
-  ];
-  body.appendChild(createItemList('Quizzes', quizzes));
+  // 2. Dynamic Itemized Quizzes
+  const quizItems = [];
+  if (g.p_q1 !== null && g.p_q1 !== undefined) quizItems.push({ label: 'Prelim Quiz 1 (P_Q1)', score: g.p_q1 });
+  if (g.p_q2 !== null && g.p_q2 !== undefined) quizItems.push({ label: 'Prelim Quiz 2 (P_Q2)', score: g.p_q2 });
+  if (g.p_q3 !== null && g.p_q3 !== undefined) quizItems.push({ label: 'Prelim Quiz 3 (P_Q3)', score: g.p_q3 });
 
-  const assignments = g.assignments || [
-    { label: 'Assignments / Seatwork', score: '48 / 50' }
-  ];
-  body.appendChild(createItemList('Assignments & Seatworks', assignments));
+  if (g.m_q1 !== null && g.m_q1 !== undefined) quizItems.push({ label: 'Midterm Quiz 1 (M_Q1)', score: g.m_q1 });
+  if (g.m_q2 !== null && g.m_q2 !== undefined) quizItems.push({ label: 'Midterm Quiz 2 (M_Q2)', score: g.m_q2 });
+  if (g.m_q3 !== null && g.m_q3 !== undefined) quizItems.push({ label: 'Midterm Quiz 3 (M_Q3)', score: g.m_q3 });
 
-  const labExercises = g.labExercises || [
-    { label: 'Lab Exercise', score: '95 / 100' }
-  ];
-  body.appendChild(createItemList('Laboratory Exercises', labExercises));
+  if (g.f_q1 !== null && g.f_q1 !== undefined) quizItems.push({ label: 'Finals Quiz 1 (F_Q1)', score: g.f_q1 });
+  if (g.f_q2 !== null && g.f_q2 !== undefined) quizItems.push({ label: 'Finals Quiz 2 (F_Q2)', score: g.f_q2 });
+  if (g.f_q3 !== null && g.f_q3 !== undefined) quizItems.push({ label: 'Finals Quiz 3 (F_Q3)', score: g.f_q3 });
 
-  const att = g.attendance || '93%';
-  const attSec = document.createElement('div');
-  attSec.className = "space-y-1.5 mb-2";
-  attSec.innerHTML = `
-    <div class="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Attendance / Participation</div>
-    <div class="flex items-center justify-between px-3 py-2 rounded-xl border border-slate-800 bg-slate-950 text-xs">
-      <span class="text-slate-300 font-medium">Attendance Rate</span>
-      <span class="font-mono font-bold text-white">${escapeHtml(att)}</span>
-    </div>
-  `;
-  body.appendChild(attSec);
+  if (quizItems.length > 0) {
+    body.appendChild(createItemList('Quizzes', quizItems));
+  } else if (g.quizzes && Array.isArray(g.quizzes)) {
+    body.appendChild(createItemList('Quizzes', g.quizzes));
+  }
 
+  // 3. Dynamic Attendance
+  const attItems = [];
+  if (g.p_att !== null && g.p_att !== undefined) attItems.push({ label: 'Prelim Attendance', score: `${g.p_att}%` });
+  if (g.m_att !== null && g.m_att !== undefined) attItems.push({ label: 'Midterm Attendance', score: `${g.m_att}%` });
+  if (g.f_att !== null && g.f_att !== undefined) attItems.push({ label: 'Finals Attendance', score: `${g.f_att}%` });
+
+  if (attItems.length > 0) {
+    body.appendChild(createItemList('Attendance & Participation', attItems));
+  } else if (g.attendance) {
+    body.appendChild(createItemList('Attendance & Participation', [{ label: 'Attendance Rate', score: String(g.attendance) }]));
+  }
+
+  // 4. Evaluation Formula Weights Footer
   const formulaInfo = document.createElement('div');
   formulaInfo.className = "p-3 rounded-xl border border-slate-800/80 bg-slate-900/40 space-y-2 mt-4";
   formulaInfo.innerHTML = `
@@ -2324,6 +2426,7 @@ async function openStudentGradeBreakdownModal(g) {
     panel.classList.remove('opacity-0', 'scale-95');
   }
 }
+// === ADDED / MODIFIED SECTION END ===
 
 function closeStudentGradeBreakdownModal() {
   const modal = document.getElementById('studentGradeBreakdownModal');
