@@ -1921,15 +1921,16 @@ function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap =
   const baseYear = parseInt(entryYearLevel) || 1;
   const yearNames = { 1: '1ST YEAR', 2: '2ND YEAR', 3: '3RD YEAR', 4: '4TH YEAR' };
 
+  const currentYearName = yearNames[baseYear] || '1ST YEAR';
+
   if (!allGrades || !allGrades.length) {
-    const label = yearNames[baseYear] || '1ST YEAR';
     return {
       yearLevel: baseYear,
       unitsCompleted: 0,
-      statusLabel: `PROMOTED TO ${label} - 1ST SEMESTER`,
-      badgeLabel: `${label} - REGULAR`,
+      statusLabel: `${currentYearName} - 1ST SEMESTER`,
+      badgeLabel: `${currentYearName} - REGULAR`,
       badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-      standingText: `Regular Student (${label}) • 0 Units Completed`
+      standingText: `Regular Student (${currentYearName}) • 0 Units Completed`
     };
   }
 
@@ -1963,23 +1964,9 @@ function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap =
   });
 
   const passedCount = uniquePassedSubjects.size;
-  const hasPassed1stSem = passedSemesters.has('1st Semester');
   const hasPassed2ndSem = passedSemesters.has('2nd Semester');
 
-  let calculatedYearLevel = baseYear;
-
-  if (hasPassed1stSem && hasPassed2ndSem) {
-    calculatedYearLevel = Math.max(baseYear, 2);
-  }
-
-  if (passedCount >= 12 && hasPassed2ndSem && calculatedYearLevel >= 2) {
-    calculatedYearLevel = 3;
-  }
-
-  if (passedCount >= 18 && calculatedYearLevel >= 3) {
-    calculatedYearLevel = 4;
-  }
-
+  // Check for any failing IT grades
   const failedITSubjects = allGrades.filter(g => {
     const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
     if (!isItSubjectCode(code)) return false;
@@ -1988,11 +1975,9 @@ function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap =
     return !stats.isPassing;
   });
 
-  const currentYearName = yearNames[calculatedYearLevel] || '1ST YEAR';
-
   if (failedITSubjects.length > 0) {
     return {
-      yearLevel: calculatedYearLevel,
+      yearLevel: baseYear,
       unitsCompleted: totalUnitsEarned,
       statusLabel: `${currentYearName} - IRREGULAR`,
       badgeLabel: `${currentYearName} - IRREGULAR`,
@@ -2001,33 +1986,26 @@ function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap =
     };
   }
 
-  if (hasPassed1stSem && hasPassed2ndSem && calculatedYearLevel === 2) {
-    return {
-      yearLevel: 2,
-      unitsCompleted: totalUnitsEarned,
-      statusLabel: `PROMOTED TO 2ND YEAR - 1ST SEMESTER`,
-      badgeLabel: `2ND YEAR - REGULAR`,
-      badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-      standingText: `Good Academic Standing (${totalUnitsEarned} Units Completed)`
-    };
+  // Define total unit threshold required for 1st Year - 1st Semester completion (e.g., 8 units or 3 subjects)
+  const REQUIRED_1ST_SEM_UNITS = 8;
+
+  let statusLabel = `${currentYearName} - 1ST SEMESTER`;
+  let calculatedYearLevel = baseYear;
+
+  if (totalUnitsEarned >= REQUIRED_1ST_SEM_UNITS && !hasPassed2ndSem) {
+    statusLabel = `PROMOTED TO 1ST YEAR - 2ND SEMESTER`;
+  } else if (hasPassed2ndSem && totalUnitsEarned >= 16) {
+    calculatedYearLevel = 2;
+    statusLabel = `PROMOTED TO 2ND YEAR - 1ST SEMESTER`;
   }
 
-  if (hasPassed1stSem && !hasPassed2ndSem) {
-    return {
-      yearLevel: 1,
-      unitsCompleted: totalUnitsEarned,
-      statusLabel: `PROMOTED TO 1ST YEAR - 2ND SEMESTER`,
-      badgeLabel: `1ST YEAR - REGULAR`,
-      badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-      standingText: `Good Academic Standing (${totalUnitsEarned} Units Completed)`
-    };
-  }
+  const activeYearName = yearNames[calculatedYearLevel] || '1ST YEAR';
 
   return {
     yearLevel: calculatedYearLevel,
     unitsCompleted: totalUnitsEarned,
-    statusLabel: `PROMOTED TO ${currentYearName} - 1ST SEMESTER`,
-    badgeLabel: `${currentYearName} - REGULAR`,
+    statusLabel: statusLabel,
+    badgeLabel: `${activeYearName} - REGULAR`,
     badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
     standingText: `Good Academic Standing (${totalUnitsEarned} Units Completed)`
   };
