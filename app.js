@@ -2605,18 +2605,6 @@ async function applySelectedSubjects() {
   const cleanSection = selectedSection.trim().toUpperCase();
 
   try {
-    const existingEnrollmentsSnapshot = await db.collection('enrollments')
-      .where('studentUid', '==', currentUserId)
-      .get();
-
-    const existingDocsByCode = new Map();
-    existingEnrollmentsSnapshot.forEach(doc => {
-      const data = doc.data();
-      if (data.subjectCode) {
-        existingDocsByCode.set(data.subjectCode.trim().toUpperCase(), doc.id);
-      }
-    });
-
     const batch = db.batch();
     const subjectCodes = [];
 
@@ -2624,19 +2612,12 @@ async function applySelectedSubjects() {
       const subjectCode = checkbox.dataset.subjectCode;
       if (!subjectCode) return;
 
-      const cleanCode = subjectCode.trim().toUpperCase();
       subjectCodes.push(subjectCode);
 
       const targetDocId = buildEnrollmentDocId(subjectCode, cleanSection, currentUserId);
-      const previousDocId = existingDocsByCode.get(cleanCode);
-
-      // Clean up previous enrollment documents if section changed
-      if (previousDocId && previousDocId !== targetDocId) {
-        batch.delete(db.collection('enrollments').doc(previousDocId));
-      }
-
       const ref = db.collection('enrollments').doc(targetDocId);
 
+      // Directly overwrite/set document without triggering batch delete errors
       batch.set(ref, {
         subjectCode,
         section: cleanSection,
