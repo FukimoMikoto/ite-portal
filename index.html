@@ -461,6 +461,68 @@
               </div>
             </div>
 
+            <!-- Grade Sheet Instructions & Template Download Banner -->
+            <div class="p-5 sm:p-6 rounded-2xl border border-slate-800 bg-slate-900/90 space-y-6 shadow-xl text-center">
+              <!-- Text Header Section -->
+              <div class="flex flex-col items-center space-y-2 max-w-xl mx-auto">
+                <div class="p-3 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mb-1">
+                  <i data-lucide="file-spreadsheet" class="w-6 h-6"></i>
+                </div>
+                <h4 class="text-base font-extrabold text-white">Standardized Class Record Template</h4>
+                <p class="text-xs text-slate-400 leading-relaxed">
+                  Use the official department template to ensure accurate grade parsing and detailed assessment breakdown viewing.
+                </p>
+              </div>
+
+              <!-- Download Template Button -->
+              <div class="w-full max-w-md mx-auto pt-1">
+                <button
+                  type="button"
+                  onclick="downloadExcelTemplate()"
+                  class="w-full py-3 px-5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/10 active:scale-95"
+                >
+                  <i data-lucide="download" class="w-4 h-4 shrink-0"></i>
+                  <span>Download Template (.xlsx)</span>
+                </button>
+              </div>
+
+              <!-- Instructions List (VERTICAL STACK LAYOUT) -->
+              <div class="flex flex-col space-y-3 pt-2 text-left">
+                <!-- Step 1 -->
+                <div class="p-3.5 rounded-xl border border-slate-800/80 bg-slate-950/60 flex items-start gap-3">
+                  <span class="flex items-center justify-center shrink-0 w-6 h-6 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-black mt-0.5">1</span>
+                  <div class="space-y-1 min-w-0">
+                    <h5 class="text-xs font-extrabold text-emerald-400 uppercase tracking-wider">Header Placement</h5>
+                    <p class="text-xs text-slate-300 leading-relaxed">
+                      Keep column headers in <strong class="text-white">Row 1</strong>. Avoid blank title rows or merged cells above the table.
+                    </p>
+                  </div>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="p-3.5 rounded-xl border border-slate-800/80 bg-slate-950/60 flex items-start gap-3">
+                  <span class="flex items-center justify-center shrink-0 w-6 h-6 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-black mt-0.5">2</span>
+                  <div class="space-y-1 min-w-0">
+                    <h5 class="text-xs font-extrabold text-emerald-400 uppercase tracking-wider">Standard Columns</h5>
+                    <p class="text-xs text-slate-300 leading-relaxed">
+                      Do not rename key columns (<code class="inline-flex text-emerald-300 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono text-[10px] whitespace-nowrap">P_Q1</code>, <code class="inline-flex text-emerald-300 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono text-[10px] whitespace-nowrap">P_Exam</code>, etc.).
+                    </p>
+                  </div>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="p-3.5 rounded-xl border border-slate-800/80 bg-slate-950/60 flex items-start gap-3">
+                  <span class="flex items-center justify-center shrink-0 w-6 h-6 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-black mt-0.5">3</span>
+                  <div class="space-y-1 min-w-0">
+                    <h5 class="text-xs font-extrabold text-emerald-400 uppercase tracking-wider">Student Identifiers</h5>
+                    <p class="text-xs text-slate-300 leading-relaxed">
+                      Ensure <strong class="text-white">Student ID</strong> matches registered portal IDs. Blank scores are treated as null/excused.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- Excel Upload Drag & Drop Widget -->
             <div
               class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4"
@@ -1377,51 +1439,51 @@
     </div>
 
     <!-- Student Grade Breakdown Modal -->
-<div
-  id="studentGradeBreakdownModal"
-  class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4 transition-opacity duration-200"
-  onclick="closeStudentGradeBreakdownModal()"
->
-  <div
-    id="studentGradeBreakdownModalPanel"
-    class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg max-h-[85vh] flex flex-col shadow-2xl opacity-0 scale-95 transition-all duration-200"
-    onclick="event.stopPropagation()"
-  >
-    <!-- Header -->
-    <div class="flex items-center justify-between p-5 border-b border-slate-800 shrink-0">
-      <h3
-        id="studentGradeBreakdownModalTitle"
-        class="font-bold text-white text-base"
-      >
-        Assessment Breakdown
-      </h3>
-      <button
-        type="button"
-        onclick="closeStudentGradeBreakdownModal()"
-        class="text-slate-400 hover:text-white transition-all text-2xl leading-none p-1 rounded-lg hover:bg-slate-800"
-      >
-        &times;
-      </button>
-    </div>
-
-    <!-- Body -->
     <div
-      id="studentGradeBreakdownModalBody"
-      class="p-5 space-y-4 overflow-y-auto"
-    ></div>
-
-    <!-- Footer -->
-    <div class="p-4 border-t border-slate-800 flex justify-end shrink-0">
-      <button
-        type="button"
-        onclick="closeStudentGradeBreakdownModal()"
-        class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl transition-all"
+      id="studentGradeBreakdownModal"
+      class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4 transition-opacity duration-200"
+      onclick="closeStudentGradeBreakdownModal()"
+    >
+      <div
+        id="studentGradeBreakdownModalPanel"
+        class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg max-h-[85vh] flex flex-col shadow-2xl opacity-0 scale-95 transition-all duration-200"
+        onclick="event.stopPropagation()"
       >
-        Close
-      </button>
+        <!-- Header -->
+        <div class="flex items-center justify-between p-5 border-b border-slate-800 shrink-0">
+          <h3
+            id="studentGradeBreakdownModalTitle"
+            class="font-bold text-white text-base"
+          >
+            Assessment Breakdown
+          </h3>
+          <button
+            type="button"
+            onclick="closeStudentGradeBreakdownModal()"
+            class="text-slate-400 hover:text-white transition-all text-2xl leading-none p-1 rounded-lg hover:bg-slate-800"
+          >
+            &times;
+          </button>
+        </div>
+
+        <!-- Body -->
+        <div
+          id="studentGradeBreakdownModalBody"
+          class="p-5 space-y-4 overflow-y-auto"
+        ></div>
+
+        <!-- Footer -->
+        <div class="p-4 border-t border-slate-800 flex justify-end shrink-0">
+          <button
+            type="button"
+            onclick="closeStudentGradeBreakdownModal()"
+            class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl transition-all"
+          >
+            Close
+          </button>
+        </div>
+      </div>
     </div>
-  </div>
-</div>
 
     <!-- SELF-SERVICE IN-APP PASSWORD RESET MODAL -->
     <div

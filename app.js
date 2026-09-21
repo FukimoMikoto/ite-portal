@@ -250,6 +250,57 @@ function switchAuthTab(tab) {
 }
 
 // ------------------------------------------------------------------
+// EXCEL TEMPLATE GENERATOR
+// ------------------------------------------------------------------
+
+/**
+ * Generates and downloads the official department Excel Grade Template using SheetJS
+ */
+function downloadExcelTemplate() {
+  if (typeof XLSX === 'undefined') {
+    alert("Excel processing library (SheetJS) is loading. Please try again in a moment.");
+    return;
+  }
+
+  // Define headers matching system expectations
+  const templateHeaders = [
+    [
+      "Student ID", "Student Name", 
+      "P_Q1", "P_Q2", "P_Q3", "P_Att", "P_Exam", "PRELIM", 
+      "M_Q1", "M_Q2", "M_Q3", "M_Att", "M_Exam", "MIDTERM", 
+      "F_Q1", "F_Q2", "F_Q3", "F_Att", "F_Exam", "FINAL"
+    ]
+  ];
+
+  // Add realistic dummy sample rows to guide instructors
+  const sampleData = [
+    ["2026-0001", "Dela Cruz, Juan", 18, 20, 19, 95, 88, 89.20, 20, 18, 20, 100, 90, 92.50, 19, 19, 20, 95, 91, 92.00],
+    ["2026-0002", "Santos, Maria Clara", 15, 14, 16, 85, 75, 76.50, 16, 17, 15, 90, 78, 79.20, 18, 16, 17, 90, 82, 83.10]
+  ];
+
+  // Combine headers and sample rows
+  const sheetData = [...templateHeaders, ...sampleData];
+
+  // Create workbook and worksheet
+  const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+
+  // Set default column widths for readability
+  worksheet['!cols'] = [
+    { wch: 14 }, // Student ID
+    { wch: 22 }, // Student Name
+    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 10 }, // Prelims
+    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 10 }, // Midterms
+    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 10 }  // Finals
+  ];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Grade Sheet");
+
+  // Trigger file download
+  XLSX.writeFile(workbook, "ITE_Official_Grade_Template.xlsx");
+}
+
+// ------------------------------------------------------------------
 // AUTHENTICATION & PASSWORD HELPERS
 // ------------------------------------------------------------------
 
@@ -1074,7 +1125,6 @@ function processExcel() {
   reader.readAsArrayBuffer(file);
 }
 
-// === ADDED / MODIFIED SECTION START ===
 function processMultiTabExcel(workbook) {
   const summarySheetName = workbook.SheetNames.find(s => s.toUpperCase().includes("FINAL GRADE")) ||
                            workbook.SheetNames.find(s => s.toUpperCase().includes("AVERAGE")) ||
@@ -1266,7 +1316,6 @@ function processSingleTabExcel(workbook) {
   renderInstructorAnalytics(parsedGradeData);
   alert(`Imported ${parsedGradeData.length} student record(s).`);
 }
-// === ADDED / MODIFIED SECTION END ===
 
 function renderParsedGradesToTable() {
   const tbody = document.getElementById('previewBody');
@@ -1345,7 +1394,6 @@ function resolveEffectiveStudentId(row, subjectCode, registeredIndex, batch) {
   return match.studentId;
 }
 
-// === ADDED / MODIFIED SECTION START ===
 async function saveDraftGrades() {
   if (!activeSubjectCode) return alert("Select an active subject first.");
   if (!parsedGradeData.length) return alert("Upload an Excel sheet to parse grades first.");
@@ -1481,7 +1529,6 @@ async function releaseGrades() {
     alert("Error releasing grades: " + err.message);
   }
 }
-// === ADDED / MODIFIED SECTION END ===
 
 // ------------------------------------------------------------------
 // ADMIN CONSOLE MANAGEMENT
@@ -2279,10 +2326,6 @@ async function loadStudentDashboard(studentId, fullName, userData = null) {
 // ------------------------------------------------------------------
 // PROSPECTUS & ASSESSMENT BREAKDOWN MODAL
 // ------------------------------------------------------------------
-
-// === ADDED / MODIFIED SECTION START ===
-// === RESTORED & DYNAMICALLY ALIGNED ASSESSMENT BREAKDOWN MODAL ===
-// === STUDENT GRADE BREAKDOWN MODAL FUNCTIONS ===
 
 async function openStudentGradeBreakdownModal(g) {
   const modal = document.getElementById('studentGradeBreakdownModal');
