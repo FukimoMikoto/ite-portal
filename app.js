@@ -22,6 +22,7 @@ let parsedGradeData = [];
 let currentUserEmail = '';
 let currentUserId = '';
 let activeSubjectCode = '';
+let activeSubjectTitle = '';
 let activeInstructorSectionFilter = 'ALL';
 let lastReportData = null;
 
@@ -36,11 +37,25 @@ let currentSessionId = null;
 let selectedPortalRole = 'student';
 let isFreshLoginAttempt = false;
 
+// Live class record (faculty) UI state
+let liveRecordSearchTerm = '';
+let liveRecordEmptyHtml = '';
+let liveRecordDirty = false;
+
 // Chart Instance Holders
 let instructorGradeChartInstance = null;
 let instructorPassFailChartInstance = null;
 let adminGradeChartInstance = null;
 let adminPassFailChartInstance = null;
+
+// Prospectus Filter State
+let isAdminProspectusItOnly = false;
+let isItOnlyFilterActive = false;
+
+// Academic configuration
+const CURRENT_SCHOOL_YEAR = '2026-2027';
+const FIRST_SEM_UNITS_FOR_PROMOTION = 8;
+const FIRST_YEAR_UNITS_FOR_PROMOTION = 16;
 
 // ------------------------------------------------------------------
 // 1. ISOLATED PORTAL ROUTER & HELPER FUNCTIONS
@@ -96,8 +111,8 @@ function selectPortal(role) {
     instructor: 'portalTabFaculty',
     admin: 'portalTabAdmin'
   };
-  const ACTIVE = "flex-1 py-2.5 rounded-lg bg-emerald-500 text-slate-950 font-bold transition-all text-[11px] sm:text-xs";
-  const INACTIVE = "flex-1 py-2.5 rounded-lg text-slate-400 hover:text-white transition-all text-[11px] sm:text-xs";
+  const ACTIVE = "flex-1 py-2 rounded-lg bg-emerald-500 text-slate-950 font-bold transition-all text-xs";
+  const INACTIVE = "flex-1 py-2 rounded-lg text-slate-400 hover:text-white transition-all text-xs";
 
   Object.entries(configs).forEach(([r, id]) => {
     const btn = document.getElementById(id);
@@ -173,6 +188,122 @@ function normalizeCodeKey(code) {
 }
 
 // ------------------------------------------------------------------
+// ASSESSMENT COMPONENT HELPERS (shared by Excel parser, saves, modal)
+// Header convention: <period>_<category><n>  e.g. P_Q1, M_Lab1, F_Exam, P_Att
+//   period   : p = Prelim, m = Midterm, f = Finals
+//   category : q, lab, ass, out, exam, att
+// ------------------------------------------------------------------
+
+const COMPONENT_KEY_RE = /^([pmf])_(q|lab|ass|out|exam|att)(\d*)$/i;
+
+function toFiniteOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = typeof value === 'number' ? value : parseFloat(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function extractComponentFields(headers, row) {
+  const fields = {};
+  headers.forEach((h, idx) => {
+    const key = String(h || '').trim().toLowerCase();
+    if (!COMPONENT_KEY_RE.test(key)) return;
+    fields[key] = toFiniteOrNull(row[idx]);
+  });
+  return fields;
+}
+
+function pickComponentFields(row) {
+  const fields = {};
+  Object.keys(row || {}).forEach((key) => {
+    if (COMPONENT_KEY_RE.test(key)) fields[key] = toFiniteOrNull(row[key]);
+  });
+  return fields;
+}
+
+// ------------------------------------------------------------------
+// DYNAMIC DASHBOARD METRICS & LOG COUNTERS
+// ------------------------------------------------------------------
+
+function updateStudentMetrics(studentGradesList = [], totalCurriculumUnits = null) {
+  let enrolledUnits = 0;
+  let completedUnits = 0;
+  let totalGradePoints = 0;
+  let gradedUnits = 0;
+  let activeSubjectCount = 0;
+
+  studentGradesList.forEach((record) => {
+    const units = Number(record.units) || 3;
+    const status = (record.status || '').toLowerCase();
+
+    if (status === 'enrolled' || status === 'ongoing' || status === 'pending') {
+      enrolledUnits += units;
+      activeSubjectCount++;
+    } else if (status === 'passed' || status === 'completed') {
+      completedUnits += units;
+    }
+
+    const finalGrade = parseFloat(record.average || record.termAverage || record.finalGrade);
+    if (!isNaN(finalGrade) && finalGrade > 0) {
+      totalGradePoints += finalGrade * units;
+      gradedUnits += units;
+    }
+  });
+
+  const hasTotal = Number(totalCurriculumUnits) > 0;
+
+  // 1. GWA Calculation
+  const gwa = gradedUnits > 0 ? (totalGradePoints / gradedUnits).toFixed(2) : null;
+  const gwaElement = document.getElementById('studentKpiGwa');
+  const gwaSubtext = document.getElementById('studentKpiGwaSubtext');
+
+  if (gwaElement) gwaElement.textContent = gwa ? gwa : 'N/A';
+  if (gwaSubtext) {
+    if (!gwa) {
+      gwaSubtext.textContent = 'No Published Grades';
+    } else if (parseFloat(gwa) >= 90 || parseFloat(gwa) <= 1.5) {
+      gwaSubtext.textContent = "President's / Dean's List";
+    } else {
+      gwaSubtext.textContent = 'Good Academic Standing';
+    }
+  }
+
+  // 2. Enrolled Units
+  const enrolledEl = document.getElementById('studentKpiEnrolledUnits');
+  const enrolledSubtext = document.getElementById('studentKpiEnrolledSubtext');
+  if (enrolledEl) enrolledEl.textContent = `${enrolledUnits} Units`;
+  if (enrolledSubtext) enrolledSubtext.textContent = `${activeSubjectCount} Active Subjects`;
+
+  // 3. Completed Units (total comes from the subjects collection, never hardcoded)
+  const completedLabel = hasTotal ? `${completedUnits} / ${totalCurriculumUnits}` : `${completedUnits} Units`;
+  const completedEl = document.getElementById('studentKpiCompletedUnits');
+  if (completedEl) completedEl.textContent = completedLabel;
+
+  // 4. Program Completion Percentage
+  const pct = hasTotal ? Math.min(100, ((completedUnits / totalCurriculumUnits) * 100)).toFixed(1) : '0.0';
+  const pctEl = document.getElementById('studentKpiCompletionPct');
+  const ratioEl = document.getElementById('studentUnitsProgressRatio');
+  const progressText = document.getElementById('studentProgressPctText');
+  const progressBarFill = document.getElementById('studentProgressBarFill');
+
+  if (pctEl) pctEl.textContent = `${pct}%`;
+  if (ratioEl) ratioEl.textContent = completedLabel;
+  if (progressText) progressText.textContent = `${pct}% Completed`;
+  if (progressBarFill) progressBarFill.style.width = `${pct}%`;
+
+  if (window.lucide) lucide.createIcons();
+}
+
+function updateLogsCounter(logsData = []) {
+  const displayEl = document.getElementById('logsCountDisplay');
+  if (!displayEl) return;
+  if (logsData === null) {
+    displayEl.textContent = '—';
+    return;
+  }
+  displayEl.textContent = typeof logsData === 'number' ? logsData : logsData.length;
+}
+
+// ------------------------------------------------------------------
 // DOM INITIALIZATION
 // ------------------------------------------------------------------
 
@@ -181,8 +312,25 @@ document.addEventListener('DOMContentLoaded', () => {
     lucide.createIcons();
   }
   setupExcelDropzone();
+  setupLiveRecordInteractions();
+  setupLoginEnterKey();
+  updateSemesterToggleUI();
   initPortalView();
 });
+
+// Pressing Enter in the email or password field signs in, exactly like clicking the button.
+function setupLoginEnterKey() {
+  ['loginEmail', 'loginPassword'].forEach((id) => {
+    const input = document.getElementById(id);
+    if (!input) return;
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || e.repeat || e.isComposing) return;
+      e.preventDefault();
+      handleLogin();
+    });
+  });
+}
 
 function setupExcelDropzone() {
   const dropzone = document.getElementById('excelDropzone');
@@ -190,6 +338,12 @@ function setupExcelDropzone() {
   if (!dropzone || !fileInput) return;
 
   const ACTIVE_CLASSES = ['border-emerald-300', 'bg-emerald-500/10'];
+
+  // Click-to-browse (the hidden input lives inside the dropzone)
+  dropzone.addEventListener('click', (e) => {
+    if (e.target === fileInput) return;
+    fileInput.click();
+  });
 
   ['dragenter', 'dragover'].forEach((eventName) => {
     dropzone.addEventListener(eventName, (e) => {
@@ -226,6 +380,64 @@ function setupExcelDropzone() {
   });
 }
 
+function setupLiveRecordInteractions() {
+  const tbody = document.getElementById('previewBody');
+  const search = document.getElementById('searchStudentInput');
+
+  if (search) {
+    search.addEventListener('input', () => {
+      liveRecordSearchTerm = search.value || '';
+      renderLiveClassRecord();
+    });
+  }
+
+  if (!tbody) return;
+
+  // Inline edits of Prelim / Midterm / Finals
+  tbody.addEventListener('input', (e) => {
+    const input = e.target;
+    if (!input || !input.matches || !input.matches('input[data-field]')) return;
+
+    const tr = input.closest('tr[data-row-index]');
+    const row = tr ? parsedGradeData[Number(tr.dataset.rowIndex)] : null;
+    if (!row) return;
+
+    const field = input.dataset.field;
+    const parsed = parseFloat(input.value);
+    row[field] = isNaN(parsed) ? 0 : parsed;
+    row.__edited = true;
+
+    const finalsVal = row.finals !== undefined ? row.finals : row.final;
+    const stats = computeGradeStats(row.prelim, row.midterm, finalsVal);
+
+    const avgCell = tr.querySelector('[data-cell="average"]');
+    const standingCell = tr.querySelector('[data-cell="standing"]');
+    if (avgCell) {
+      avgCell.textContent = stats.averageDisplay;
+      avgCell.className = `px-4 py-3 font-black font-mono ${stats.isPassing ? 'text-white' : 'text-rose-400'}`;
+    }
+    if (standingCell) standingCell.innerHTML = liveStandingHtml(row, stats);
+
+    liveRecordDirty = true;
+    setFacultySyncState('dirty');
+  });
+
+  tbody.addEventListener('change', (e) => {
+    if (e.target && e.target.matches && e.target.matches('input[data-field]')) {
+      renderInstructorAnalytics(parsedGradeData);
+    }
+  });
+
+  // Row click opens the itemized breakdown (ignore clicks on the inputs)
+  tbody.addEventListener('click', (e) => {
+    if (e.target.closest('input')) return;
+    const tr = e.target.closest('tr[data-row-index]');
+    if (!tr) return;
+    const row = parsedGradeData[Number(tr.dataset.rowIndex)];
+    if (row) openStudentGradeBreakdownModal(row);
+  });
+}
+
 function switchAuthTab(tab) {
   const formLogin = document.getElementById('formLogin');
   const formRegister = document.getElementById('formRegister');
@@ -238,14 +450,47 @@ function switchAuthTab(tab) {
   if (tab === 'login') {
     if (formLogin) formLogin.classList.remove('hidden');
     if (formRegister) formRegister.classList.add('hidden');
-    if (tabBtnLogin) tabBtnLogin.className = "flex-1 py-2.5 rounded-lg bg-emerald-500 text-slate-950 font-bold transition-all";
-    if (tabBtnRegister) tabBtnRegister.className = "flex-1 py-2.5 rounded-lg text-slate-400 hover:text-white transition-all";
+    if (tabBtnLogin) tabBtnLogin.className = "flex-1 py-2 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold transition-all";
+    if (tabBtnRegister) tabBtnRegister.className = "flex-1 py-2 rounded-lg text-slate-400 hover:text-white transition-all";
   } else {
     if (formLogin) formLogin.classList.add('hidden');
     if (formRegister) formRegister.classList.remove('hidden');
-    if (tabBtnRegister) tabBtnRegister.className = "flex-1 py-2.5 rounded-lg bg-emerald-500 text-slate-950 font-bold transition-all";
-    if (tabBtnLogin) tabBtnLogin.className = "flex-1 py-2.5 rounded-lg text-slate-400 hover:text-white transition-all";
+    if (tabBtnRegister) tabBtnRegister.className = "flex-1 py-2 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold transition-all";
+    if (tabBtnLogin) tabBtnLogin.className = "flex-1 py-2 rounded-lg text-slate-400 hover:text-white transition-all";
     selectPortal('student');
+  }
+}
+
+// ------------------------------------------------------------------
+// SEMESTER SWITCHING
+// ------------------------------------------------------------------
+
+function updateSemesterToggleUI() {
+  const ACTIVE = "px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-[11px] font-extrabold transition-all";
+  const INACTIVE = "px-3 py-1.5 rounded-lg text-slate-400 hover:text-white text-[11px] font-bold transition-all";
+  const is1S = normalizeSemester(activeSemester) === '1st Semester';
+  const btn1 = document.getElementById('semesterTab1S');
+  const btn2 = document.getElementById('semesterTab2S');
+  if (btn1) btn1.className = is1S ? ACTIVE : INACTIVE;
+  if (btn2) btn2.className = is1S ? INACTIVE : ACTIVE;
+}
+
+function setSemester(sem) {
+  const next = normalizeSemester(sem);
+  if (next === normalizeSemester(activeSemester)) return;
+
+  if (liveRecordDirty && !confirm("You have unsaved changes in the live class record. Switch semester and discard them?")) {
+    return;
+  }
+
+  activeSemester = next;
+  updateSemesterToggleUI();
+  updateClassHeader();
+
+  const instructorView = document.getElementById('instructorView');
+  const instructorVisible = instructorView && !instructorView.classList.contains('hidden');
+  if (instructorVisible && activeSubjectCode) {
+    loadInstructorGradesFromFirestore(activeSubjectCode, activeInstructorSectionFilter);
   }
 }
 
@@ -253,50 +498,38 @@ function switchAuthTab(tab) {
 // EXCEL TEMPLATE GENERATOR
 // ------------------------------------------------------------------
 
-/**
- * Generates and downloads the official department Excel Grade Template using SheetJS
- */
 function downloadExcelTemplate() {
   if (typeof XLSX === 'undefined') {
     alert("Excel processing library (SheetJS) is loading. Please try again in a moment.");
     return;
   }
 
-  // Define headers matching system expectations
   const templateHeaders = [
     [
-      "Student ID", "Student Name", 
-      "P_Q1", "P_Q2", "P_Q3", "P_Att", "P_Exam", "PRELIM", 
-      "M_Q1", "M_Q2", "M_Q3", "M_Att", "M_Exam", "MIDTERM", 
-      "F_Q1", "F_Q2", "F_Q3", "F_Att", "F_Exam", "FINAL"
+      "Student ID", "Student Name",
+      "P_Q1", "P_Q2", "P_Q3", "P_Lab", "P_Att", "P_Exam", "PRELIM",
+      "M_Q1", "M_Q2", "M_Q3", "M_Lab", "M_Att", "M_Exam", "MIDTERM",
+      "F_Q1", "F_Q2", "F_Q3", "F_Lab", "F_Att", "F_Exam", "FINAL"
     ]
   ];
 
-  // Add realistic dummy sample rows to guide instructors
   const sampleData = [
-    ["2026-0001", "Dela Cruz, Juan", 18, 20, 19, 95, 88, 89.20, 20, 18, 20, 100, 90, 92.50, 19, 19, 20, 95, 91, 92.00],
-    ["2026-0002", "Santos, Maria Clara", 15, 14, 16, 85, 75, 76.50, 16, 17, 15, 90, 78, 79.20, 18, 16, 17, 90, 82, 83.10]
+    ["2026-0001", "Dela Cruz, Juan", 18, 20, 19, 92, 95, 88, 89.20, 20, 18, 20, 94, 100, 90, 92.50, 19, 19, 20, 95, 95, 91, 92.00],
+    ["2026-0002", "Santos, Maria Clara", 15, 14, 16, 80, 85, 75, 76.50, 16, 17, 15, 82, 90, 78, 79.20, 18, 16, 17, 85, 90, 82, 83.10]
   ];
 
-  // Combine headers and sample rows
   const sheetData = [...templateHeaders, ...sampleData];
-
-  // Create workbook and worksheet
   const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
 
-  // Set default column widths for readability
   worksheet['!cols'] = [
-    { wch: 14 }, // Student ID
-    { wch: 22 }, // Student Name
-    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 10 }, // Prelims
-    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 10 }, // Midterms
-    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 10 }  // Finals
+    { wch: 14 }, { wch: 22 },
+    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 10 },
+    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 10 },
+    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 10 }
   ];
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "Grade Sheet");
-
-  // Trigger file download
   XLSX.writeFile(workbook, "ITE_Official_Grade_Template.xlsx");
 }
 
@@ -423,7 +656,7 @@ async function sendResetLink(email) {
 }
 
 // ------------------------------------------------------------------
-// SINGLE SESSION CONCURRENT LOGIN GUARD (FREE TIER)
+// SINGLE SESSION CONCURRENT LOGIN GUARD
 // ------------------------------------------------------------------
 
 function setupSingleSessionGuard(uid) {
@@ -568,7 +801,6 @@ async function handleStudentRegister() {
   const email = document.getElementById('regEmail').value.trim();
   const password = document.getElementById('regPassword').value.trim();
   const entryYearLevel = parseInt(document.getElementById('regYearLevel').value) || 1;
-  const studentType = document.querySelector('input[name="studentType"]:checked')?.value || 'regular';
   const authError = document.getElementById('authError');
 
   try {
@@ -579,11 +811,10 @@ async function handleStudentRegister() {
       email,
       role: "student",
       status: "active",
-      studentType,
       entryYearLevel,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
-    await logActivity(email, `Registered ${studentType} student account (${studentId} - Year ${entryYearLevel})`);
+    await logActivity(email, `Registered student account (${studentId} - Year ${entryYearLevel})`);
     alert("Student registration completed successfully!");
   } catch (err) {
     if (authError) authError.innerText = err.message;
@@ -671,6 +902,39 @@ async function saveInstructorGradingFormula() {
   }
 }
 
+const CLASS_CARD_ACTIVE = 'relative p-4 rounded-xl border border-emerald-500/50 bg-emerald-500/5 hover:bg-emerald-500/10 cursor-pointer transition-all space-y-1';
+const CLASS_CARD_INACTIVE = 'relative p-4 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-800 cursor-pointer transition-all space-y-1';
+
+function setClassCardActive(card, isActive) {
+  if (!card) return;
+  card.className = isActive ? CLASS_CARD_ACTIVE : CLASS_CARD_INACTIVE;
+  const dot = card.querySelector('[data-role="active-dot"]');
+  if (dot) dot.classList.toggle('hidden', !isActive);
+}
+
+function updateClassHeader() {
+  if (!activeSubjectCode) return;
+  const titleEl = document.getElementById('currentClassTitle');
+  const metaEl = document.getElementById('currentClassMeta');
+  if (titleEl) titleEl.innerText = `${activeSubjectCode} · Live class record`;
+  if (metaEl) {
+    metaEl.innerText = `${activeSubjectTitle} · Section ${activeInstructorSectionFilter} · ${semesterDisplayLabel(activeSemester)} · Instructor: ${currentUserEmail}`;
+  }
+}
+
+function setFacultySyncState(state) {
+  const dot = document.getElementById('facultySyncDot');
+  const text = document.getElementById('facultySyncText');
+  const config = {
+    synced: { dot: 'bg-emerald-400', text: 'All changes saved' },
+    dirty: { dot: 'bg-amber-400 animate-pulse', text: 'Unsaved changes' },
+    staged: { dot: 'bg-amber-400 animate-pulse', text: 'Imported • not yet saved' }
+  }[state] || { dot: 'bg-emerald-400', text: 'All changes saved' };
+
+  if (dot) dot.className = `w-2 h-2 rounded-full ${config.dot}`;
+  if (text) text.textContent = config.text;
+}
+
 async function loadInstructorAssignedSubjects() {
   const container = document.getElementById('assignedClassesList');
   if (!container) return;
@@ -682,7 +946,10 @@ async function loadInstructorAssignedSubjects() {
 
     container.innerHTML = '';
 
+    const countBadge = document.getElementById('assignedClassesCount');
+
     if (assignSnapshot.empty) {
+      if (countBadge) countBadge.textContent = '0 active';
       container.innerHTML = `
         <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">
           No assigned subjects found for your account. Please ask the ITE Admin to assign a subject to you.
@@ -698,6 +965,8 @@ async function loadInstructorAssignedSubjects() {
         assignmentsList.push({ ...a, section: a.section || 'ALL' });
       }
     });
+
+    if (countBadge) countBadge.textContent = `${assignmentsList.length} active`;
 
     let isFirst = true;
 
@@ -715,16 +984,27 @@ async function loadInstructorAssignedSubjects() {
         units = sData.units || 3;
       }
 
+      // Dynamic roster size = approved enrollments for this subject/section
+      let studentCount = 0;
+      try {
+        const enrollSnap = await db.collection('enrollments').where('subjectCode', '==', code).get();
+        enrollSnap.forEach((d) => {
+          const e = d.data();
+          if (e.status === 'approved' && (section === 'ALL' || e.section === section)) studentCount++;
+        });
+      } catch (countErr) {
+        console.warn("Could not count enrolled students:", countErr);
+      }
+
       const card = document.createElement('div');
-      card.className = `p-4 rounded-xl border ${isFirst ? 'border-emerald-500/50 bg-slate-800/80' : 'border-slate-800 bg-slate-950'} hover:bg-slate-800 cursor-pointer transition-all space-y-1`;
+      card.className = isFirst ? CLASS_CARD_ACTIVE : CLASS_CARD_INACTIVE;
       card.onclick = () => selectSubject(code, subjectName, section, card);
       card.innerHTML = `
-        <div class="flex items-center justify-between gap-2">
-          <div class="font-bold text-sm text-white truncate">${escapeHtml(code)} - ${escapeHtml(subjectName)}</div>
-          <span class="shrink-0 px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">${escapeHtml(section)}</span>
-        </div>
-        <div class="text-xs text-slate-400">${Number(units) || 0} Units • Assigned Section</div>
-        <div class="text-xs font-bold text-emerald-400 pt-1">● Active Workspace</div>
+        <span data-role="active-dot" class="${isFirst ? '' : 'hidden'} absolute top-3.5 right-3.5 w-2 h-2 rounded-full bg-emerald-400"></span>
+        <div class="font-mono text-xs font-bold text-emerald-400">${escapeHtml(code)}</div>
+        <div class="font-bold text-sm text-white truncate">${escapeHtml(section)}</div>
+        <div class="text-[11px] text-slate-400 truncate">${escapeHtml(subjectName)}</div>
+        <div class="text-[11px] text-slate-500">${Number(units) || 0} units · ${studentCount} student${studentCount === 1 ? '' : 's'}</div>
       `;
       container.appendChild(card);
 
@@ -738,34 +1018,22 @@ async function loadInstructorAssignedSubjects() {
   }
 }
 
-function filterInstructorRosterBySection(section) {
-  activeInstructorSectionFilter = section;
-  if (activeSubjectCode) {
-    loadInstructorGradesFromFirestore(activeSubjectCode, section);
-    loadPendingEnrollments(activeSubjectCode);
-    loadOfficiallyEnrolledStudents(activeSubjectCode);
-  }
-}
-
 async function selectSubject(code, title, section = 'ALL', cardElement = null) {
   activeSubjectCode = code;
+  activeSubjectTitle = title;
   activeInstructorSectionFilter = section;
+
+  liveRecordSearchTerm = '';
+  const searchInput = document.getElementById('searchStudentInput');
+  if (searchInput) searchInput.value = '';
 
   const container = document.getElementById('assignedClassesList');
   if (container) {
-    Array.from(container.children).forEach(child => {
-      child.className = 'p-4 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-800 cursor-pointer transition-all space-y-1';
-    });
+    Array.from(container.children).forEach(child => setClassCardActive(child, false));
   }
-  if (cardElement) {
-    cardElement.className = 'p-4 rounded-xl border border-emerald-500/50 bg-slate-800/80 hover:bg-slate-800 cursor-pointer transition-all space-y-1';
-  }
+  if (cardElement) setClassCardActive(cardElement, true);
 
-  const currentClassTitle = document.getElementById('currentClassTitle');
-  const currentClassMeta = document.getElementById('currentClassMeta');
-
-  if (currentClassTitle) currentClassTitle.innerText = `${code} (${section}) - ${title}`;
-  if (currentClassMeta) currentClassMeta.innerText = `Instructor: ${currentUserEmail} | Subject: ${code} | Section: ${section}`;
+  updateClassHeader();
 
   try {
     let gf = null;
@@ -796,25 +1064,85 @@ async function selectSubject(code, title, section = 'ALL', cardElement = null) {
 
   loadInstructorGradesFromFirestore(code, section);
   loadPendingEnrollments(code);
-  loadOfficiallyEnrolledStudents(code);
 }
 
-function setActiveSemester(sem) {
-  activeSemester = normalizeSemester(sem);
+// ------------------------------------------------------------------
+// LIVE CLASS RECORD RENDERER (faculty)
+// ------------------------------------------------------------------
 
-  const btn1S = document.getElementById('semester1SBtn');
-  const btn2S = document.getElementById('semester2SBtn');
-  const ACTIVE = ['bg-emerald-500', 'text-slate-950'];
-  const INACTIVE = ['bg-slate-800', 'text-slate-300', 'hover:bg-slate-700'];
+const LIVE_INPUT_CLASS = "w-16 px-2 py-1.5 rounded-md bg-slate-950 border border-slate-800 text-white text-xs font-mono font-bold text-center focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500";
 
-  if (btn1S) btn1S.classList.remove(...ACTIVE, ...INACTIVE);
-  if (btn2S) btn2S.classList.remove(...ACTIVE, ...INACTIVE);
-  if (btn1S) btn1S.classList.add(...(activeSemester === '1st Semester' ? ACTIVE : INACTIVE));
-  if (btn2S) btn2S.classList.add(...(activeSemester === '2nd Semester' ? ACTIVE : INACTIVE));
+function emptyLiveRow(messageHtml) {
+  return `
+    <tr>
+      <td colspan="7" class="px-4 py-12 text-center text-slate-500 italic">${messageHtml}</td>
+    </tr>
+  `;
+}
 
-  if (activeSubjectCode) {
-    loadInstructorGradesFromFirestore(activeSubjectCode, activeInstructorSectionFilter);
+function liveRowStateLabel(row) {
+  if (row.__edited || row.__staged) return 'Unsaved';
+  return row.isReleased ? 'Released' : 'Draft';
+}
+
+function liveStandingHtml(row, stats) {
+  const badge = stats.isPassing
+    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+    : 'bg-rose-500/15 text-rose-400 border border-rose-500/30';
+  return `
+    <span class="inline-flex items-center justify-center px-2.5 py-1 rounded-md text-[10px] font-extrabold uppercase tracking-wider leading-none ${badge}">${stats.isPassing ? 'PASS' : 'AT RISK'}</span>
+    <div class="text-[10px] text-slate-500 mt-1">${liveRowStateLabel(row)}</div>
+  `;
+}
+
+function renderLiveClassRecord() {
+  const tbody = document.getElementById('previewBody');
+  if (!tbody) return;
+
+  if (!parsedGradeData.length) {
+    tbody.innerHTML = liveRecordEmptyHtml || emptyLiveRow('No grade sheet parsed yet. Select an assigned class and import an Excel file to view grades.');
+    return;
   }
+
+  const term = liveRecordSearchTerm.trim().toLowerCase();
+  const visible = [];
+  parsedGradeData.forEach((row, index) => {
+    if (term) {
+      const hay = `${row.fullName || ''} ${row.studentId || ''}`.toLowerCase();
+      if (!hay.includes(term)) return;
+    }
+    visible.push({ row, index });
+  });
+
+  if (!visible.length) {
+    tbody.innerHTML = emptyLiveRow(`No students match "${escapeHtml(liveRecordSearchTerm.trim())}".`);
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+
+  visible.forEach(({ row, index }) => {
+    const finalsVal = row.finals !== undefined ? row.finals : row.final;
+    const stats = computeGradeStats(row.prelim, row.midterm, finalsVal);
+
+    const tr = document.createElement('tr');
+    tr.className = "hover:bg-slate-800/40 transition-colors cursor-pointer";
+    tr.title = "Click a row to view the itemized assessment breakdown";
+    tr.dataset.rowIndex = String(index);
+    tr.innerHTML = `
+      <td class="px-4 py-3 font-mono text-xs text-slate-400 whitespace-nowrap">${escapeHtml(row.studentId || 'N/A')}</td>
+      <td class="px-4 py-3 font-bold text-white whitespace-nowrap">${escapeHtml(row.fullName || 'Unnamed Student')}</td>
+      <td class="px-4 py-3"><input type="number" min="0" max="100" step="0.01" data-field="prelim" value="${stats.prelim}" class="${LIVE_INPUT_CLASS}" /></td>
+      <td class="px-4 py-3"><input type="number" min="0" max="100" step="0.01" data-field="midterm" value="${stats.midterm}" class="${LIVE_INPUT_CLASS}" /></td>
+      <td class="px-4 py-3"><input type="number" min="0" max="100" step="0.01" data-field="finals" value="${stats.finals}" class="${LIVE_INPUT_CLASS}" /></td>
+      <td data-cell="average" class="px-4 py-3 font-black font-mono ${stats.isPassing ? 'text-white' : 'text-rose-400'}">${stats.averageDisplay}</td>
+      <td data-cell="standing" class="px-4 py-3 whitespace-nowrap">${liveStandingHtml(row, stats)}</td>
+    `;
+    fragment.appendChild(tr);
+  });
+
+  tbody.innerHTML = '';
+  tbody.appendChild(fragment);
 }
 
 async function loadInstructorGradesFromFirestore(subjectCode, section = activeInstructorSectionFilter) {
@@ -851,21 +1179,20 @@ async function loadInstructorGradesFromFirestore(subjectCode, section = activeIn
       .where('semester', 'in', semQueryValues)
       .get();
 
+    liveRecordDirty = false;
+    setFacultySyncState('synced');
+
     if (snapshot.empty) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="7" class="px-4 py-12 text-center text-slate-500 italic">
-            No grades saved for ${escapeHtml(subjectCode)} [${escapeHtml(section)}] (${escapeHtml(semesterDisplayLabel(activeSemester))}). Upload an Excel file below to import student grades.
-          </td>
-        </tr>
-      `;
       parsedGradeData = [];
+      liveRecordEmptyHtml = emptyLiveRow(
+        `No grades saved for ${escapeHtml(subjectCode)} [${escapeHtml(section)}] (${escapeHtml(semesterDisplayLabel(activeSemester))}). Drop an Excel class record above to import student grades.`
+      );
+      renderLiveClassRecord();
       renderInstructorAnalytics([]);
       return;
     }
 
     parsedGradeData = [];
-    tbody.innerHTML = '';
 
     const gradesByStudent = new Map();
 
@@ -903,39 +1230,13 @@ async function loadInstructorGradesFromFirestore(subjectCode, section = activeIn
 
     gradesByStudent.forEach((g) => {
       parsedGradeData.push(g);
-
-      const stats = computeGradeStats(g.prelim, g.midterm, g.finals);
-
-      const tr = document.createElement('tr');
-      tr.className = "hover:bg-slate-800/50 transition-colors cursor-pointer";
-      tr.title = "Click to view itemized assessment breakdown";
-      tr.innerHTML = `
-        <td class="px-4 py-3.5 font-mono text-xs text-slate-400 whitespace-nowrap">${escapeHtml(g.studentId || '')}</td>
-        <td class="px-4 py-3.5 font-semibold text-white whitespace-nowrap">${escapeHtml(g.fullName || '')}</td>
-        <td class="px-4 py-3.5 text-slate-300">${stats.prelim.toFixed(2)}</td>
-        <td class="px-4 py-3.5 text-slate-300">${stats.midterm.toFixed(2)}</td>
-        <td class="px-4 py-3.5 text-slate-300">${stats.finals.toFixed(2)}</td>
-        <td class="px-4 py-3.5 font-bold text-emerald-400">${stats.averageDisplay}</td>
-        <td class="px-4 py-3.5 whitespace-nowrap">
-          <span class="inline-flex items-center justify-center px-2.5 py-1 rounded-md text-[10px] font-extrabold uppercase tracking-wider whitespace-nowrap leading-none ${g.isReleased ? (stats.isPassing ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30') : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'}">
-            ${g.isReleased ? (stats.isPassing ? 'PASSED' : 'RE-EVAL') : 'DRAFT'}
-          </span>
-        </td>
-      `;
-      tr.addEventListener('click', () => openStudentGradeBreakdownModal(g));
-      tbody.appendChild(tr);
     });
 
-    if (parsedGradeData.length === 0) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="7" class="px-4 py-12 text-center text-slate-500 italic">
-            No enrolled students in Section [${escapeHtml(section)}] have saved grades yet.
-          </td>
-        </tr>
-      `;
-    }
+    liveRecordEmptyHtml = parsedGradeData.length === 0
+      ? emptyLiveRow(`No enrolled students in Section [${escapeHtml(section)}] have saved grades yet.`)
+      : '';
 
+    renderLiveClassRecord();
     renderInstructorAnalytics(parsedGradeData);
   } catch (err) {
     console.error("Error fetching grades:", err);
@@ -1095,6 +1396,10 @@ function renderAdminAnalytics(allReleasedGrades) {
   });
 }
 
+// ------------------------------------------------------------------
+// EXCEL PARSER (SheetJS)
+// ------------------------------------------------------------------
+
 function processExcel() {
   const fileInput = document.getElementById('excelFile');
   if (!fileInput || !fileInput.files.length) return alert("Select an Excel file.");
@@ -1107,7 +1412,7 @@ function processExcel() {
       const data = new Uint8Array(e.target.result);
       const workbook = XLSX.read(data, { type: 'array' });
 
-      const hasMultiTabSheets = workbook.SheetNames.some(s => 
+      const hasMultiTabSheets = workbook.SheetNames.some(s =>
         ['PRELIM', 'MIDTERM', 'FINAL'].includes(s.trim().toUpperCase())
       );
 
@@ -1120,6 +1425,11 @@ function processExcel() {
       console.error("Excel Parsing Error:", err);
       alert("Error parsing Excel file: " + err.message);
     }
+  };
+
+  // Allow re-importing the same file after it is edited
+  reader.onloadend = function() {
+    fileInput.value = '';
   };
 
   reader.readAsArrayBuffer(file);
@@ -1157,25 +1467,6 @@ function processMultiTabExcel(workbook) {
   const midtermIdx = headers.findIndex(h => h.toLowerCase() === "midterm");
   const finalIdx = headers.findIndex(h => h.toLowerCase() === "final" || h.toLowerCase().includes("finals"));
 
-  // Locate Itemized Assessment Column Indices
-  const pQ1Idx = headers.findIndex(h => h.toLowerCase() === "p_q1");
-  const pQ2Idx = headers.findIndex(h => h.toLowerCase() === "p_q2");
-  const pQ3Idx = headers.findIndex(h => h.toLowerCase() === "p_q3");
-  const pAttIdx = headers.findIndex(h => h.toLowerCase() === "p_att");
-  const pExamIdx = headers.findIndex(h => h.toLowerCase() === "p_exam");
-
-  const mQ1Idx = headers.findIndex(h => h.toLowerCase() === "m_q1");
-  const mQ2Idx = headers.findIndex(h => h.toLowerCase() === "m_q2");
-  const mQ3Idx = headers.findIndex(h => h.toLowerCase() === "m_q3");
-  const mAttIdx = headers.findIndex(h => h.toLowerCase() === "m_att");
-  const mExamIdx = headers.findIndex(h => h.toLowerCase() === "m_exam");
-
-  const fQ1Idx = headers.findIndex(h => h.toLowerCase() === "f_q1");
-  const fQ2Idx = headers.findIndex(h => h.toLowerCase() === "f_q2");
-  const fQ3Idx = headers.findIndex(h => h.toLowerCase() === "f_q3");
-  const fAttIdx = headers.findIndex(h => h.toLowerCase() === "f_att");
-  const fExamIdx = headers.findIndex(h => h.toLowerCase() === "f_exam");
-
   parsedGradeData = [];
 
   for (let r = headerRowIndex + 1; r < summaryMatrix.length; r++) {
@@ -1194,25 +1485,7 @@ function processMultiTabExcel(workbook) {
       prelim: parseFloat(prelim.toFixed(2)),
       midterm: parseFloat(midterm.toFixed(2)),
       finals: parseFloat(finals.toFixed(2)),
-
-      // Itemized values
-      p_q1: pQ1Idx !== -1 && row[pQ1Idx] !== "" ? parseFloat(row[pQ1Idx]) : null,
-      p_q2: pQ2Idx !== -1 && row[pQ2Idx] !== "" ? parseFloat(row[pQ2Idx]) : null,
-      p_q3: pQ3Idx !== -1 && row[pQ3Idx] !== "" ? parseFloat(row[pQ3Idx]) : null,
-      p_att: pAttIdx !== -1 && row[pAttIdx] !== "" ? parseFloat(row[pAttIdx]) : null,
-      p_exam: pExamIdx !== -1 && row[pExamIdx] !== "" ? parseFloat(row[pExamIdx]) : null,
-
-      m_q1: mQ1Idx !== -1 && row[mQ1Idx] !== "" ? parseFloat(row[mQ1Idx]) : null,
-      m_q2: mQ2Idx !== -1 && row[mQ2Idx] !== "" ? parseFloat(row[mQ2Idx]) : null,
-      m_q3: mQ3Idx !== -1 && row[mQ3Idx] !== "" ? parseFloat(row[mQ3Idx]) : null,
-      m_att: mAttIdx !== -1 && row[mAttIdx] !== "" ? parseFloat(row[mAttIdx]) : null,
-      m_exam: mExamIdx !== -1 && row[mExamIdx] !== "" ? parseFloat(row[mExamIdx]) : null,
-
-      f_q1: fQ1Idx !== -1 && row[fQ1Idx] !== "" ? parseFloat(row[fQ1Idx]) : null,
-      f_q2: fQ2Idx !== -1 && row[fQ2Idx] !== "" ? parseFloat(row[fQ2Idx]) : null,
-      f_q3: fQ3Idx !== -1 && row[fQ3Idx] !== "" ? parseFloat(row[fQ3Idx]) : null,
-      f_att: fAttIdx !== -1 && row[fAttIdx] !== "" ? parseFloat(row[fAttIdx]) : null,
-      f_exam: fExamIdx !== -1 && row[fExamIdx] !== "" ? parseFloat(row[fExamIdx]) : null
+      ...extractComponentFields(headers, row)
     });
   }
 
@@ -1254,25 +1527,6 @@ function processSingleTabExcel(workbook) {
   const midtermIdx = headers.findIndex(h => h.toLowerCase() === "midterm");
   const finalIdx = headers.findIndex(h => h.toLowerCase() === "final" || h.toLowerCase().includes("finals"));
 
-  // Locate Itemized Assessment Column Indices
-  const pQ1Idx = headers.findIndex(h => h.toLowerCase() === "p_q1");
-  const pQ2Idx = headers.findIndex(h => h.toLowerCase() === "p_q2");
-  const pQ3Idx = headers.findIndex(h => h.toLowerCase() === "p_q3");
-  const pAttIdx = headers.findIndex(h => h.toLowerCase() === "p_att");
-  const pExamIdx = headers.findIndex(h => h.toLowerCase() === "p_exam");
-
-  const mQ1Idx = headers.findIndex(h => h.toLowerCase() === "m_q1");
-  const mQ2Idx = headers.findIndex(h => h.toLowerCase() === "m_q2");
-  const mQ3Idx = headers.findIndex(h => h.toLowerCase() === "m_q3");
-  const mAttIdx = headers.findIndex(h => h.toLowerCase() === "m_att");
-  const mExamIdx = headers.findIndex(h => h.toLowerCase() === "m_exam");
-
-  const fQ1Idx = headers.findIndex(h => h.toLowerCase() === "f_q1");
-  const fQ2Idx = headers.findIndex(h => h.toLowerCase() === "f_q2");
-  const fQ3Idx = headers.findIndex(h => h.toLowerCase() === "f_q3");
-  const fAttIdx = headers.findIndex(h => h.toLowerCase() === "f_att");
-  const fExamIdx = headers.findIndex(h => h.toLowerCase() === "f_exam");
-
   parsedGradeData = [];
   for (let r = headerRowIndex + 1; r < matrix.length; r++) {
     const row = matrix[r];
@@ -1290,25 +1544,7 @@ function processSingleTabExcel(workbook) {
       prelim: parseFloat(prelim.toFixed(2)),
       midterm: parseFloat(midterm.toFixed(2)),
       finals: parseFloat(finals.toFixed(2)),
-
-      // Itemized values
-      p_q1: pQ1Idx !== -1 && row[pQ1Idx] !== "" ? parseFloat(row[pQ1Idx]) : null,
-      p_q2: pQ2Idx !== -1 && row[pQ2Idx] !== "" ? parseFloat(row[pQ2Idx]) : null,
-      p_q3: pQ3Idx !== -1 && row[pQ3Idx] !== "" ? parseFloat(row[pQ3Idx]) : null,
-      p_att: pAttIdx !== -1 && row[pAttIdx] !== "" ? parseFloat(row[pAttIdx]) : null,
-      p_exam: pExamIdx !== -1 && row[pExamIdx] !== "" ? parseFloat(row[pExamIdx]) : null,
-
-      m_q1: mQ1Idx !== -1 && row[mQ1Idx] !== "" ? parseFloat(row[mQ1Idx]) : null,
-      m_q2: mQ2Idx !== -1 && row[mQ2Idx] !== "" ? parseFloat(row[mQ2Idx]) : null,
-      m_q3: mQ3Idx !== -1 && row[mQ3Idx] !== "" ? parseFloat(row[mQ3Idx]) : null,
-      m_att: mAttIdx !== -1 && row[mAttIdx] !== "" ? parseFloat(row[mAttIdx]) : null,
-      m_exam: mExamIdx !== -1 && row[mExamIdx] !== "" ? parseFloat(row[mExamIdx]) : null,
-
-      f_q1: fQ1Idx !== -1 && row[fQ1Idx] !== "" ? parseFloat(row[fQ1Idx]) : null,
-      f_q2: fQ2Idx !== -1 && row[fQ2Idx] !== "" ? parseFloat(row[fQ2Idx]) : null,
-      f_q3: fQ3Idx !== -1 && row[fQ3Idx] !== "" ? parseFloat(row[fQ3Idx]) : null,
-      f_att: fAttIdx !== -1 && row[fAttIdx] !== "" ? parseFloat(row[fAttIdx]) : null,
-      f_exam: fExamIdx !== -1 && row[fExamIdx] !== "" ? parseFloat(row[fExamIdx]) : null
+      ...extractComponentFields(headers, row)
     });
   }
 
@@ -1318,42 +1554,15 @@ function processSingleTabExcel(workbook) {
 }
 
 function renderParsedGradesToTable() {
-  const tbody = document.getElementById('previewBody');
-  if (!tbody) return;
+  parsedGradeData.forEach((row) => { row.__staged = true; });
+  liveRecordEmptyHtml = emptyLiveRow('No grade sheet parsed yet. Select an assigned class and import an Excel file to view grades.');
 
-  if (!parsedGradeData.length) {
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="7" class="px-4 py-12 text-center text-slate-500 italic">
-          No grade sheet parsed yet. Select an assigned class and import an Excel file to view grades.
-        </td>
-      </tr>
-    `;
-    return;
+  if (parsedGradeData.length) {
+    liveRecordDirty = true;
+    setFacultySyncState('staged');
   }
 
-  tbody.innerHTML = '';
-
-  parsedGradeData.forEach((row) => {
-    const stats = computeGradeStats(row.prelim, row.midterm, row.finals);
-
-    const tr = document.createElement('tr');
-    tr.className = "hover:bg-slate-800/50 transition-colors cursor-pointer";
-    tr.innerHTML = `
-      <td class="px-4 py-3.5 font-mono text-xs text-slate-400 whitespace-nowrap">${escapeHtml(row.studentId || 'N/A')}</td>
-      <td class="px-4 py-3.5 font-semibold text-white whitespace-nowrap">${escapeHtml(row.fullName || 'Unnamed Student')}</td>
-      <td class="px-4 py-3.5 text-slate-300">${stats.prelim.toFixed(2)}</td>
-      <td class="px-4 py-3.5 text-slate-300">${stats.midterm.toFixed(2)}</td>
-      <td class="px-4 py-3.5 text-slate-300">${stats.finals.toFixed(2)}</td>
-      <td class="px-4 py-3.5 font-bold ${stats.isPassing ? 'text-emerald-400' : 'text-rose-400'}">${stats.averageDisplay}</td>
-      <td class="px-4 py-3.5 whitespace-nowrap">
-        <span class="inline-flex items-center justify-center px-2.5 py-1 rounded-md text-[10px] font-extrabold uppercase tracking-wider whitespace-nowrap leading-none bg-amber-500/20 text-amber-400 border border-amber-500/30">
-          STAGED DRAFT (${stats.isPassing ? 'PASSED' : 'RE-EVAL'})
-        </span>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
+  renderLiveClassRecord();
 }
 
 async function buildRegisteredStudentIndex(subjectCode) {
@@ -1427,24 +1636,22 @@ async function saveDraftGrades() {
 
       const docId = buildGradeDocId(activeSubjectCode, cleanStudentId);
       const docRef = db.collection('grades').doc(docId);
-      const stats = computeGradeStats(row.prelim, row.midterm, row.finals);
+      const finalsVal = row.finals !== undefined ? row.finals : row.final;
+      const stats = computeGradeStats(row.prelim, row.midterm, finalsVal);
 
       batch.set(docRef, {
-        classId: activeSubjectCode, 
-        studentId: cleanStudentId, 
+        classId: activeSubjectCode,
+        studentId: cleanStudentId,
         fullName: row.fullName,
         section: activeInstructorSectionFilter,
-        prelim: stats.prelim, 
+        prelim: stats.prelim,
         midterm: stats.midterm,
-        finals: stats.finals, 
+        finals: stats.finals,
 
-        // Store Itemized Assessment Breakdown
-        p_q1: row.p_q1 ?? null, p_q2: row.p_q2 ?? null, p_q3: row.p_q3 ?? null, p_att: row.p_att ?? null, p_exam: row.p_exam ?? null,
-        m_q1: row.m_q1 ?? null, m_q2: row.m_q2 ?? null, m_q3: row.m_q3 ?? null, m_att: row.m_att ?? null, m_exam: row.m_exam ?? null,
-        f_q1: row.f_q1 ?? null, f_q2: row.f_q2 ?? null, f_q3: row.f_q3 ?? null, f_att: row.f_att ?? null, f_exam: row.f_exam ?? null,
+        ...pickComponentFields(row),
 
         semester: normalizeSemester(activeSemester),
-        schoolYear: "2026-2027",
+        schoolYear: CURRENT_SCHOOL_YEAR,
         isReleased: false,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
@@ -1495,24 +1702,22 @@ async function releaseGrades() {
 
       const docId = buildGradeDocId(activeSubjectCode, cleanStudentId);
       const gradeRef = db.collection('grades').doc(docId);
-      const stats = computeGradeStats(row.prelim, row.midterm, row.finals);
+      const finalsVal = row.finals !== undefined ? row.finals : row.final;
+      const stats = computeGradeStats(row.prelim, row.midterm, finalsVal);
 
       batch.set(gradeRef, {
-        classId: activeSubjectCode, 
-        studentId: cleanStudentId, 
+        classId: activeSubjectCode,
+        studentId: cleanStudentId,
         fullName: row.fullName,
         section: activeInstructorSectionFilter,
-        prelim: stats.prelim, 
+        prelim: stats.prelim,
         midterm: stats.midterm,
-        finals: stats.finals, 
+        finals: stats.finals,
 
-        // Store Itemized Assessment Breakdown
-        p_q1: row.p_q1 ?? null, p_q2: row.p_q2 ?? null, p_q3: row.p_q3 ?? null, p_att: row.p_att ?? null, p_exam: row.p_exam ?? null,
-        m_q1: row.m_q1 ?? null, m_q2: row.m_q2 ?? null, m_q3: row.m_q3 ?? null, m_att: row.m_att ?? null, m_exam: row.m_exam ?? null,
-        f_q1: row.f_q1 ?? null, f_q2: row.f_q2 ?? null, f_q3: row.f_q3 ?? null, f_att: row.f_att ?? null, f_exam: row.f_exam ?? null,
+        ...pickComponentFields(row),
 
         semester: normalizeSemester(activeSemester),
-        schoolYear: "2026-2027",
+        schoolYear: CURRENT_SCHOOL_YEAR,
         isReleased: true,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
@@ -1531,69 +1736,206 @@ async function releaseGrades() {
 }
 
 // ------------------------------------------------------------------
-// ADMIN CONSOLE MANAGEMENT
+// ADMIN CONSOLE MANAGEMENT & ACTIVE ASSIGNMENTS
 // ------------------------------------------------------------------
+
+function classifyAtRiskRecord(g) {
+  const finalsVal = g.finals !== undefined ? g.finals : g.final;
+  const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
+
+  const missing = [];
+  if (!stats.prelim) missing.push('Prelim');
+  if (!stats.midterm) missing.push('Midterm');
+  if (!stats.finals) missing.push('Finals');
+
+  if (missing.length) {
+    return { issue: `Missing ${missing.join(', ')}`, gradeLabel: 'INC', gradeClass: 'text-amber-400', sortKey: -1, stats };
+  }
+  if (!stats.isPassing) {
+    return { issue: 'Below passing', gradeLabel: stats.averageDisplay, gradeClass: 'text-rose-400', sortKey: stats.average, stats };
+  }
+  return null;
+}
+
+function renderAdminKpis({ facultyList, assignments, todayLogCount }) {
+  const total = facultyList.length;
+  const disabled = facultyList.filter((f) => f.status === 'disabled').length;
+  const active = total - disabled;
+
+  const facultyCountEl = document.getElementById('facultyCountDisplay');
+  const facultySub = document.getElementById('facultyActiveSubtext');
+  if (facultyCountEl) facultyCountEl.textContent = String(total);
+  if (facultySub) facultySub.textContent = `${active} active • ${disabled} disabled`;
+
+  const subjectCodes = new Set();
+  const sections = new Set();
+  assignments.forEach((a) => {
+    if (a.subjectCode) subjectCodes.add(String(a.subjectCode).trim().toUpperCase());
+    const sec = String(a.section || 'ALL').trim().toUpperCase();
+    if (sec && sec !== 'ALL') sections.add(sec);
+  });
+
+  const subjectsCountEl = document.getElementById('subjectsCountDisplay');
+  const subjectsSub = document.getElementById('subjectsSectionsSubtext');
+  if (subjectsCountEl) subjectsCountEl.textContent = String(subjectCodes.size);
+  if (subjectsSub) {
+    subjectsSub.textContent = sections.size > 0
+      ? `Across ${sections.size} section${sections.size === 1 ? '' : 's'}`
+      : 'Department-wide assignments';
+  }
+
+  updateLogsCounter(todayLogCount);
+  const logsSub = document.getElementById('logsCountSubtext');
+  if (logsSub) logsSub.textContent = 'Actions logged today';
+}
+
+function renderFacultyRoster(facultyDocs, loadByUid) {
+  const facultyTable = document.getElementById('facultyTableBody');
+  const assignFacultySelect = document.getElementById('assignFacultySelect');
+
+  if (facultyTable) facultyTable.innerHTML = '';
+  if (assignFacultySelect) assignFacultySelect.innerHTML = '<option value="">Select Faculty...</option>';
+
+  if (facultyTable && !facultyDocs.length) {
+    facultyTable.innerHTML = `
+      <tr>
+        <td colspan="5" class="px-4 py-6 text-center text-slate-500 italic text-xs">No faculty accounts provisioned yet.</td>
+      </tr>
+    `;
+  }
+
+  facultyDocs.forEach(({ id, data: f }) => {
+    const displayLabel = facultyDisplayLabel(f);
+    const isEnabled = f.status !== 'disabled';
+    const facultyRef = f.facultyId || f.employeeId || id.slice(0, 8).toUpperCase();
+    const load = loadByUid[id] || 0;
+
+    if (facultyTable) {
+      const tr = document.createElement('tr');
+      tr.className = "hover:bg-slate-800/50 transition-colors";
+      tr.innerHTML = `
+        <td class="px-4 py-3">
+          <div class="font-bold text-white">${escapeHtml(displayLabel)}</div>
+          ${f.fullName && f.email ? `<div class="text-[11px] text-slate-500">${escapeHtml(f.email)}</div>` : ''}
+        </td>
+        <td class="px-4 py-3 font-mono text-xs text-slate-400">${escapeHtml(facultyRef)}</td>
+        <td class="px-4 py-3 text-slate-300">${load} unit${load === 1 ? '' : 's'}</td>
+        <td class="px-4 py-3">
+          <span class="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${isEnabled ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'}">
+            ${isEnabled ? 'ENABLED' : 'DISABLED'}
+          </span>
+        </td>
+        <td class="px-4 py-3">
+          <button type="button" role="switch" aria-checked="${isEnabled}" title="${isEnabled ? 'Disable account' : 'Enable account'}"
+            onclick="toggleFacultyStatus('${escapeHtml(id)}', '${isEnabled ? 'active' : 'disabled'}')"
+            class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${isEnabled ? 'bg-emerald-500' : 'bg-slate-700'}">
+            <span class="inline-block h-4 w-4 rounded-full bg-slate-950 transition-transform ${isEnabled ? 'translate-x-4' : 'translate-x-0.5'}"></span>
+          </button>
+        </td>
+      `;
+      facultyTable.appendChild(tr);
+    }
+
+    if (assignFacultySelect) {
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.innerText = displayLabel;
+      assignFacultySelect.appendChild(opt);
+    }
+  });
+}
+
+function renderAtRiskTracker(releasedGrades) {
+  const atRiskTable = document.getElementById('atRiskTableBody');
+  const badge = document.getElementById('atRiskBadge');
+
+  const flagged = [];
+  releasedGrades.forEach((g) => {
+    const result = classifyAtRiskRecord(g);
+    if (result) flagged.push({ g, ...result });
+  });
+  flagged.sort((a, b) => a.sortKey - b.sortKey);
+
+  const uniqueStudents = new Set(flagged.map(({ g }) => g.studentId || normalizeNameKey(g.fullName)));
+  if (badge) {
+    const n = uniqueStudents.size;
+    badge.textContent = `${n} STUDENT${n === 1 ? '' : 'S'} FLAGGED`;
+    badge.className = n > 0
+      ? "px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-black uppercase"
+      : "px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-black uppercase";
+  }
+
+  if (!atRiskTable) return;
+  atRiskTable.innerHTML = '';
+
+  if (!flagged.length) {
+    atRiskTable.innerHTML = `
+      <tr>
+        <td colspan="5" class="px-4 py-6 text-center text-slate-500 italic text-xs">
+          No at-risk students detected across released course records.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  flagged.forEach((entry) => {
+    const { g } = entry;
+    const tr = document.createElement('tr');
+    tr.className = "hover:bg-slate-800/50 transition-colors";
+    tr.innerHTML = `
+      <td class="px-4 py-3">
+        <div class="font-bold text-white">${escapeHtml(g.fullName || 'Student')}</div>
+        <div class="text-[11px] font-mono text-slate-500">${escapeHtml(g.studentId || 'N/A')}</div>
+      </td>
+      <td class="px-4 py-3">
+        <div class="font-mono text-xs font-bold text-emerald-400">${escapeHtml(g.classId || g.subjectCode || 'N/A')}</div>
+        <div class="text-[11px] text-slate-500">${escapeHtml(semesterDisplayLabel(g.semester))}</div>
+      </td>
+      <td class="px-4 py-3 text-slate-300">${escapeHtml(entry.issue)}</td>
+      <td class="px-4 py-3 font-mono font-black ${entry.gradeClass}">${escapeHtml(entry.gradeLabel)}</td>
+      <td class="px-4 py-3">
+        <button type="button" data-review="1" class="px-3 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-bold text-white transition-all">Review</button>
+      </td>
+    `;
+    const reviewBtn = tr.querySelector('button[data-review]');
+    if (reviewBtn) reviewBtn.addEventListener('click', () => openStudentGradeBreakdownModal(g));
+    atRiskTable.appendChild(tr);
+  });
+}
 
 async function loadAdminDashboardData() {
   try {
-    const facultySnapshot = await db.collection('users').where('role', '==', 'instructor').get();
-    const facultyCount = document.getElementById('facultyCountDisplay');
-    if (facultyCount) facultyCount.innerText = facultySnapshot.size;
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
 
-    const facultyTable = document.getElementById('facultyTableBody');
-    const assignFacultySelect = document.getElementById('assignFacultySelect');
-    if (facultyTable) facultyTable.innerHTML = '';
-    if (assignFacultySelect) assignFacultySelect.innerHTML = '<option value="">Select Faculty...</option>';
+    const [
+      facultySnapshot,
+      subjectsSnapshot,
+      assignmentsSnapshot,
+      gradesSnapshot,
+      todayLogsSnapshot,
+      recentLogsSnapshot
+    ] = await Promise.all([
+      db.collection('users').where('role', '==', 'instructor').get(),
+      db.collection('subjects').get(),
+      db.collection('assignments').get(),
+      db.collection('grades').where('isReleased', '==', true).get(),
+      db.collection('logs')
+        .where('timestamp', '>=', firebase.firestore.Timestamp.fromDate(startOfToday))
+        .get()
+        .catch((e) => { console.warn("Today's activity count unavailable:", e); return null; }),
+      db.collection('logs').orderBy('timestamp', 'desc').limit(10).get()
+    ]);
 
-    const facultyInfoByUid = {};
-    facultySnapshot.forEach((doc) => {
-      const f = doc.data();
-      facultyInfoByUid[doc.id] = f;
-      const displayLabel = facultyDisplayLabel(f);
-
-      if (facultyTable) {
-        const tr = document.createElement('tr');
-        const isActive = f.status === 'active';
-        const safeStatus = f.status === 'disabled' ? 'disabled' : 'active';
-        tr.className = "hover:bg-slate-800/50 transition-colors";
-        tr.innerHTML = `
-          <td class="px-5 py-3">
-            <div class="font-medium text-white">${escapeHtml(displayLabel)}</div>
-            ${f.fullName ? `<div class="text-[11px] text-slate-500">${escapeHtml(f.email)}</div>` : ''}
-          </td>
-          <td class="px-5 py-3">
-            <span class="px-2.5 py-0.5 rounded-full text-xs font-bold ${isActive ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}">
-              ${escapeHtml(f.status || 'active')}
-            </span>
-          </td>
-          <td class="px-5 py-3">
-            <button onclick="toggleFacultyStatus('${doc.id}', '${safeStatus}')" class="px-3 py-1 rounded-lg text-xs font-bold ${isActive ? 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'} transition-all">
-              ${isActive ? 'Disable' : 'Enable'}
-            </button>
-          </td>
-        `;
-        facultyTable.appendChild(tr);
-      }
-
-      if (assignFacultySelect) {
-        const opt = document.createElement('option');
-        opt.value = doc.id;
-        opt.innerText = displayLabel;
-        assignFacultySelect.appendChild(opt);
-      }
-    });
-
-    const subjectsSnapshot = await db.collection('subjects').get();
-    const subjectsCount = document.getElementById('subjectsCountDisplay');
-    if (subjectsCount) subjectsCount.innerText = subjectsSnapshot.size;
-
-    const subjectNameByCode = {};
+    // Subject catalogue (units + assign dropdown)
+    const unitsByCode = {};
     const assignSubjectSelect = document.getElementById('assignSubjectSelect');
     if (assignSubjectSelect) assignSubjectSelect.innerHTML = '<option value="">Select Subject...</option>';
 
     subjectsSnapshot.forEach((doc) => {
       const s = doc.data();
-      subjectNameByCode[s.subjectCode] = s.subjectName;
+      unitsByCode[s.subjectCode] = Number(s.units) || 3;
       if (assignSubjectSelect) {
         const opt = document.createElement('option');
         opt.value = s.subjectCode;
@@ -1602,130 +1944,39 @@ async function loadAdminDashboardData() {
       }
     });
 
-    const activeAssignmentsList = document.getElementById('activeAssignmentsList');
-    if (activeAssignmentsList) {
-      const assignmentsSnapshot = await db.collection('assignments').get();
-      const assignmentsByFaculty = {};
-
-      assignmentsSnapshot.forEach((doc) => {
-        const a = doc.data();
-        if (!assignmentsByFaculty[a.facultyUid]) assignmentsByFaculty[a.facultyUid] = [];
-        assignmentsByFaculty[a.facultyUid].push({ ...a, section: a.section || 'ALL' });
-      });
-
-      activeAssignmentsList.innerHTML = '';
-
-      if (facultySnapshot.empty) {
-        activeAssignmentsList.innerHTML = `
-          <div class="p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">
-            No instructors have been provisioned yet.
-          </div>
-        `;
-      } else {
-        facultySnapshot.forEach((facultyDoc) => {
-          const facultyUid = facultyDoc.id;
-          const facultyLabel = facultyDisplayLabel(facultyInfoByUid[facultyUid] || {});
-          const assignedSubjects = assignmentsByFaculty[facultyUid] || [];
-
-          const card = document.createElement('div');
-          card.className = "p-3 rounded-lg border border-slate-800 bg-slate-950 space-y-2";
-
-          const header = document.createElement('div');
-          header.className = "text-sm font-semibold text-white truncate";
-          header.textContent = facultyLabel;
-          card.appendChild(header);
-
-          const subjectsContainer = document.createElement('div');
-          subjectsContainer.className = "space-y-1";
-
-          if (assignedSubjects.length) {
-            assignedSubjects.forEach((assignment) => {
-              const code = assignment.subjectCode;
-              const section = assignment.section || 'ALL';
-              const subjectName = subjectNameByCode[code] || code;
-
-              const subjectRow = document.createElement('div');
-              subjectRow.className = "flex items-center justify-between gap-3 pl-3 border-l-2 border-emerald-500/30 py-1";
-
-              const label = document.createElement('span');
-              label.className = "text-xs text-slate-300 truncate";
-              label.textContent = `${code} (${section}) - ${subjectName}`;
-
-              const unassignBtn = document.createElement('button');
-              unassignBtn.className = "shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition-all";
-              unassignBtn.textContent = "Unassign";
-              unassignBtn.addEventListener('click', () => unassignSubjectFromFaculty(facultyUid, code, section));
-
-              subjectRow.appendChild(label);
-              subjectRow.appendChild(unassignBtn);
-              subjectsContainer.appendChild(subjectRow);
-            });
-          } else {
-            const noSubjects = document.createElement('div');
-            noSubjects.className = "pl-3 text-xs text-slate-600 italic";
-            noSubjects.textContent = "No subjects assigned";
-            subjectsContainer.appendChild(noSubjects);
-          }
-
-          card.appendChild(subjectsContainer);
-          activeAssignmentsList.appendChild(card);
-        });
-      }
-    }
-
-    const atRiskTable = document.getElementById('atRiskTableBody');
-    const gradesSnapshot = await db.collection('grades').where('isReleased', '==', true).get();
-    const allReleasedGrades = [];
-
-    if (atRiskTable) atRiskTable.innerHTML = '';
-    let atRiskCount = 0;
-
-    gradesSnapshot.forEach((doc) => {
-      const g = doc.data();
-      allReleasedGrades.push(g);
-
-      const finalsVal = g.finals !== undefined ? g.finals : g.final;
-      const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
-
-      if (!stats.isPassing && atRiskTable) {
-        atRiskCount++;
-        const tr = document.createElement('tr');
-        tr.className = "hover:bg-slate-800/50 transition-colors";
-        tr.innerHTML = `
-          <td class="px-5 py-3 text-white font-medium">${escapeHtml(g.fullName || 'Student')}</td>
-          <td class="px-5 py-3 font-mono text-xs text-slate-400">${escapeHtml(g.studentId || 'N/A')}</td>
-          <td class="px-5 py-3 text-slate-300">${escapeHtml(g.classId || g.subjectCode || 'N/A')}</td>
-          <td class="px-5 py-3 font-bold text-rose-400">${stats.averageDisplay}</td>
-          <td class="px-5 py-3">
-            <span class="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase bg-rose-500/20 text-rose-400 border border-rose-500/30">
-              DEFICIENCY / AT-RISK
-            </span>
-          </td>
-        `;
-        atRiskTable.appendChild(tr);
+    // Assignments -> teaching load per faculty + KPI source
+    const assignments = [];
+    const loadByUid = {};
+    assignmentsSnapshot.forEach((doc) => {
+      const a = doc.data();
+      assignments.push(a);
+      if (a.facultyUid && a.subjectCode && unitsByCode[a.subjectCode] !== undefined) {
+        loadByUid[a.facultyUid] = (loadByUid[a.facultyUid] || 0) + unitsByCode[a.subjectCode];
       }
     });
 
-    if (atRiskTable && atRiskCount === 0) {
-      atRiskTable.innerHTML = `
-        <tr>
-          <td colspan="5" class="px-5 py-6 text-center text-slate-500 italic text-xs">
-            No at-risk students detected across released course records.
-          </td>
-        </tr>
-      `;
-    }
+    // Faculty roster + KPI cards
+    const facultyDocs = [];
+    facultySnapshot.forEach((doc) => facultyDocs.push({ id: doc.id, data: doc.data() }));
 
+    renderFacultyRoster(facultyDocs, loadByUid);
+    renderAdminKpis({
+      facultyList: facultyDocs.map((d) => d.data),
+      assignments,
+      todayLogCount: todayLogsSnapshot ? todayLogsSnapshot.size : null
+    });
+
+    // At-risk tracker + analytics
+    const allReleasedGrades = [];
+    gradesSnapshot.forEach((doc) => allReleasedGrades.push(doc.data()));
+    renderAtRiskTracker(allReleasedGrades);
     renderAdminAnalytics(allReleasedGrades);
 
-    const logsSnapshot = await db.collection('logs').orderBy('timestamp', 'desc').limit(10).get();
-    const logsCount = document.getElementById('logsCountDisplay');
-    if (logsCount) logsCount.innerText = logsSnapshot.size;
-
+    // Audit log table (latest 10)
     const logsTable = document.getElementById('logsTableBody');
     if (logsTable) {
       logsTable.innerHTML = '';
-      logsSnapshot.forEach((doc) => {
+      recentLogsSnapshot.forEach((doc) => {
         const l = doc.data();
         const timeStr = l.timestamp ? new Date(l.timestamp.toDate()).toLocaleString() : 'Just now';
         const tr = document.createElement('tr');
@@ -1739,8 +1990,144 @@ async function loadAdminDashboardData() {
       });
     }
 
+    loadActiveAssignmentsList();
+
   } catch (err) {
     console.error("Error loading admin dashboard data:", err);
+  }
+}
+
+async function loadActiveAssignmentsList() {
+  const container = document.getElementById('activeAssignmentsContainer');
+  if (!container) return;
+
+  try {
+    const [assignmentsSnap, usersSnap, subjectsSnap] = await Promise.all([
+      db.collection('assignments').get(),
+      db.collection('users').get(),
+      db.collection('subjects').get()
+    ]);
+
+    if (assignmentsSnap.empty) {
+      container.innerHTML = `
+        <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">
+          No active subject assignments found.
+        </div>
+      `;
+      return;
+    }
+
+    const facultyMap = {};
+    usersSnap.forEach(doc => {
+      const uData = doc.data();
+      const displayName = uData.fullName || uData.name || uData.email || doc.id;
+      const title = uData.title ? ` (${uData.title})` : '';
+      facultyMap[doc.id] = `${displayName}${title}`;
+    });
+
+    const subjectMap = {};
+    subjectsSnap.forEach(doc => {
+      const s = doc.data();
+      subjectMap[s.subjectCode] = s.subjectName || s.subjectCode;
+    });
+
+    const grouped = {};
+    assignmentsSnap.forEach(doc => {
+      const a = doc.data();
+      const fUid = a.facultyUid || 'unassigned';
+      if (!grouped[fUid]) grouped[fUid] = [];
+      grouped[fUid].push({ docId: doc.id, ...a });
+    });
+
+    const fragment = document.createDocumentFragment();
+
+    Object.entries(grouped).forEach(([facultyUid, list]) => {
+      const facultyName = facultyMap[facultyUid] || `Instructor (${facultyUid})`;
+
+      const groupCard = document.createElement('div');
+      groupCard.className = "p-4 rounded-xl border border-slate-800/80 bg-slate-950 space-y-2.5 mb-3";
+
+      const header = document.createElement('div');
+      header.className = "font-bold text-xs text-white border-b border-slate-800/80 pb-2 flex items-center justify-between";
+      header.innerHTML = `
+        <span class="text-slate-100 font-semibold">${escapeHtml(facultyName)}</span>
+        <span class="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">${list.length} Subject(s)</span>
+      `;
+      groupCard.appendChild(header);
+
+      const itemsList = document.createElement('div');
+      itemsList.className = "space-y-1.5";
+
+      list.forEach(a => {
+        const title = subjectMap[a.subjectCode]
+          ? `${a.subjectCode} (${a.section || 'ALL'}) - ${subjectMap[a.subjectCode]}`
+          : `${a.subjectCode} (${a.section || 'ALL'})`;
+
+        const itemRow = document.createElement('div');
+        itemRow.className = "flex items-center justify-between gap-3 p-2 rounded-lg border border-slate-800/60 bg-slate-900/60 hover:bg-slate-900 transition-colors";
+
+        itemRow.innerHTML = `
+          <div class="text-xs font-semibold text-emerald-400 min-w-0 truncate">${escapeHtml(title)}</div>
+          <button onclick="unassignSubjectFromFaculty('${a.docId}', '${escapeHtml(a.subjectCode)}', '${escapeHtml(facultyName)}')" type="button" class="shrink-0 px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white font-bold text-[10px] rounded border border-rose-500/20 transition-all">
+            Unassign
+          </button>
+        `;
+        itemsList.appendChild(itemRow);
+      });
+
+      groupCard.appendChild(itemsList);
+      fragment.appendChild(groupCard);
+    });
+
+    container.innerHTML = '';
+    container.appendChild(fragment);
+
+  } catch (err) {
+    console.error("Error loading active assignments:", err);
+  }
+}
+
+async function unassignSubjectFromFaculty(assignmentDocId, subjectCode, facultyName) {
+  if (!confirm(`Are you sure you want to unassign ${subjectCode} from ${facultyName}?`)) return;
+
+  try {
+    await db.collection('assignments').doc(assignmentDocId).delete();
+    await logActivity(currentUserEmail, `Unassigned subject ${subjectCode} from ${facultyName}`);
+    alert(`Successfully unassigned ${subjectCode}.`);
+    loadActiveAssignmentsList();
+    loadAdminDashboardData();
+  } catch (err) {
+    console.error("Unassign Error:", err);
+    alert("Error unassigning subject: " + err.message);
+  }
+}
+
+async function migrateLegacyAssignmentIDs() {
+  if (!confirm("Run migration to upgrade legacy assignment document IDs to key-based format?")) return;
+
+  try {
+    const snapshot = await db.collection('assignments').get();
+    let migratedCount = 0;
+
+    for (const doc of snapshot.docs) {
+      const data = doc.data();
+      if (!data.facultyUid || !data.subjectCode) continue;
+
+      const expectedDocId = buildAssignmentDocId(data.facultyUid, data.subjectCode, data.section || 'ALL');
+
+      if (doc.id !== expectedDocId) {
+        await db.collection('assignments').doc(expectedDocId).set(data, { merge: true });
+        await db.collection('assignments').doc(doc.id).delete();
+        migratedCount++;
+      }
+    }
+
+    await logActivity(currentUserEmail, `Migrated ${migratedCount} legacy assignment document IDs`);
+    alert(`Migration completed! ${migratedCount} assignment document(s) updated.`);
+    loadActiveAssignmentsList();
+  } catch (err) {
+    console.error("Migration Error:", err);
+    alert("Error executing assignment migration: " + err.message);
   }
 }
 
@@ -1752,81 +2139,13 @@ async function toggleFacultyStatus(uid, currentStatus) {
   loadAdminDashboardData();
 }
 
-async function assignSubjectToFaculty() {
-  const facultySelect = document.getElementById('assignFacultySelect');
-  const facultyUid = facultySelect ? facultySelect.value : '';
-  const subjectCode = document.getElementById('assignSubjectSelect') ? document.getElementById('assignSubjectSelect').value : '';
+async function createFacultyAccount() {
+  const fullName = document.getElementById('adminFacultyName').value.trim();
+  const title = document.getElementById('adminFacultyTitle').value.trim();
+  const email = document.getElementById('adminFacultyEmail').value.trim();
+  const password = document.getElementById('adminFacultyPass').value.trim();
 
-  const sectionInput = document.getElementById('assignSectionInput');
-  let selectedSection = sectionInput ? sectionInput.value.trim().toUpperCase() : '';
-
-  if (!selectedSection) {
-    const promptedSection = prompt("Enter the Section code to assign (e.g., BSIT-1A, BSIT-1B, ALL):", "BSIT-1A");
-    if (!promptedSection) return;
-    selectedSection = promptedSection.trim().toUpperCase();
-  }
-
-  if (!facultyUid || !subjectCode) {
-    alert("Please select both a faculty member and a subject.");
-    return;
-  }
-
-  const facultyEmail = facultySelect.options[facultySelect.selectedIndex]?.text || facultyUid;
-  const assignmentId = buildAssignmentDocId(facultyUid, subjectCode, selectedSection);
-  const assignmentRef = db.collection('assignments').doc(assignmentId);
-
-  try {
-    const existingDoc = await assignmentRef.get();
-
-    if (existingDoc.exists) {
-      alert(`Notice: ${subjectCode} [${selectedSection}] is already assigned to this instructor.`);
-      return;
-    }
-
-    await assignmentRef.set({
-      facultyUid, 
-      subjectCode,
-      section: selectedSection,
-      assignedAt: firebase.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
-
-    await logActivity(currentUserEmail, `Assigned ${subjectCode} (${selectedSection}) to instructor ${facultyUid}`);
-    alert(`Successfully assigned ${subjectCode} [Section: ${selectedSection}] to ${facultyEmail}!`);
-    loadAdminDashboardData();
-  } catch (err) {
-    console.error("Assign Subject Error:", err);
-    alert("Error assigning subject: " + err.message);
-  }
-}
-
-async function unassignSubjectFromFaculty(facultyUid, subjectCode, section = 'ALL') {
-  const confirmed = confirm(`Are you sure you want to unassign ${subjectCode} (${section}) from this instructor?`);
-  if (!confirmed) return;
-
-  try {
-    const assignmentId = buildAssignmentDocId(facultyUid, subjectCode, section);
-    await db.collection('assignments').doc(assignmentId).delete();
-
-    // Fallback cleanup for unsectioned legacy keys
-    const legacyId = `${facultyUid}_${subjectCode}`;
-    await db.collection('assignments').doc(legacyId).delete().catch(() => {});
-
-    await logActivity(currentUserEmail, `Unassigned ${subjectCode} (${section}) from instructor ${facultyUid}`);
-    alert(`${subjectCode} (${section}) has been unassigned from this instructor.`);
-    loadAdminDashboardData();
-  } catch (err) {
-    console.error("Unassign Subject Error:", err);
-    alert("Error unassigning subject: " + err.message);
-  }
-}
-
-async function createInstructor() {
-  const fullName = document.getElementById('instFullName').value.trim();
-  const title = document.getElementById('instTitle').value.trim();
-  const email = document.getElementById('instEmail').value.trim();
-  const password = document.getElementById('instPassword').value.trim();
-
-  if (!fullName || !email || !password) return alert("Enter at least the full name, email, and password.");
+  if (!fullName || !email || !password) return alert("Enter at least full name, email, and password.");
 
   try {
     const tempApp = firebase.initializeApp(firebaseConfig, "SecondaryApp");
@@ -1845,36 +2164,106 @@ async function createInstructor() {
     alert(`Instructor created: ${fullName}`);
     loadAdminDashboardData();
   } catch (err) {
-    alert("Error: " + err.message);
+    alert("Error creating instructor: " + err.message);
   }
 }
 
-async function addSubject() {
-  const subjectCode = document.getElementById('subCode').value.trim();
-  const subjectName = document.getElementById('subName').value.trim();
-  const units = parseInt(document.getElementById('subUnits').value);
-  const yearLevel = document.getElementById('subYearLevel').value;
-  const semester = document.getElementById('subSemester').value;
-  const lecHrs = parseFloat(document.getElementById('subLecHrs').value) || 0;
-  const labHrs = parseFloat(document.getElementById('subLabHrs').value) || 0;
-  const prerequisite = document.getElementById('subPrerequisite').value.trim();
+async function addNewSubjectCode() {
+  const subjectCode = document.getElementById('adminSubCode').value.trim();
+  const subjectName = document.getElementById('adminSubTitle').value.trim();
+  const yearLevel = document.getElementById('adminSubYear').value;
+  const semester = document.getElementById('adminSubSem').value;
 
-  if (!subjectCode || !subjectName || isNaN(units)) return alert("Complete the Code, Name, and Units fields.");
+  if (!subjectCode || !subjectName) return alert("Complete both Code and Subject Name.");
 
   try {
     await db.collection('subjects').doc(subjectCode).set({
-      subjectCode, subjectName, units,
-      yearLevel, semester, lecHrs, labHrs, prerequisite
-    });
-    await logActivity(currentUserEmail, `Added department subject ${subjectCode}`);
-    alert(`Subject ${subjectCode} saved!`);
+      subjectCode,
+      subjectName,
+      units: 3,
+      yearLevel,
+      semester,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    await logActivity(currentUserEmail, `Added subject code ${subjectCode}`);
+    alert(`Subject ${subjectCode} saved successfully!`);
     loadAdminDashboardData();
   } catch (err) {
-    alert("Error: " + err.message);
+    alert("Error saving subject: " + err.message);
   }
 }
 
-let isAdminProspectusItOnly = false;
+async function assignSubjectToFaculty() {
+  const facultySelect = document.getElementById('assignFacultySelect');
+  const facultyUid = facultySelect ? facultySelect.value : '';
+  const subjectCode = document.getElementById('assignSubjectSelect') ? document.getElementById('assignSubjectSelect').value : '';
+
+  if (!facultyUid || !subjectCode) {
+    alert("Please select both a faculty member and a subject.");
+    return;
+  }
+
+  const promptedSection = prompt("Enter the Section code to assign (e.g., BSIT-1A, BSIT-1B, ALL):", "BSIT-1A");
+  if (!promptedSection) return;
+  const selectedSection = promptedSection.trim().toUpperCase();
+
+  const facultyEmail = facultySelect.options[facultySelect.selectedIndex]?.text || facultyUid;
+  const assignmentId = buildAssignmentDocId(facultyUid, subjectCode, selectedSection);
+  const assignmentRef = db.collection('assignments').doc(assignmentId);
+
+  try {
+    const existingDoc = await assignmentRef.get();
+
+    if (existingDoc.exists) {
+      alert(`Notice: ${subjectCode} [${selectedSection}] is already assigned to this instructor.`);
+      return;
+    }
+
+    await assignmentRef.set({
+      facultyUid,
+      subjectCode,
+      section: selectedSection,
+      assignedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    await logActivity(currentUserEmail, `Assigned ${subjectCode} (${selectedSection}) to instructor ${facultyUid}`);
+    alert(`Successfully assigned ${subjectCode} [Section: ${selectedSection}] to ${facultyEmail}!`);
+    loadAdminDashboardData();
+  } catch (err) {
+    console.error("Assign Subject Error:", err);
+    alert("Error assigning subject: " + err.message);
+  }
+}
+
+// ------------------------------------------------------------------
+// ADMIN CONSOLE MODALS & CURRICULUM PROSPECTUS ENGINE
+// ------------------------------------------------------------------
+
+function openCreateFacultyModal() {
+  const modal = document.getElementById('createFacultyModal');
+  const panel = document.getElementById('createFacultyModalPanel');
+  if (!modal) return;
+
+  modal.classList.remove('hidden');
+  if (panel) {
+    void panel.offsetWidth;
+    panel.classList.remove('opacity-0', 'scale-95');
+  }
+}
+
+function closeCreateFacultyModal() {
+  const modal = document.getElementById('createFacultyModal');
+  const panel = document.getElementById('createFacultyModalPanel');
+  if (!modal) return;
+
+  if (panel) {
+    panel.classList.add('opacity-0', 'scale-95');
+    setTimeout(() => modal.classList.add('hidden'), 150);
+  } else {
+    modal.classList.add('hidden');
+  }
+}
 
 async function openAdminProspectusModal() {
   const modal = document.getElementById('adminProspectusModal');
@@ -1888,6 +2277,8 @@ async function openAdminProspectusModal() {
       Loading curriculum prospectus subjects...
     </div>
   `;
+
+  updateAdminFilterToggleUI();
 
   modal.classList.remove('hidden');
   if (panel) {
@@ -1913,7 +2304,7 @@ async function openAdminProspectusModal() {
     if (!groups.length) {
       container.innerHTML = `
         <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">
-          No matching subjects found.
+          No matching ${isAdminProspectusItOnly ? 'IT' : ''} subjects found in this prospectus.
         </div>
       `;
       return;
@@ -1921,10 +2312,10 @@ async function openAdminProspectusModal() {
 
     groups.forEach(({ label, subjects }) => {
       const section = document.createElement('div');
-      section.className = "space-y-2";
+      section.className = "space-y-2 mb-4";
 
       const heading = document.createElement('h4');
-      heading.className = "text-xs font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-1.5";
+      heading.className = "text-xs font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-1.5 sticky top-0 bg-slate-950 py-1 z-10";
       heading.textContent = label;
       section.appendChild(heading);
 
@@ -1945,7 +2336,7 @@ async function openAdminProspectusModal() {
         metaLine.className = "text-xs text-slate-400";
         const hoursText = (s.lecHrs || s.labHrs) ? ` • ${Number(s.lecHrs) || 0} Lec / ${Number(s.labHrs) || 0} Lab hrs` : '';
         const prereqText = s.prerequisite ? ` • Prereq: ${s.prerequisite}` : '';
-        metaLine.textContent = `${Number(s.units) || 0} Units${hoursText}${prereqText}`;
+        metaLine.textContent = `${Number(s.units) || 3} Units${hoursText}${prereqText}`;
 
         left.appendChild(codeLine);
         left.appendChild(metaLine);
@@ -1978,99 +2369,85 @@ function closeAdminProspectusModal() {
   const panel = document.getElementById('adminProspectusModalPanel');
   if (!modal) return;
 
-  if (panel) panel.classList.add('opacity-0', 'scale-95');
-  setTimeout(() => modal.classList.add('hidden'), 200);
+  if (panel) {
+    panel.classList.add('opacity-0', 'scale-95');
+    setTimeout(() => modal.classList.add('hidden'), 200);
+  } else {
+    modal.classList.add('hidden');
+  }
+}
+
+function updateAdminFilterToggleUI() {
+  const btnAll = document.getElementById('adminBtnFilterAll');
+  const btnIT = document.getElementById('adminBtnFilterIT');
+
+  const ACTIVE = "flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-extrabold text-xs transition-all";
+  const INACTIVE = "flex-1 py-1.5 rounded-lg text-slate-400 font-bold text-xs transition-all";
+
+  if (btnAll) btnAll.className = isAdminProspectusItOnly ? INACTIVE : ACTIVE;
+  if (btnIT) btnIT.className = isAdminProspectusItOnly ? ACTIVE : INACTIVE;
 }
 
 function toggleAdminProspectusFilter(mode) {
   isAdminProspectusItOnly = (mode === 'it');
-
-  const btnAll = document.getElementById('adminBtnFilterAll');
-  const btnIT = document.getElementById('adminBtnFilterIT');
-  const ACTIVE = "px-3 py-1 text-xs rounded-lg bg-emerald-600 text-white font-bold transition-all";
-  const INACTIVE = "px-3 py-1 text-xs rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium transition-all";
-
-  if (btnAll) btnAll.className = isAdminProspectusItOnly ? INACTIVE : ACTIVE;
-  if (btnIT) btnIT.className = isAdminProspectusItOnly ? ACTIVE : INACTIVE;
-
+  updateAdminFilterToggleUI();
   openAdminProspectusModal();
+}
+
+function filterAdminProspectus(filterType) {
+  toggleAdminProspectusFilter(filterType === 'it' ? 'it' : 'all');
 }
 
 function selectSubjectFromAdminProspectus(subjectCode) {
   const select = document.getElementById('assignSubjectSelect');
   if (select) {
+    let option = Array.from(select.options).find(opt => opt.value === subjectCode);
+    if (!option) {
+      option = new Option(subjectCode, subjectCode);
+      select.add(option);
+    }
     select.value = subjectCode;
-    handleAssignSubjectSelectChange();
   }
   closeAdminProspectusModal();
-}
-
-function handleAssignSubjectSelectChange() {
-  const select = document.getElementById('assignSubjectSelect');
-  const indicator = document.getElementById('selectedSubjectIndicator');
-  if (!select || !indicator) return;
-
-  if (select.value) {
-    const selectedText = select.options[select.selectedIndex]?.text || select.value;
-    indicator.textContent = `Selected: ${selectedText}`;
-    indicator.classList.remove('hidden');
-  } else {
-    indicator.classList.add('hidden');
-  }
-}
-
-async function migrateLegacyAssignmentIds() {
-  try {
-    const snapshot = await db.collection('assignments').get();
-    if (snapshot.empty) return alert("No legacy assignment documents found.");
-
-    let count = 0;
-    const batch = db.batch();
-
-    snapshot.forEach((doc) => {
-      const data = doc.data();
-      const targetSection = data.section || 'ALL';
-      const canonicalId = buildAssignmentDocId(data.facultyUid, data.subjectCode, targetSection);
-
-      if (doc.id !== canonicalId && data.facultyUid && data.subjectCode) {
-        batch.set(db.collection('assignments').doc(canonicalId), { ...data, section: targetSection });
-        batch.delete(doc.ref);
-        count++;
-      }
-    });
-
-    if (count > 0) {
-      await batch.commit();
-      alert(`Successfully migrated ${count} legacy assignment document(s)!`);
-      loadAdminDashboardData();
-    } else {
-      alert("All assignment documents are already using canonical ID format.");
-    }
-  } catch (err) {
-    console.error("Migration Error:", err);
-    alert("Error migrating assignments: " + err.message);
-  }
 }
 
 // ------------------------------------------------------------------
 // PROGRESSION & STUDENT DASHBOARD ENGINE
 // ------------------------------------------------------------------
 
+/**
+ * Pure evaluator (no DOM access). Returns ONE consistent status model that the
+ * banner renders into three non-overlapping slots:
+ *   badgeText -> regularity + academic year   (pill)
+ *   headline  -> where the student now stands (main heading)
+ *   subtext   -> semester / standing detail   (line under heading)
+ * Units completed are intentionally NOT repeated here; the progress card shows them.
+ */
 function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap = {}) {
-  const baseYear = parseInt(entryYearLevel) || 1;
-  const yearNames = { 1: '1ST YEAR', 2: '2ND YEAR', 3: '3RD YEAR', 4: '4TH YEAR' };
+  const baseYear = Math.min(4, Math.max(1, parseInt(entryYearLevel) || 1));
+  const yearNames = { 1: '1st Year', 2: '2nd Year', 3: '3rd Year', 4: '4th Year' };
+  const academicYearText = `Academic year ${CURRENT_SCHOOL_YEAR.replace('-', '–')}`;
 
-  const currentYearName = yearNames[baseYear] || '1ST YEAR';
+  const REGULAR_CLASS = 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
+  const IRREGULAR_CLASS = 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+
+  const build = (fields) => ({
+    statusLabel: fields.headline,
+    badgeLabel: fields.badgeText,
+    standingText: fields.subtext,
+    ...fields
+  });
 
   if (!allGrades || !allGrades.length) {
-    return {
+    return build({
       yearLevel: baseYear,
       unitsCompleted: 0,
-      statusLabel: `${currentYearName} - 1ST SEMESTER`,
-      badgeLabel: `${currentYearName} - REGULAR`,
-      badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-      standingText: `Regular Student (${currentYearName}) • 0 Units Completed`
-    };
+      headline: yearNames[baseYear],
+      subtext: '1st Semester • Good academic standing',
+      badgeText: `Regular • ${academicYearText}`,
+      badgeClass: REGULAR_CLASS,
+      subtextClass: 'text-emerald-400'
+    });
   }
 
   const uniquePassedSubjects = new Map();
@@ -2102,10 +2479,8 @@ function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap =
     }
   });
 
-  const passedCount = uniquePassedSubjects.size;
   const hasPassed2ndSem = passedSemesters.has('2nd Semester');
 
-  // Check for any failing IT grades
   const failedITSubjects = allGrades.filter(g => {
     const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
     if (!isItSubjectCode(code)) return false;
@@ -2115,91 +2490,64 @@ function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap =
   });
 
   if (failedITSubjects.length > 0) {
-    return {
+    return build({
       yearLevel: baseYear,
       unitsCompleted: totalUnitsEarned,
-      statusLabel: `${currentYearName} - IRREGULAR`,
-      badgeLabel: `${currentYearName} - IRREGULAR`,
-      badgeClass: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-      standingText: `Warning: ${failedITSubjects.length} IT Deficiency Subject(s) • ${totalUnitsEarned} Units Completed`
-    };
+      headline: yearNames[baseYear],
+      subtext: `${failedITSubjects.length} IT deficiency subject${failedITSubjects.length === 1 ? '' : 's'} to resolve`,
+      badgeText: `Irregular • ${academicYearText}`,
+      badgeClass: IRREGULAR_CLASS,
+      subtextClass: 'text-amber-400'
+    });
   }
 
-  // Define total unit threshold required for 1st Year - 1st Semester completion (e.g., 8 units or 3 subjects)
-  const REQUIRED_1ST_SEM_UNITS = 8;
-
-  let statusLabel = `${currentYearName} - 1ST SEMESTER`;
   let calculatedYearLevel = baseYear;
+  let headline = yearNames[baseYear];
+  let subtext = '1st Semester • Good academic standing';
 
-  if (totalUnitsEarned >= REQUIRED_1ST_SEM_UNITS && !hasPassed2ndSem) {
-    statusLabel = `PROMOTED TO 1ST YEAR - 2ND SEMESTER`;
-  } else if (hasPassed2ndSem && totalUnitsEarned >= 16) {
-    calculatedYearLevel = 2;
-    statusLabel = `PROMOTED TO 2ND YEAR - 1ST SEMESTER`;
+  if (hasPassed2ndSem && totalUnitsEarned >= FIRST_YEAR_UNITS_FOR_PROMOTION) {
+    calculatedYearLevel = Math.max(baseYear, 2);
+    headline = `Promoted to ${yearNames[calculatedYearLevel]}`;
+    subtext = '1st Semester • Good academic standing';
+  } else if (totalUnitsEarned >= FIRST_SEM_UNITS_FOR_PROMOTION && !hasPassed2ndSem) {
+    headline = 'Promoted to 2nd Semester';
+    subtext = `${yearNames[baseYear]} • Good academic standing`;
   }
 
-  const activeYearName = yearNames[calculatedYearLevel] || '1ST YEAR';
-
-  return {
+  return build({
     yearLevel: calculatedYearLevel,
     unitsCompleted: totalUnitsEarned,
-    statusLabel: statusLabel,
-    badgeLabel: `${activeYearName} - REGULAR`,
-    badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-    standingText: `Good Academic Standing (${totalUnitsEarned} Units Completed)`
-  };
+    headline,
+    subtext,
+    badgeText: `Regular • ${academicYearText}`,
+    badgeClass: REGULAR_CLASS,
+    subtextClass: 'text-emerald-400'
+  });
 }
 
 function renderYearLevelProgressionBanner(allGrades, subjectMap = {}) {
   const banner = document.getElementById('studentProgressionBanner');
   const badge = document.getElementById('studentProgressionBadge');
+  const title = document.getElementById('studentProgressionTitle');
   const text = document.getElementById('studentStandingText');
-
-  const profileSubtext = document.getElementById('profileStandingSubtext');
-  const profileBadge = document.getElementById('profileYearLevelBadge');
 
   const progression = evaluateAcademicProgression(allGrades, currentStudentEntryYear, subjectMap);
 
   if (banner && badge && text) {
     banner.classList.remove('hidden');
-    badge.className = `px-3.5 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-wider border ${progression.badgeClass}`;
-    badge.textContent = progression.statusLabel;
-    text.textContent = progression.standingText;
-  }
-
-  const failedITCount = (allGrades || []).filter(g => {
-    const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
-    if (!isItSubjectCode(code)) return false;
-    const finalsVal = g.finals !== undefined ? g.finals : g.final;
-    const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
-    return !stats.isPassing;
-  }).length;
-
-  if (profileSubtext) {
-    if (failedITCount > 0) {
-      profileSubtext.textContent = `${failedITCount} Deficiency Subject(s) • ${progression.unitsCompleted} Units Completed`;
-      profileSubtext.className = "text-xs font-semibold text-rose-400";
-    } else {
-      profileSubtext.textContent = `No Academic Deficiencies • ${progression.unitsCompleted} Units Completed`;
-      profileSubtext.className = "text-xs text-slate-300";
-    }
-  }
-
-  if (profileBadge) {
-    profileBadge.textContent = progression.badgeLabel;
-    profileBadge.className = `px-4 py-2 rounded-xl text-xs font-extrabold uppercase border ${progression.badgeClass}`;
+    badge.className = `px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider border ${progression.badgeClass}`;
+    badge.textContent = progression.badgeText;
+    if (title) title.textContent = progression.headline;
+    text.className = `text-sm font-extrabold ${progression.subtextClass}`;
+    text.textContent = progression.subtext;
   }
 }
 
 async function loadStudentDashboard(studentId, fullName, userData = null) {
   const nameEl = document.getElementById('profileStudentName');
-  const idEl = document.getElementById('profileStudentId');
 
   if (nameEl) {
     nameEl.textContent = fullName || (userData && userData.fullName) || 'Student';
-  }
-  if (idEl) {
-    idEl.textContent = studentId || (userData && userData.studentId) || '';
   }
 
   const tbody1S = document.getElementById('studentGradesBody1S');
@@ -2226,22 +2574,26 @@ async function loadStudentDashboard(studentId, fullName, userData = null) {
       };
       renderEmpty(tbody1S);
       renderEmpty(tbody2S);
+      updateStudentMetrics([]);
       return;
     }
 
-    const [subjectsSnapshot, gradeSnapshots] = await Promise.all([
+    const [subjectsSnapshot, gradeSnapshots, enrollmentsSnapshot] = await Promise.all([
       db.collection('subjects').get(),
       Promise.all([
         cleanStudentId ? db.collection('grades').where('isReleased', '==', true).where('studentId', '==', cleanStudentId).get() : null,
         cleanFullName ? db.collection('grades').where('isReleased', '==', true).where('fullName', '==', cleanFullName).get() : null
-      ])
+      ]),
+      currentUserId ? db.collection('enrollments').where('studentUid', '==', currentUserId).get() : null
     ]);
 
     const subjectMap = {};
+    let totalCurriculumUnits = 0;
     subjectsSnapshot.forEach((doc) => {
       const data = doc.data();
       if (data.subjectCode) {
         subjectMap[data.subjectCode.toUpperCase().trim()] = data;
+        totalCurriculumUnits += Number(data.units) || 3;
       }
     });
 
@@ -2256,12 +2608,32 @@ async function loadStudentDashboard(studentId, fullName, userData = null) {
 
     const matchedGrades = Array.from(gradeDocsMap.values());
 
-    const progression = evaluateAcademicProgression(matchedGrades, currentStudentEntryYear, subjectMap);
-    const unitsDisplay = document.getElementById('profileUnitsCompleted');
-    if (unitsDisplay) {
-      unitsDisplay.textContent = `${progression.unitsCompleted} Units Completed`;
+    const studentRecordsList = [];
+    matchedGrades.forEach(g => {
+      const finalsValue = g.finals !== undefined ? g.finals : g.final;
+      const stats = computeGradeStats(g.prelim, g.midterm, finalsValue);
+      const codeKey = (g.classId || g.subjectCode || '').toUpperCase().trim();
+      const units = subjectMap[codeKey] ? Number(subjectMap[codeKey].units) || 3 : 3;
+
+      studentRecordsList.push({
+        units,
+        status: stats.isPassing ? 'passed' : 'failed',
+        average: stats.average
+      });
+    });
+
+    if (enrollmentsSnapshot) {
+      enrollmentsSnapshot.forEach(doc => {
+        const e = doc.data();
+        const codeKey = (e.subjectCode || '').toUpperCase().trim();
+        const units = subjectMap[codeKey] ? Number(subjectMap[codeKey].units) || 3 : 3;
+        if (e.status === 'approved' || e.status === 'pending') {
+          studentRecordsList.push({ units, status: 'enrolled' });
+        }
+      });
     }
 
+    updateStudentMetrics(studentRecordsList, totalCurriculumUnits);
     renderYearLevelProgressionBanner(matchedGrades, subjectMap);
 
     if (!matchedGrades.length) {
@@ -2324,177 +2696,164 @@ async function loadStudentDashboard(studentId, fullName, userData = null) {
 }
 
 // ------------------------------------------------------------------
-// PROSPECTUS & ASSESSMENT BREAKDOWN MODAL
+// ASSESSMENT BREAKDOWN MODAL
 // ------------------------------------------------------------------
+
+const GRADE_PERIODS = [
+  { code: 'p', label: 'Prelim', field: 'prelim' },
+  { code: 'm', label: 'Midterm', field: 'midterm' },
+  { code: 'f', label: 'Finals', field: 'finals' }
+];
+
+const COMPONENT_CATEGORIES = [
+  { key: 'q', heading: 'Quizzes', label: 'Quiz' },
+  { key: 'lab', heading: 'Laboratory Exercises', label: 'Lab Exercise' },
+  { key: 'ass', heading: 'Assignments & Seatworks', label: 'Assignment' },
+  { key: 'out', heading: 'Major Output', label: 'Major Output' },
+  { key: 'exam', heading: 'Major Exam', label: 'Major Exam' },
+  { key: 'att', heading: 'Attendance / Participation', label: 'Attendance' }
+];
+
+// Groups every recorded component score as { period: { category: [{key, num, value}] } }.
+// Empty / non-numeric values are skipped; a real 0 is kept.
+function collectComponentEntries(g) {
+  const grouped = {};
+  Object.keys(g || {}).forEach((key) => {
+    const match = COMPONENT_KEY_RE.exec(key);
+    if (!match) return;
+
+    const value = toFiniteOrNull(g[key]);
+    if (value === null) return;
+
+    const period = match[1].toLowerCase();
+    const category = match[2].toLowerCase();
+    const num = match[3] ? parseInt(match[3], 10) : 0;
+
+    if (!grouped[period]) grouped[period] = {};
+    if (!grouped[period][category]) grouped[period][category] = [];
+    grouped[period][category].push({ key: key.toLowerCase(), num, value });
+  });
+
+  Object.values(grouped).forEach((categories) => {
+    Object.values(categories).forEach((list) => list.sort((a, b) => a.num - b.num));
+  });
+
+  return grouped;
+}
+
+function formatComponentScore(entry, categoryKey, maxScores) {
+  const max = maxScores ? toFiniteOrNull(maxScores[entry.key]) : null;
+  if (max !== null && max > 0) return `${entry.value} / ${max}`;
+  if (categoryKey === 'att') return `${entry.value}%`;
+  return String(entry.value);
+}
 
 async function openStudentGradeBreakdownModal(g) {
   const modal = document.getElementById('studentGradeBreakdownModal');
   const panel = document.getElementById('studentGradeBreakdownModalPanel');
   const title = document.getElementById('studentGradeBreakdownModalTitle');
   const body = document.getElementById('studentGradeBreakdownModalBody');
-  if (!modal || !body) return;
+  if (!modal || !body || !g) return;
 
-  const subjectCode = g.classId || g.subjectCode || 'Subject';
+  const subjectCode = g.classId || g.subjectCode || activeSubjectCode || 'Subject';
   if (title) title.textContent = `${subjectCode} - Assessment Breakdown`;
 
   const finalsValue = g.finals !== undefined ? g.finals : g.final;
   const stats = computeGradeStats(g.prelim, g.midterm, finalsValue);
-
-  // Fetch or default the grading formula weights
-  let gf = { weightLab: 30, weightQuizzes: 30, weightOutput: 20, weightExam: 20 };
-  try {
-    const formulaDoc = await db.collection('instructorFormulas').doc(`${currentUserId}_${subjectCode}`).get();
-    if (formulaDoc.exists && formulaDoc.data().gradingFormula) {
-      gf = formulaDoc.data().gradingFormula;
-    } else {
-      const subDoc = await db.collection('subjects').doc(subjectCode).get();
-      if (subDoc.exists && subDoc.data().gradingFormula) {
-        gf = subDoc.data().gradingFormula;
-      }
-    }
-  } catch (e) {
-    console.warn("Could not load formula weights for modal:", e);
-  }
+  const maxScores = (g.maxScores && typeof g.maxScores === 'object') ? g.maxScores : null;
+  const components = collectComponentEntries(g);
 
   body.innerHTML = '';
 
-  // 1. Overall Term Average Banner
+  // Summary
+  const metaParts = [g.fullName, g.studentId, g.semester ? semesterDisplayLabel(g.semester) : '']
+    .filter(Boolean)
+    .map(escapeHtml)
+    .join(' • ');
+
   const summary = document.createElement('div');
-  summary.className = "flex items-center justify-between p-3.5 rounded-xl border border-slate-800 bg-slate-950 mb-3";
+  summary.className = "flex items-center justify-between gap-3 p-3.5 rounded-xl border border-slate-800 bg-slate-950";
   summary.innerHTML = `
-    <div>
-      <div class="text-[10px] text-emerald-400 uppercase tracking-wider font-extrabold">Overall Term Average</div>
+    <div class="min-w-0">
+      <div class="text-[10px] text-emerald-400 uppercase tracking-wider font-extrabold">TERM AVERAGE</div>
       <div class="text-2xl font-black text-white mt-0.5">${stats.averageDisplay}</div>
+      ${metaParts ? `<div class="text-[11px] text-slate-400 mt-1 truncate">${metaParts}</div>` : ''}
     </div>
-    <span class="px-3 py-1 rounded-full text-xs font-extrabold uppercase ${stats.isPassing ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}">
+    <span class="shrink-0 px-3 py-1 rounded-full text-xs font-extrabold uppercase ${stats.isPassing ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}">
       ${stats.isPassing ? 'PASS' : 'FAIL'}
     </span>
   `;
   body.appendChild(summary);
 
-  // Helper function to build category item lists
-  const createItemList = (headingText, items) => {
-    const sec = document.createElement('div');
-    sec.className = "space-y-1.5 mb-3";
+  // One block per grading period
+  let totalItems = 0;
 
-    const h = document.createElement('div');
-    h.className = "text-[11px] font-bold text-emerald-400 uppercase tracking-wider";
-    h.textContent = headingText;
-    sec.appendChild(h);
+  GRADE_PERIODS.forEach((period) => {
+    const periodCard = document.createElement('div');
+    periodCard.className = "rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-3";
 
-    items.forEach(item => {
-      const row = document.createElement('div');
-      row.className = "flex items-center justify-between px-3 py-2 rounded-xl border border-slate-800 bg-slate-950/80 text-xs";
-      row.innerHTML = `
-        <span class="text-slate-300 font-medium">${escapeHtml(item.label)}</span>
-        <span class="font-mono font-bold text-white">${escapeHtml(item.score)}</span>
-      `;
-      sec.appendChild(row);
+    const periodHeader = document.createElement('div');
+    periodHeader.className = "flex items-center justify-between border-b border-slate-800/80 pb-2";
+    periodHeader.innerHTML = `
+      <span class="text-xs font-extrabold uppercase tracking-wider text-white">${period.label}</span>
+      <span class="text-sm font-black font-mono text-emerald-400">${stats[period.field].toFixed(2)}</span>
+    `;
+    periodCard.appendChild(periodHeader);
+
+    const periodComponents = components[period.code] || {};
+    let periodItemCount = 0;
+
+    COMPONENT_CATEGORIES.forEach((category) => {
+      const items = periodComponents[category.key];
+      if (!items || !items.length) return;
+
+      periodItemCount += items.length;
+
+      const section = document.createElement('div');
+      section.className = "space-y-1.5";
+
+      const heading = document.createElement('div');
+      heading.className = "text-[10px] font-bold text-slate-400 uppercase tracking-wider";
+      heading.textContent = category.heading;
+      section.appendChild(heading);
+
+      items.forEach((entry, idx) => {
+        const needsNumber = items.length > 1 || entry.num > 0;
+        const label = needsNumber ? `${category.label} ${entry.num || idx + 1}` : category.label;
+
+        const row = document.createElement('div');
+        row.className = "flex items-center justify-between px-3 py-2 rounded-lg border border-slate-800 bg-slate-950/80 text-xs";
+        row.innerHTML = `
+          <span class="text-slate-300 font-medium">${escapeHtml(label)}</span>
+          <span class="font-mono font-bold text-white">${escapeHtml(formatComponentScore(entry, category.key, maxScores))}</span>
+        `;
+        section.appendChild(row);
+      });
+
+      periodCard.appendChild(section);
     });
 
-    return sec;
-  };
+    if (periodItemCount === 0) {
+      const empty = document.createElement('div');
+      empty.className = "text-[11px] text-slate-500 italic";
+      empty.textContent = "No itemized scores recorded for this period.";
+      periodCard.appendChild(empty);
+    }
 
-  // 2. Major Exams Section
-  const examsSec = document.createElement('div');
-  examsSec.className = "space-y-1.5 mb-3";
-  examsSec.innerHTML = `
-    <div class="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Major Exams</div>
-    <div class="grid grid-cols-3 gap-2">
-      <div class="p-2.5 rounded-xl border border-slate-800 bg-slate-950 text-center">
-        <div class="text-[10px] font-bold text-slate-400 uppercase">Prelim</div>
-        <div class="text-sm font-bold text-white mt-0.5">${stats.prelim.toFixed(2)}</div>
-        ${g.p_exam !== null && g.p_exam !== undefined ? `<div class="text-[10px] text-slate-500 mt-0.5">Exam: ${g.p_exam}</div>` : ''}
-      </div>
-      <div class="p-2.5 rounded-xl border border-slate-800 bg-slate-950 text-center">
-        <div class="text-[10px] font-bold text-slate-400 uppercase">Midterm</div>
-        <div class="text-sm font-bold text-white mt-0.5">${stats.midterm.toFixed(2)}</div>
-        ${g.m_exam !== null && g.m_exam !== undefined ? `<div class="text-[10px] text-slate-500 mt-0.5">Exam: ${g.m_exam}</div>` : ''}
-      </div>
-      <div class="p-2.5 rounded-xl border border-slate-800 bg-slate-950 text-center">
-        <div class="text-[10px] font-bold text-slate-400 uppercase">Finals</div>
-        <div class="text-sm font-bold text-white mt-0.5">${stats.finals.toFixed(2)}</div>
-        ${g.f_exam !== null && g.f_exam !== undefined ? `<div class="text-[10px] text-slate-500 mt-0.5">Exam: ${g.f_exam}</div>` : ''}
-      </div>
-    </div>
-  `;
-  body.appendChild(examsSec);
+    totalItems += periodItemCount;
+    body.appendChild(periodCard);
+  });
 
-  // 3. Quizzes Section
-  const quizItems = [];
-  if (g.p_q1 !== null && g.p_q1 !== undefined) quizItems.push({ label: 'Quiz 1 (Prelim)', score: `${g.p_q1}` });
-  if (g.p_q2 !== null && g.p_q2 !== undefined) quizItems.push({ label: 'Quiz 2 (Prelim)', score: `${g.p_q2}` });
-  if (g.p_q3 !== null && g.p_q3 !== undefined) quizItems.push({ label: 'Quiz 3 (Prelim)', score: `${g.p_q3}` });
-
-  if (g.m_q1 !== null && g.m_q1 !== undefined) quizItems.push({ label: 'Quiz 1 (Midterm)', score: `${g.m_q1}` });
-  if (g.m_q2 !== null && g.m_q2 !== undefined) quizItems.push({ label: 'Quiz 2 (Midterm)', score: `${g.m_q2}` });
-  if (g.m_q3 !== null && g.m_q3 !== undefined) quizItems.push({ label: 'Quiz 3 (Midterm)', score: `${g.m_q3}` });
-
-  if (g.f_q1 !== null && g.f_q1 !== undefined) quizItems.push({ label: 'Quiz 1 (Finals)', score: `${g.f_q1}` });
-  if (g.f_q2 !== null && g.f_q2 !== undefined) quizItems.push({ label: 'Quiz 2 (Finals)', score: `${g.f_q2}` });
-  if (g.f_q3 !== null && g.f_q3 !== undefined) quizItems.push({ label: 'Quiz 3 (Finals)', score: `${g.f_q3}` });
-
-  if (quizItems.length > 0) {
-    body.appendChild(createItemList('Quizzes', quizItems));
-  } else if (g.quizzes && Array.isArray(g.quizzes)) {
-    body.appendChild(createItemList('Quizzes', g.quizzes));
+  if (totalItems === 0) {
+    const emptyNotice = document.createElement('div');
+    emptyNotice.className = "p-4 rounded-xl border border-slate-800 bg-slate-950 text-center text-xs text-slate-500 italic";
+    emptyNotice.textContent = "No itemized assessment components recorded for this subject record.";
+    body.appendChild(emptyNotice);
   }
 
-  // 4. Assignments & Seatworks Section
-  const assignmentItems = [];
-  if (g.assignments && Array.isArray(g.assignments)) {
-    assignmentItems.push(...g.assignments);
-  } else if (g.assignment_score !== undefined && g.assignment_score !== null) {
-    assignmentItems.push({ label: 'Assignments / Seatwork', score: `${g.assignment_score}` });
-  } else {
-    assignmentItems.push({ label: 'Assignments / Seatwork', score: 'Evaluated in Term Grade' });
-  }
-  body.appendChild(createItemList('Assignments & Seatworks', assignmentItems));
-
-  // 5. Laboratory Exercises Section
-  const labItems = [];
-  if (g.labExercises && Array.isArray(g.labExercises)) {
-    labItems.push(...g.labExercises);
-  } else if (g.lab_score !== undefined && g.lab_score !== null) {
-    labItems.push({ label: 'Lab Exercise', score: `${g.lab_score}` });
-  } else {
-    labItems.push({ label: 'Lab Exercise', score: 'Evaluated in Term Grade' });
-  }
-  body.appendChild(createItemList('Laboratory Exercises', labItems));
-
-  // 6. Attendance / Participation Section
-  const attItems = [];
-  if (g.p_att !== null && g.p_att !== undefined) attItems.push({ label: 'Prelim Attendance', score: `${g.p_att}%` });
-  if (g.m_att !== null && g.m_att !== undefined) attItems.push({ label: 'Midterm Attendance', score: `${g.m_att}%` });
-  if (g.f_att !== null && g.f_att !== undefined) attItems.push({ label: 'Finals Attendance', score: `${g.f_att}%` });
-
-  if (attItems.length > 0) {
-    body.appendChild(createItemList('Attendance / Participation', attItems));
-  } else {
-    const attVal = g.attendance || '93%';
-    body.appendChild(createItemList('Attendance / Participation', [{ label: 'Attendance Rate', score: String(attVal) }]));
-  }
-
-  // 7. Course Evaluation Structure Footer
-  const formulaInfo = document.createElement('div');
-  formulaInfo.className = "p-3 rounded-xl border border-slate-800/80 bg-slate-900/40 space-y-2 mt-4";
-  formulaInfo.innerHTML = `
-    <div class="text-[11px] font-bold text-emerald-400 uppercase tracking-wider border-b border-slate-800 pb-1">
-      Course Evaluation Structure
-    </div>
-    <div class="grid grid-cols-2 gap-2 text-xs text-slate-300 pt-1">
-      <div>Laboratory / Formative: <span class="font-mono text-white font-bold">${gf.weightLab}%</span></div>
-      <div>Quizzes / Assessments: <span class="font-mono text-white font-bold">${gf.weightQuizzes}%</span></div>
-      <div>Major Output / Summative: <span class="font-mono text-white font-bold">${gf.weightOutput}%</span></div>
-      <div>Major Examination: <span class="font-mono text-white font-bold">${gf.weightExam}%</span></div>
-    </div>
-  `;
-  body.appendChild(formulaInfo);
-
-  // Show Modal & Animate Panel
   modal.classList.remove('hidden');
   if (panel) {
-    void panel.offsetWidth; // Force CSS reflow
+    void panel.offsetWidth;
     panel.classList.remove('opacity-0', 'scale-95');
   }
 }
@@ -2504,13 +2863,8 @@ function closeStudentGradeBreakdownModal() {
   const panel = document.getElementById('studentGradeBreakdownModalPanel');
   if (!modal) return;
 
-  if (panel) {
-    panel.classList.add('opacity-0', 'scale-95');
-  }
-
-  setTimeout(() => {
-    modal.classList.add('hidden');
-  }, 200);
+  if (panel) panel.classList.add('opacity-0', 'scale-95');
+  setTimeout(() => modal.classList.add('hidden'), 200);
 }
 
 const PROSPECTUS_GROUPS = [
@@ -2524,7 +2878,6 @@ const PROSPECTUS_GROUPS = [
   { yearLevel: '4', semester: '2S', label: '4th Year - 2nd Semester' }
 ];
 
-let isItOnlyFilterActive = false;
 const IT_SUBJECT_PREFIXES = ['COMP', 'PROG', 'IT', 'SIA', 'DBMS', 'CAPSTONE', 'NET', 'MS', 'IS', 'APPSDEV', 'IPT', 'MUL'];
 
 function isItSubjectCode(subjectCode) {
@@ -2558,13 +2911,18 @@ function groupSubjectsForProspectus(subjectsSnapshot, itOnly = false) {
   return groups;
 }
 
+// ------------------------------------------------------------------
+// IT SUBJECT TOGGLE FILTER METHOD (STUDENT DASHBOARD)
+// ------------------------------------------------------------------
+
 function toggleITSubjectFilter(mode) {
   isItOnlyFilterActive = (mode === 'it');
 
   const btnAll = document.getElementById('btnFilterAllSubjects');
   const btnIT = document.getElementById('btnFilterITSubjects');
-  const ACTIVE = "px-3 py-1 text-sm rounded-lg bg-emerald-600 text-white font-medium";
-  const INACTIVE = "px-3 py-1 text-sm rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium";
+
+  const ACTIVE = "flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition-all";
+  const INACTIVE = "flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg text-slate-400 hover:text-white text-xs font-bold transition-all";
 
   if (btnAll) btnAll.className = isItOnlyFilterActive ? INACTIVE : ACTIVE;
   if (btnIT) btnIT.className = isItOnlyFilterActive ? ACTIVE : INACTIVE;
@@ -2620,7 +2978,6 @@ async function loadAvailableSubjectsForStudent() {
         const codeKey = e.subjectCode.trim().toUpperCase();
         const existingStatus = statusByCode[codeKey];
 
-        // Prioritize 'pending' and 'approved' over stale 'rejected' records
         if (!existingStatus || existingStatus === 'rejected' || e.status === 'pending' || e.status === 'approved') {
           statusByCode[codeKey] = e.status;
         }
@@ -2680,7 +3037,7 @@ async function loadAvailableSubjectsForStudent() {
           const isMet = isITPrerequisiteMet(s.prerequisite, passedSubjects);
           if (!isMet) {
             hasUnmetPrerequisite = true;
-            prereqMessage = `Prerequisite not met: Failed or missing ${s.prerequisite}`;
+            prereqMessage = `Prerequisite not met: ${s.prerequisite}`;
           }
         }
 
@@ -2796,7 +3153,6 @@ async function applySelectedSubjects() {
       const targetDocId = buildEnrollmentDocId(subjectCode, cleanSection, currentUserId);
       const ref = db.collection('enrollments').doc(targetDocId);
 
-      // Directly overwrite/set document without triggering batch delete errors
       batch.set(ref, {
         subjectCode,
         section: cleanSection,
@@ -2821,58 +3177,9 @@ async function applySelectedSubjects() {
   }
 }
 
-function toggleSelectAllPendingEnrollments(checked) {
-  const checkboxes = document.querySelectorAll('.pending-enrollment-checkbox');
-  checkboxes.forEach((cb) => {
-    cb.checked = checked;
-  });
-}
-
-async function batchUpdatePendingEnrollments(newStatus) {
-  if (!activeSubjectCode) return alert("Select an active subject first.");
-
-  const checkedBoxes = Array.from(document.querySelectorAll('.pending-enrollment-checkbox:checked'));
-  if (!checkedBoxes.length) {
-    return alert(`Please select at least one student application to ${newStatus}.`);
-  }
-
-  const confirmed = confirm(`Are you sure you want to ${newStatus} ${checkedBoxes.length} enrollment request(s)?`);
-  if (!confirmed) return;
-
-  try {
-    const batch = db.batch();
-    checkedBoxes.forEach((cb) => {
-      const enrollmentId = cb.dataset.enrollmentId;
-      if (enrollmentId) {
-        const ref = db.collection('enrollments').doc(enrollmentId);
-        batch.update(ref, {
-          status: newStatus,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-      }
-    });
-
-    await batch.commit();
-    await logActivity(currentUserEmail, `Batch ${newStatus} ${checkedBoxes.length} enrollment(s) for ${activeSubjectCode}`);
-    alert(`Successfully updated ${checkedBoxes.length} student application(s) to ${newStatus.toUpperCase()}.`);
-
-    const selectAllCb = document.getElementById('pendingSelectAllCheckbox');
-    if (selectAllCb) selectAllCb.checked = false;
-
-    loadPendingEnrollments(activeSubjectCode);
-    loadOfficiallyEnrolledStudents(activeSubjectCode);
-  } catch (err) {
-    console.error("Batch Enrollment Update Error:", err);
-    alert("Error updating enrollments: " + err.message);
-  }
-}
-
 async function loadPendingEnrollments(subjectCode) {
   const container = document.getElementById('pendingEnrollmentsList');
   if (!container) return;
-
-  const selectAllCb = document.getElementById('pendingSelectAllCheckbox');
-  if (selectAllCb) selectAllCb.checked = false;
 
   try {
     const snapshot = await db.collection('enrollments')
@@ -2891,7 +3198,7 @@ async function loadPendingEnrollments(subjectCode) {
     });
 
     if (pendingDocs.length === 0) {
-      container.innerHTML = `<div class="p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">No pending roster requests for Section [${activeInstructorSectionFilter}].</div>`;
+      container.innerHTML = `<div class="p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">No pending roster requests for Section [${escapeHtml(activeInstructorSectionFilter)}].</div>`;
       return;
     }
 
@@ -2904,11 +3211,6 @@ async function loadPendingEnrollments(subjectCode) {
       const left = document.createElement('div');
       left.className = "flex items-center gap-3 min-w-0";
 
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.className = "pending-enrollment-checkbox w-4 h-4 accent-emerald-500 shrink-0 cursor-pointer";
-      checkbox.dataset.enrollmentId = docId;
-
       const info = document.createElement('div');
       info.className = "min-w-0";
       info.innerHTML = `
@@ -2919,7 +3221,6 @@ async function loadPendingEnrollments(subjectCode) {
         <div class="text-xs text-slate-400 font-mono">${escapeHtml(e.studentId || 'N/A')}</div>
       `;
 
-      left.appendChild(checkbox);
       left.appendChild(info);
 
       const right = document.createElement('div');
@@ -2950,100 +3251,6 @@ async function loadPendingEnrollments(subjectCode) {
   }
 }
 
-async function loadOfficiallyEnrolledStudents(subjectCode) {
-  const container = document.getElementById('officiallyEnrolledList');
-  const countBadge = document.getElementById('enrolledCountBadge');
-  if (!container) return;
-
-  try {
-    const snapshot = await db.collection('enrollments')
-      .where('subjectCode', '==', subjectCode)
-      .where('status', '==', 'approved')
-      .get();
-
-    container.innerHTML = '';
-
-    const enrolledDocs = [];
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      if (activeInstructorSectionFilter === 'ALL' || data.section === activeInstructorSectionFilter) {
-        enrolledDocs.push({ id: doc.id, ...data });
-      }
-    });
-
-    if (countBadge) {
-      countBadge.textContent = `${enrolledDocs.length} Enrolled (${activeInstructorSectionFilter})`;
-    }
-
-    if (enrolledDocs.length === 0) {
-      container.innerHTML = `
-        <div class="p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">
-          No officially enrolled students for Section [${activeInstructorSectionFilter}].
-        </div>
-      `;
-      return;
-    }
-
-    enrolledDocs.forEach((e) => {
-      const docId = e.id;
-
-      const row = document.createElement('div');
-      row.className = "flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950 hover:bg-slate-900/60 transition-all";
-
-      const info = document.createElement('div');
-      info.className = "min-w-0";
-      info.innerHTML = `
-        <div class="flex items-center gap-2">
-          <span class="text-sm font-semibold text-white truncate">${escapeHtml(e.fullName || 'Student')}</span>
-          <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">${escapeHtml(e.section || 'N/A')}</span>
-        </div>
-        <div class="text-xs text-slate-400 font-mono">${escapeHtml(e.studentId || 'N/A')}</div>
-      `;
-
-      const right = document.createElement('div');
-      right.className = "flex items-center gap-2 shrink-0";
-
-      const badge = document.createElement('span');
-      badge.className = "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
-      badge.textContent = "ENROLLED";
-
-      const removeBtn = document.createElement('button');
-      removeBtn.type = 'button';
-      removeBtn.className = "px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white font-bold text-xs rounded-lg transition-all border border-rose-500/30";
-      removeBtn.textContent = "Drop";
-      removeBtn.onclick = () => dropEnrolledStudent(docId, subjectCode, e.fullName);
-
-      right.appendChild(badge);
-      right.appendChild(removeBtn);
-
-      row.appendChild(info);
-      row.appendChild(right);
-
-      container.appendChild(row);
-    });
-  } catch (err) {
-    console.error("Error loading officially enrolled students:", err);
-  }
-}
-
-async function dropEnrolledStudent(enrollmentId, subjectCode, studentName) {
-  const confirmed = confirm(`Are you sure you want to drop ${studentName || 'this student'} from ${subjectCode}?`);
-  if (!confirmed) return;
-
-  try {
-    await db.collection('enrollments').doc(enrollmentId).update({
-      status: 'rejected',
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    await logActivity(currentUserEmail, `Dropped ${studentName || enrollmentId} from ${subjectCode}`);
-    loadPendingEnrollments(subjectCode || activeSubjectCode);
-    loadOfficiallyEnrolledStudents(subjectCode || activeSubjectCode);
-  } catch (err) {
-    console.error("Error dropping student:", err);
-    alert("Error dropping student: " + err.message);
-  }
-}
-
 async function updateEnrollmentStatus(enrollmentId, newStatus, subjectCode) {
   try {
     await db.collection('enrollments').doc(enrollmentId).update({
@@ -3052,7 +3259,6 @@ async function updateEnrollmentStatus(enrollmentId, newStatus, subjectCode) {
     });
     await logActivity(currentUserEmail, `Set enrollment ${enrollmentId} status to ${newStatus}`);
     loadPendingEnrollments(subjectCode || activeSubjectCode);
-    loadOfficiallyEnrolledStudents(subjectCode || activeSubjectCode);
   } catch (err) {
     console.error("Update Enrollment Status Error:", err);
     alert("Error updating enrollment: " + err.message);
