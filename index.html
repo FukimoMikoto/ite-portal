@@ -97,6 +97,25 @@
         -moz-appearance: textfield;
       }
     </style>
+      <style>
+      .subnav-btn { flex: 0 0 auto; text-align: left; padding: 0.6rem 0.85rem; border-radius: 0.6rem; font-size: 0.75rem; font-weight: 700; color: rgb(148 163 184); transition: all .15s ease; white-space: nowrap; }
+      @media (min-width: 1024px) { .subnav-btn { width: 100%; } }
+      .subnav-btn:hover { color: #fff; background: rgb(15 23 42); }
+      .subnav-btn.is-active { background: rgb(16 185 129 / 0.15); color: rgb(52 211 153); box-shadow: inset 3px 0 0 rgb(16 185 129); }
+      html { scroll-behavior: smooth; }
+      [data-page][hidden], [data-page-not][hidden] { display: none !important; }
+      .subnav-btn { display: flex; align-items: center; gap: 0.65rem; }
+      #roleSidebar { transition: width .2s ease; }
+      @media (min-width: 1024px) {
+        #roleSidebar.sidebar-collapsed { width: 4.5rem; }
+        #roleSidebar.sidebar-collapsed .nav-label,
+        #roleSidebar.sidebar-collapsed .sidebar-title,
+        #roleSidebar.sidebar-collapsed [data-notif-count] { display: none; }
+        #roleSidebar.sidebar-collapsed .subnav-btn { justify-content: center; padding-left: 0; padding-right: 0; }
+        #roleSidebar.sidebar-collapsed #sidebarUserCard { flex-direction: column; gap: 0.5rem; }
+        #roleSidebar.sidebar-collapsed #sidebarCollapseBtn svg { transform: rotate(180deg); }
+      }
+    </style>
   </head>
   <body
     class="h-full flex flex-col font-sans antialiased selection:bg-emerald-500 selection:text-slate-950"
@@ -402,13 +421,13 @@
     <!-- ========================================================= -->
     <div
       id="mainDashboard"
-      class="hidden min-h-screen flex flex-col bg-[#090d16]"
+      class="hidden min-h-screen lg:h-screen lg:overflow-hidden flex flex-col bg-[#090d16]"
     >
       <!-- Top Header Navigation Bar -->
       <header
         class="sticky top-0 z-40 border-b border-slate-800 bg-[#090d16]/90 backdrop-blur-md px-4 lg:px-8 py-3"
       >
-        <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+        <div class="w-full flex items-center justify-between gap-4">
           <div class="flex items-center gap-3">
             <img
               src="ITELogo.jpg"
@@ -430,13 +449,96 @@
             </div>
           </div>
 
-          <div id="userInfo" class="flex items-center gap-3">
-            <!-- Populated by app.js -->
+          <div class="flex items-center gap-3">
+            <button
+              id="notificationBell"
+              type="button"
+              onclick="toggleNotificationDrawer(true)"
+              aria-label="Open notifications"
+              class="relative p-2 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-900 text-slate-300 hover:text-emerald-400 transition-all"
+            >
+              <i data-lucide="bell" class="w-4 h-4"></i>
+              <span
+                id="notificationBadge"
+                class="hidden absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black flex items-center justify-center"
+              >0</span>
+            </button>
+            <div id="userInfo" class="flex items-center gap-3">
+              <!-- Populated by app.js -->
+            </div>
           </div>
         </div>
       </header>
 
-      <main class="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-8 space-y-6">
+      <!-- Notification drawer (same for every role; contents are per-user) -->
+      <div id="notificationOverlay" class="hidden fixed inset-0 z-40 bg-black/50" onclick="toggleNotificationDrawer(false)"></div>
+      <aside id="notificationDrawer" class="hidden fixed top-0 right-0 z-50 h-full w-full sm:w-96 bg-slate-950 border-l border-slate-800 flex flex-col">
+        <div class="flex items-center justify-between p-4 border-b border-slate-800">
+          <h2 class="text-sm font-black text-white uppercase tracking-wider">Notifications</h2>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="markAllNotificationsRead()" class="px-2.5 py-1 text-[11px] font-bold bg-slate-800 text-slate-300 rounded-lg hover:text-white">Mark all as read</button>
+            <button type="button" onclick="toggleNotificationDrawer(false)" aria-label="Close notifications" class="px-2.5 py-1 text-[11px] font-bold bg-slate-800 text-slate-300 rounded-lg hover:text-white">Close</button>
+          </div>
+        </div>
+        <div id="notificationPanel" class="flex-1 overflow-y-auto p-4 space-y-3"></div>
+      </aside>
+
+      <div class="flex flex-1 flex-col lg:flex-row min-h-0 lg:overflow-hidden">
+        <!-- Role sidebar: only the logged-in role's group is un-hidden by routeUserRole() -->
+        <aside id="roleSidebar" class="shrink-0 w-full lg:w-60 border-b lg:border-b-0 lg:border-r border-slate-800 bg-slate-950 px-3 py-3 lg:py-5 overflow-x-auto lg:overflow-x-hidden lg:overflow-y-auto lg:self-stretch lg:flex lg:flex-col">
+        <!-- Role sidebar: only the logged-in role's group is un-hidden by routeUserRole() -->
+        <div class="lg:flex-1">
+          <div id="sidebarNavStudent" class="hidden">
+            <div class="sidebar-title px-3 pb-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Student</div>
+            <nav data-subnav data-view="studentView" aria-label="Student sections" class="flex lg:flex-col gap-1">
+              <button type="button" data-page="overview" class="subnav-btn"><i data-lucide="layout-dashboard" class="w-4 h-4 shrink-0"></i><span class="nav-label">Academic Overview</span></button>
+              <button type="button" data-page="subjects" class="subnav-btn"><i data-lucide="book-open" class="w-4 h-4 shrink-0"></i><span class="nav-label">My Subjects</span></button>
+              <button type="button" data-page="records" class="subnav-btn"><i data-lucide="clipboard-list" class="w-4 h-4 shrink-0"></i><span class="nav-label">Course Records</span></button>
+              <button type="button" data-page="prospectus" class="subnav-btn"><i data-lucide="graduation-cap" class="w-4 h-4 shrink-0"></i><span class="nav-label">Curriculum Prospectus</span></button>
+              <button type="button" onclick="toggleNotificationDrawer(true)" class="subnav-btn"><i data-lucide="bell" class="w-4 h-4 shrink-0"></i><span class="nav-label">Notifications</span><span data-notif-count class="hidden ml-auto px-1.5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black">0</span></button>
+            </nav>
+          </div>
+          <div id="sidebarNavInstructor" class="hidden">
+            <div class="sidebar-title px-3 pb-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Faculty</div>
+            <nav data-subnav data-view="instructorView" aria-label="Faculty sections" class="flex lg:flex-col gap-1">
+              <button type="button" data-page="home" class="subnav-btn"><i data-lucide="layout-dashboard" class="w-4 h-4 shrink-0"></i><span class="nav-label">Home</span></button>
+              <button type="button" data-page="record" class="subnav-btn"><i data-lucide="table" class="w-4 h-4 shrink-0"></i><span class="nav-label">Class Record</span></button>
+              <button type="button" data-page="roster" class="subnav-btn"><i data-lucide="users" class="w-4 h-4 shrink-0"></i><span class="nav-label">Student Roster</span></button>
+              <button type="button" data-page="weights" class="subnav-btn"><i data-lucide="sliders-horizontal" class="w-4 h-4 shrink-0"></i><span class="nav-label">Evaluation Weights</span></button>
+              <button type="button" data-page="analytics" class="subnav-btn"><i data-lucide="activity" class="w-4 h-4 shrink-0"></i><span class="nav-label">Analytics</span></button>
+              <button type="button" data-page="requests" class="subnav-btn"><i data-lucide="user-plus" class="w-4 h-4 shrink-0"></i><span class="nav-label">Roster Requests</span></button>
+              <button type="button" onclick="toggleNotificationDrawer(true)" class="subnav-btn"><i data-lucide="bell" class="w-4 h-4 shrink-0"></i><span class="nav-label">Notifications</span><span data-notif-count class="hidden ml-auto px-1.5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black">0</span></button>
+            </nav>
+            <div class="mt-4 pt-3 border-t border-slate-800">
+              <div class="sidebar-title px-3 pb-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Resources</div>
+              <button type="button" onclick="downloadExcelTemplate()" class="subnav-btn" title="Download the standardized class record template (.xlsx)"><i data-lucide="file-down" class="w-4 h-4 shrink-0"></i><span class="nav-label">Class Record Template</span></button>
+            </div>
+          </div>
+          <div id="sidebarNavAdmin" class="hidden">
+            <div class="sidebar-title px-3 pb-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Admin</div>
+            <nav data-subnav data-view="adminView" aria-label="Admin sections" class="flex lg:flex-col gap-1">
+              <button type="button" data-page="overview" class="subnav-btn"><i data-lucide="layout-dashboard" class="w-4 h-4 shrink-0"></i><span class="nav-label">Overview</span></button>
+              <button type="button" data-page="users" class="subnav-btn"><i data-lucide="users" class="w-4 h-4 shrink-0"></i><span class="nav-label">User Management</span></button>
+              <button type="button" data-page="assignments" class="subnav-btn"><i data-lucide="link" class="w-4 h-4 shrink-0"></i><span class="nav-label">Course Assignments</span></button>
+              <button type="button" data-page="atrisk" class="subnav-btn"><i data-lucide="flag" class="w-4 h-4 shrink-0"></i><span class="nav-label">At-Risk Tracker</span></button>
+              <button type="button" data-page="logs" class="subnav-btn"><i data-lucide="scroll-text" class="w-4 h-4 shrink-0"></i><span class="nav-label">Audit Logs</span></button>
+              <button type="button" onclick="toggleNotificationDrawer(true)" class="subnav-btn"><i data-lucide="bell" class="w-4 h-4 shrink-0"></i><span class="nav-label">Notifications</span><span data-notif-count class="hidden ml-auto px-1.5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black">0</span></button>
+            </nav>
+          </div>
+        </div>
+        <div id="sidebarUserCard" class="hidden lg:flex items-center gap-3 mt-4 pt-4 border-t border-slate-800">
+          <div id="sidebarAvatar" class="w-9 h-9 shrink-0 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-black flex items-center justify-center">--</div>
+          <div class="sidebar-title min-w-0 flex-1">
+            <div id="sidebarUserName" class="text-xs font-bold text-white truncate">Signed in</div>
+            <div id="sidebarUserRole" class="text-[10px] font-extrabold uppercase tracking-widest text-emerald-400">--</div>
+          </div>
+          <button id="sidebarCollapseBtn" type="button" aria-label="Collapse sidebar" class="shrink-0 p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-emerald-400 hover:bg-slate-900 transition-all">
+            <i data-lucide="chevrons-left" class="w-4 h-4"></i>
+          </button>
+        </div>
+        </aside>
+
+        <main class="flex-1 min-w-0 w-full max-w-[120rem] lg:overflow-y-auto p-4 lg:p-8 2xl:px-10 space-y-6">
         <!-- ========================================================= -->
         <!-- VIEW 1: STUDENT DASHBOARD (DYNAMIC)                       -->
         <!-- ========================================================= -->
@@ -470,7 +572,7 @@
 
           <!-- Academic Progression Banner (all text filled by JS) -->
           <div
-            id="studentProgressionBanner"
+            id="studentProgressionBanner" data-page="overview"
             class="glass-panel p-6 rounded-2xl border border-slate-800 relative overflow-hidden"
           >
             <div
@@ -539,7 +641,7 @@
           </div>
 
           <!-- 4 Dynamic KPI Cards -->
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" data-page="overview">
             <!-- Card 1: GWA -->
             <div
               class="p-5 rounded-2xl border border-slate-800 bg-slate-950/80 space-y-2"
@@ -644,8 +746,48 @@
             </div>
           </div>
 
+          <!-- Student Home: subjects + notifications at a glance -->
+          <div data-page="overview" class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3">
+              <div class="flex items-center justify-between">
+                <h3 class="text-sm font-black text-white uppercase tracking-wider">My subjects</h3>
+                <button type="button" onclick="goToSidebarPage('subjects')" class="text-[11px] font-bold text-emerald-400 hover:underline">View all</button>
+              </div>
+              <div id="studentHomeSubjects" class="space-y-2 text-xs text-slate-500"><div class="h-4 rounded bg-slate-800/70 animate-pulse"></div><div class="h-4 rounded bg-slate-800/70 animate-pulse"></div><div class="h-4 rounded bg-slate-800/70 animate-pulse"></div></div>
+            </div>
+            <div class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3">
+              <div class="flex items-center justify-between">
+                <h3 class="text-sm font-black text-white uppercase tracking-wider">Latest notifications</h3>
+                <button type="button" onclick="toggleNotificationDrawer(true)" class="text-[11px] font-bold text-emerald-400 hover:underline">Open all</button>
+              </div>
+              <div id="studentHomeNotifs" class="space-y-2 text-xs text-slate-500"><div class="h-4 rounded bg-slate-800/70 animate-pulse"></div><div class="h-4 rounded bg-slate-800/70 animate-pulse"></div><div class="h-4 rounded bg-slate-800/70 animate-pulse"></div></div>
+            </div>
+          </div>
+
+          <!-- My Subjects (live enrollment status) -->
+          <div id="studentSecSubjects" data-page="subjects" style="scroll-margin-top:6rem" class="p-6 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3">
+            <div>
+              <h3 class="text-base font-bold text-white">My Subjects</h3>
+              <p class="text-xs text-slate-400">Your enrollment requests and their status.</p>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="border-b border-slate-800 text-[10px] font-extrabold uppercase tracking-widest text-slate-500">
+                    <th class="py-2 px-3">SUBJECT</th>
+                    <th class="py-2 px-3">SECTION</th>
+                    <th class="py-2 px-3">STATUS</th>
+                  </tr>
+                </thead>
+                <tbody id="studentSubjectsBody" class="divide-y divide-slate-800/60 text-xs">
+                  <tr><td colspan="3" class="px-3 py-4 text-slate-500">Loading your subjects...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <!-- Academic Records Table -->
-          <div
+          <div id="studentSecRecords" data-page="records" style="scroll-margin-top:6rem"
             class="p-6 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-4"
           >
             <div
@@ -722,6 +864,55 @@
               </div>
             </div>
           </div>
+
+          <!-- Curriculum Prospectus & Course Registration (restored) -->
+          <div
+            id="studentSecProspectus" data-page="prospectus"
+            style="scroll-margin-top:6rem"
+            class="p-6 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-4"
+          >
+            <div
+              class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3"
+            >
+              <div>
+                <h3 class="text-base font-bold text-white">Curriculum Prospectus &amp; Course Registration</h3>
+                <p class="text-xs text-slate-400">
+                  Check the subjects you want to take, then apply for enrollment with your section.
+                </p>
+              </div>
+              <div
+                id="prospectusFilterControls"
+                class="flex items-center gap-1 p-1 rounded-xl bg-slate-950 border border-slate-800"
+              >
+                <button
+                  id="btnFilterAllSubjects"
+                  type="button"
+                  onclick="toggleITSubjectFilter('all')"
+                  class="flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition-all"
+                >
+                  All Subjects
+                </button>
+                <button
+                  id="btnFilterITSubjects"
+                  type="button"
+                  onclick="toggleITSubjectFilter('it')"
+                  class="flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg text-slate-400 hover:text-white text-xs font-bold transition-all"
+                >
+                  IT Subjects Only
+                </button>
+              </div>
+            </div>
+
+            <div id="prospectusContainer" class="space-y-4"></div>
+
+            <button
+              type="button"
+              onclick="applySelectedSubjects()"
+              class="w-full py-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-bold transition-all"
+            >
+              Apply for Selected Subjects
+            </button>
+          </div>
         </div>
 
         <!-- ========================================================= -->
@@ -758,9 +949,26 @@
             </div>
           </div>
 
-          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <!-- Instructor Home (class overview) -->
+          <div id="instructorHomePanel" data-page="home" class="space-y-6">
+            <div class="grid grid-cols-2 xl:grid-cols-4 gap-4">
+            <div class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60"><div class="text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Assigned classes</div><div id="ihClasses" class="mt-1 text-2xl font-black text-white">--</div></div>
+            <div class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60"><div class="text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Enrolled students</div><div id="ihEnrolled" class="mt-1 text-2xl font-black text-white">--</div></div>
+            <div class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60"><div class="text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Grades released</div><div id="ihReleased" class="mt-1 text-2xl font-black text-white">--</div></div>
+            <div class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60"><div class="text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Pending requests</div><div id="ihPending" class="mt-1 text-2xl font-black text-white">--</div></div>
+            </div>
+            <div class="flex items-center justify-between">
+              <h2 class="text-sm font-black text-white uppercase tracking-wider">My classes</h2>
+              <button type="button" onclick="loadInstructorHome()" class="px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-950 text-[11px] font-bold text-slate-300 hover:text-emerald-400">Refresh</button>
+            </div>
+            <div id="instructorHomeClasses" class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4">
+              <div class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3"><div class="h-3 w-1/3 rounded bg-slate-800/70 animate-pulse"></div><div class="h-4 w-2/3 rounded bg-slate-800/70 animate-pulse"></div><div class="h-2 rounded bg-slate-800/70 animate-pulse"></div><div class="h-8 rounded-xl bg-slate-800/70 animate-pulse"></div></div><div class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3"><div class="h-3 w-1/3 rounded bg-slate-800/70 animate-pulse"></div><div class="h-4 w-2/3 rounded bg-slate-800/70 animate-pulse"></div><div class="h-2 rounded bg-slate-800/70 animate-pulse"></div><div class="h-8 rounded-xl bg-slate-800/70 animate-pulse"></div></div><div class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3"><div class="h-3 w-1/3 rounded bg-slate-800/70 animate-pulse"></div><div class="h-4 w-2/3 rounded bg-slate-800/70 animate-pulse"></div><div class="h-2 rounded bg-slate-800/70 animate-pulse"></div><div class="h-8 rounded-xl bg-slate-800/70 animate-pulse"></div></div>
+            </div>
+          </div>
+
+          <div data-page-not="home" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <!-- Left rail: assigned classes + template -->
-            <aside class="lg:col-span-3 space-y-6">
+            <aside id="facSecClasses" style="scroll-margin-top:6rem;display:none" class="lg:col-span-3 space-y-6" aria-hidden="true">
               <div class="space-y-3">
                 <div class="flex items-center justify-between">
                   <div class="text-xs font-bold text-white">Assigned classes</div>
@@ -800,9 +1008,16 @@
             </aside>
 
             <!-- Main column -->
-            <section class="lg:col-span-9 space-y-6">
+            <section class="lg:col-span-12 space-y-6">
+              <!-- Active class switcher (replaces the old side list; the full class list lives on Home) -->
+              <div id="classSwitcherBar" class="flex flex-wrap items-center gap-3 p-3 rounded-2xl border border-slate-800 bg-slate-950/60">
+                <label for="classSwitcher" class="text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Active class</label>
+                <select id="classSwitcher" onchange="switchActiveClass(this.value)" class="min-w-[16rem] px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs font-bold text-white focus:outline-none focus:border-emerald-500"></select>
+                <button type="button" onclick="goToSidebarPage('home')" class="px-3 py-2 rounded-lg border border-slate-800 bg-slate-950 text-[11px] font-bold text-slate-300 hover:text-emerald-400">All my classes</button>
+              </div>
+
               <!-- Dropzone + Release CTA -->
-              <div class="glass-panel p-4 rounded-2xl border border-slate-800">
+              <div data-page="record" class="glass-panel p-4 rounded-2xl border border-slate-800">
                 <div class="flex flex-col md:flex-row gap-4">
                   <div
                     id="excelDropzone"
@@ -818,13 +1033,13 @@
                         Drop Excel class record here
                       </div>
                       <div class="text-[11px] text-slate-500">
-                        or click to browse · .xlsx or .xls
+                        or click to browse · .xlsx, .xls or .csv
                       </div>
                     </div>
                     <input
                       type="file"
                       id="excelFile"
-                      accept=".xlsx, .xls"
+                      accept=".xlsx, .xls, .csv"
                       class="hidden"
                       onchange="processExcel()"
                     />
@@ -841,8 +1056,37 @@
                 </div>
               </div>
 
+              <!-- Official student roster (approved enrollments, alphabetical) -->
+              <div id="facSecStudentRoster" data-page="roster" style="scroll-margin-top:6rem" class="glass-panel rounded-2xl border border-slate-800">
+                <div class="flex items-center justify-between gap-4 p-5 border-b border-slate-800">
+                  <div>
+                    <h2 class="text-base font-black text-white">Official student roster</h2>
+                    <p class="text-xs text-slate-500">Approved enrollments for the selected class, alphabetical.</p>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <input type="text" oninput="filterRoster(this.value)" placeholder="Search roster..." aria-label="Search roster" class="w-40 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500" />
+                    <span id="studentRosterCount" class="px-2.5 py-1 rounded-md text-[10px] font-extrabold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">0 students</span>
+                  </div>
+                </div>
+                <div class="overflow-x-auto max-h-[65vh] overflow-y-auto">
+                  <table class="w-full text-left border-collapse">
+                    <thead>
+                      <tr class="bg-slate-950/50 border-b border-slate-800 text-[10px] font-extrabold uppercase tracking-widest text-slate-500">
+                        <th class="py-3 px-4">#</th>
+                        <th class="py-3 px-4 cursor-pointer select-none hover:text-emerald-400" onclick="sortRoster('studentId')" title="Sort by ID">STUDENT ID<span id="rosterSortId"></span></th>
+                        <th class="py-3 px-4 cursor-pointer select-none hover:text-emerald-400" onclick="sortRoster('fullName')" title="Sort by name">STUDENT NAME<span id="rosterSortName"> ▲</span></th>
+                        <th class="py-3 px-4">SECTION</th>
+                      </tr>
+                    </thead>
+                    <tbody id="studentRosterBody" class="divide-y divide-slate-800/60 text-xs">
+                      <tr><td colspan="4" class="px-4 py-6 text-center text-slate-500">Select an assigned class to view its roster.</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
               <!-- Live class record -->
-              <div class="glass-panel rounded-2xl border border-slate-800">
+              <div id="facSecRecord" data-page="record" style="scroll-margin-top:6rem" class="glass-panel rounded-2xl border border-slate-800">
                 <div
                   class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-5 border-b border-slate-800"
                 >
@@ -895,14 +1139,23 @@
                       />
                     </div>
                     <button
+                      onclick="addGridRow()"
+                      type="button"
+                      class="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-emerald-500/30 text-xs font-bold text-emerald-400 transition-all"
+                    >
+                      + Add row
+                    </button>
+                    <button
                       onclick="saveDraftGrades()"
                       type="button"
                       class="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-bold text-white transition-all"
                     >
-                      Save draft
+                      Save staged draft
                     </button>
                   </div>
                 </div>
+
+                <div id="gridSummaryStrip" class="flex flex-wrap gap-x-6 gap-y-1 px-5 py-2.5 border-b border-slate-800 text-[11px] font-bold text-slate-400"></div>
 
                 <div class="overflow-x-auto">
                   <table class="w-full text-left border-collapse">
@@ -910,13 +1163,17 @@
                       <tr
                         class="bg-slate-950/50 border-b border-slate-800 text-[10px] font-extrabold uppercase tracking-widest text-slate-500"
                       >
-                        <th class="py-3 px-4">STUDENT ID</th>
-                        <th class="py-3 px-4">STUDENT</th>
-                        <th class="py-3 px-4">PRELIM</th>
-                        <th class="py-3 px-4">MIDTERM</th>
-                        <th class="py-3 px-4">FINALS</th>
-                        <th class="py-3 px-4">AVERAGE</th>
-                        <th class="py-3 px-4">STANDING</th>
+                        <th class="py-3 px-4 whitespace-nowrap">STUDENT ID</th>
+                        <th class="py-3 px-4 whitespace-nowrap">STUDENT NAME</th>
+                        <th class="py-3 px-4 whitespace-nowrap">PRELIM</th>
+                        <th class="py-3 px-4 whitespace-nowrap">MIDTERM</th>
+                        <th class="py-3 px-4 whitespace-nowrap">FINALS</th>
+                        <th class="py-3 px-4 whitespace-nowrap">LABORATORY</th>
+                        <th class="py-3 px-4 whitespace-nowrap">QUIZZES</th>
+                        <th class="py-3 px-4 whitespace-nowrap">ORAL RECITATION</th>
+                        <th class="py-3 px-4 whitespace-nowrap">ATTENDANCE</th>
+                        <th class="py-3 px-4 whitespace-nowrap">AVERAGE</th>
+                        <th class="py-3 px-4 whitespace-nowrap">STANDING</th>
                       </tr>
                     </thead>
                     <tbody
@@ -928,7 +1185,7 @@
               </div>
 
               <!-- Evaluation weights -->
-              <div
+              <div id="facSecWeights" data-page="weights" style="scroll-margin-top:6rem"
                 class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3"
               >
                 <div class="flex items-center justify-between">
@@ -967,7 +1224,7 @@
                   </div>
                   <div>
                     <label class="block text-[9px] text-slate-500 mb-1"
-                      >Major Output (Summative)</label
+                      >Oral Recitation</label
                     >
                     <input
                       type="number"
@@ -997,7 +1254,7 @@
               </div>
 
               <!-- Charts -->
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div id="facSecAnalytics" data-page="analytics" style="scroll-margin-top:6rem" class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div
                   class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3"
                 >
@@ -1026,7 +1283,7 @@
               </div>
 
               <!-- Pending roster requests -->
-              <div
+              <div id="facSecRoster" data-page="requests" style="scroll-margin-top:6rem"
                 class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3"
               >
                 <h3
@@ -1073,7 +1330,7 @@
           </div>
 
           <!-- Top Metrics Cards Grid (all values filled from Firestore) -->
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div data-page="overview" class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <!-- Total Faculty -->
             <div
               class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3 hover-card-glow relative"
@@ -1165,8 +1422,26 @@
             </div>
           </div>
 
+          <!-- Admin Home: recent activity + quick actions -->
+          <div data-page="overview" class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <div class="xl:col-span-2 p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3">
+              <div class="flex items-center justify-between">
+                <h3 class="text-sm font-black text-white uppercase tracking-wider">Recent activity</h3>
+                <button type="button" onclick="goToSidebarPage('logs')" class="text-[11px] font-bold text-emerald-400 hover:underline">Audit logs</button>
+              </div>
+              <div id="adminHomeActivity" class="space-y-2 text-xs text-slate-500"><div class="h-4 rounded bg-slate-800/70 animate-pulse"></div><div class="h-4 rounded bg-slate-800/70 animate-pulse"></div><div class="h-4 rounded bg-slate-800/70 animate-pulse"></div></div>
+            </div>
+            <div class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-2">
+              <h3 class="text-sm font-black text-white uppercase tracking-wider mb-1">Quick actions</h3>
+              <button type="button" onclick="goToSidebarPage('users')" class="w-full text-left px-3 py-2.5 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-900 hover:text-emerald-400 text-xs font-bold text-slate-300 transition-all">Manage faculty &amp; assignments</button>
+              <button type="button" onclick="goToSidebarPage('assignments')" class="w-full text-left px-3 py-2.5 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-900 hover:text-emerald-400 text-xs font-bold text-slate-300 transition-all">View course assignments</button>
+              <button type="button" onclick="goToSidebarPage('atrisk')" class="w-full text-left px-3 py-2.5 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-900 hover:text-emerald-400 text-xs font-bold text-slate-300 transition-all">Review at-risk students</button>
+              <button type="button" onclick="goToSidebarPage('logs')" class="w-full text-left px-3 py-2.5 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-900 hover:text-emerald-400 text-xs font-bold text-slate-300 transition-all">Open audit logs</button>
+            </div>
+          </div>
+
           <!-- Middle 2-Column Section: Faculty Roster + Subject Assignment -->
-          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div id="adminSecRoster" data-page="users" style="scroll-margin-top:6rem" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <!-- Left: Faculty Roster Table (8 cols) -->
             <div
               class="lg:col-span-8 glass-panel p-6 rounded-2xl border border-slate-800 space-y-4 hover-card-glow"
@@ -1275,7 +1550,7 @@
           </div>
 
           <!-- Active Subject Assignments List Panel -->
-          <div
+          <div id="adminSecAssignments" data-page="assignments" style="scroll-margin-top:6rem"
             class="glass-panel p-6 rounded-2xl border border-slate-800 space-y-4 hover-card-glow"
           >
             <div
@@ -1314,7 +1589,7 @@
           </div>
 
           <!-- At-Risk & Deficiency Tracker Panel -->
-          <div
+          <div id="adminSecAtRisk" data-page="atrisk" style="scroll-margin-top:6rem"
             class="glass-panel p-6 rounded-2xl border border-slate-800 space-y-4 hover-card-glow"
           >
             <div
@@ -1365,7 +1640,7 @@
           </div>
 
           <!-- System Activity & Audit Logs -->
-          <div
+          <div id="adminSecLogs" data-page="logs" style="scroll-margin-top:6rem"
             class="glass-panel p-6 rounded-2xl border border-slate-800 space-y-4 hover-card-glow"
           >
             <h3
@@ -1395,6 +1670,7 @@
           </div>
         </div>
       </main>
+      </div>
     </div>
 
     <!-- MODALS -->

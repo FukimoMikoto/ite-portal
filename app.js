@@ -21,6 +21,7 @@ const db = firebase.firestore();
 let parsedGradeData = [];
 let currentUserEmail = '';
 let currentUserId = '';
+let currentUserRole = '';
 let activeSubjectCode = '';
 let activeSubjectTitle = '';
 let activeInstructorSectionFilter = 'ALL';
@@ -164,6 +165,545 @@ function computeGradeStats(prelim, midterm, finals) {
     averageDisplay: average.toFixed(2),
     isPassing: average >= PASSING_THRESHOLD
   };
+}
+
+// ------------------------------------------------------------------
+// FACULTY GRID: WEIGHTED TERM AVERAGE (grid only - student GWA, at-risk list
+// and admin analytics still use computeGradeStats)
+// Exam category = mean of Prelim / Midterm / Finals.
+// A category left blank in a row is excluded and the remaining weights are
+// re-normalised, so legacy rows with only Prelim/Midterm/Finals keep the
+// exact same average as before.
+// ------------------------------------------------------------------
+
+const GRID_SCORE_FIELDS = ['labScore', 'quizzesScore', 'oralRecitationScore', 'attendanceScore']; // attendance is recorded but not weighted
+
+function getActiveWeights() {
+  const read = (id, fallback) => {
+    const el = document.getElementById(id);
+    const v = el ? parseFloat(el.value) : NaN;
+    return Number.isFinite(v) ? v : fallback;
+  };
+  return {
+    lab: read('weightLab', 30),
+    quizzes: read('weightQuizzes', 30),
+    oral: read('weightOutput', 20), // id kept for compatibility; now "Oral Recitation"
+    exam: read('weightExam', 20)
+  };
+}
+
+function computeFacultyRowStats(row) {
+  const finalsVal = row.finals !== undefined ? row.finals : row.final;
+  const base = computeGradeStats(row.prelim, row.midterm, finalsVal);
+  const examAvg = (base.prelim + base.midterm + base.finals) / 3;
+  const w = getActiveWeights();
+
+  const parts = [{ w: w.exam, v: examAvg }];
+  [['labScore', w.lab], ['quizzesScore', w.quizzes], ['oralRecitationScore', w.oral]].forEach(([field, weight]) => {
+    const v = toFiniteOrNull(row[field]);
+    if (v !== null) parts.push({ w: weight, v });
+  });
+
+  const totalW = parts.reduce((sum, p) => sum + p.w, 0);
+  const average = totalW > 0
+    ? parts.reduce((sum, p) => sum + p.w * p.v, 0) / totalW
+    : examAvg;
+
+  return {
+    ...base,
+    average,
+    averageDisplay: average.toFixed(2),
+    isPassing: average >= PASSING_THRESHOLD
+  };
+}
+
+function refreshWeightIndicator() {
+  const w = getActiveWeights();
+  const total = w.lab + w.quizzes + w.oral + w.exam;
+  const el = document.getElementById('weightTotalIndicator');
+  if (!el) return;
+  el.textContent = `Total: ${total}%`;
+  el.className = total === 100 ? "text-[10px] font-mono text-emerald-400" : "text-[10px] font-mono text-rose-400 font-bold";
+}
+
+function setupWeightLiveRecalc() {
+  ['weightLab', 'weightQuizzes', 'weightOutput', 'weightExam'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', () => {
+      refreshWeightIndicator();
+      refreshGridComputedCells();
+    });
+  });
+}
+
+// Re-computes Average / Standing for every rendered row without rebuilding inputs
+function updateGridSummary() {
+  const el = document.getElementById('gridSummaryStrip');
+  if (!el) return;
+  if (!parsedGradeData.length) { el.innerHTML = ''; return; }
+  const graded = parsedGradeData.filter((r) => !isNotGradedRow(r));
+  const notGraded = parsedGradeData.length - graded.length;
+  if (!graded.length) { el.innerHTML = `<span>Not graded: <span class="text-white">${notGraded}</span></span>`; return; }
+  const stats = graded.map(computeFacultyRowStats);
+  const pass = stats.filter((s) => s.isPassing).length;
+  const avg = stats.reduce((sum, s) => sum + s.average, 0) / stats.length;
+  el.innerHTML = `<span>Students: <span class="text-white">${stats.length}</span></span>` +
+    `<span>Class average: <span class="text-white font-mono">${avg.toFixed(2)}</span></span>` +
+    `<span>Passing: <span class="text-emerald-400">${pass}</span></span>` +
+    `<span>At risk: <span class="text-rose-400">${stats.length - pass}</span></span>` +
+    (notGraded ? `<span>Not graded: <span class="text-white">${notGraded}</span></span>` : '');
+}
+
+function refreshGridComputedCells() {
+  const tbody = document.getElementById('previewBody');
+  if (!tbody) return;
+  tbody.querySelectorAll('tr[data-row-index]').forEach((tr) => {
+    const row = parsedGradeData[Number(tr.dataset.rowIndex)];
+    if (row) updateRowComputedCells(tr, row);
+  });
+}
+
+function updateRowComputedCells(tr, row) {
+  const stats = computeFacultyRowStats(row);
+  const avgCell = tr.querySelector('[data-cell="average"]');
+  const standingCell = tr.querySelector('[data-cell="standing"]');
+  if (avgCell && isNotGradedRow(row)) {
+    avgCell.textContent = '—';
+    avgCell.className = 'px-4 py-3 font-black font-mono text-slate-500';
+  } else if (avgCell) {
+    avgCell.textContent = stats.averageDisplay;
+    avgCell.className = `px-4 py-3 font-black font-mono ${stats.isPassing ? 'text-white' : 'text-rose-400'}`;
+  }
+  if (standingCell) standingCell.innerHTML = liveStandingHtml(row, stats);
+  updateGridSummary();
+}
+
+// Pulls Lab / Quizzes / Oral Recitation overall scores from optional Excel columns
+function extractCategoryScores(headers, row) {
+  const fields = {};
+  const patterns = [
+    ['labScore', /^(lab|laboratory)(\s*score)?$/i],
+    ['quizzesScore', /^(quiz|quizzes)(\s*score)?$/i],
+    ['oralRecitationScore', /^(oral|oral\s*recitation)(\s*score)?$/i],
+    ['attendanceScore', /^(att|attendance)(\s*score)?$/i]
+  ];
+  patterns.forEach(([field, re]) => {
+    const idx = headers.findIndex((h) => re.test(String(h || '').trim()));
+    if (idx !== -1) fields[field] = toFiniteOrNull(row[idx]);
+  });
+  return fields;
+}
+
+function addGridRow() {
+  if (!activeSubjectCode) return alert("Select an active subject first.");
+  parsedGradeData.push({ studentId: '', fullName: '', prelim: 0, midterm: 0, finals: 0, __staged: true });
+  liveRecordEmptyHtml = '';
+  liveRecordSearchTerm = '';
+  const search = document.getElementById('searchStudentInput');
+  if (search) search.value = '';
+  liveRecordDirty = true;
+  setFacultySyncState('dirty');
+  renderLiveClassRecord();
+  const rows = document.querySelectorAll('#previewBody tr[data-row-index]');
+  const last = rows[rows.length - 1];
+  const first = last && last.querySelector('input[data-field]');
+  if (first) first.focus();
+}
+
+// If the instructor edited the Student ID of an already-saved row, drop the old grade doc
+function queueRenamedDocCleanup(row, batch) {
+  if (row.__docId && row.__originalStudentId !== undefined &&
+      String(row.__originalStudentId).trim() !== String(row.studentId || '').trim()) {
+    batch.delete(db.collection('grades').doc(row.__docId));
+  }
+}
+
+function pickCategoryScoreFields(row) {
+  const out = {};
+  GRID_SCORE_FIELDS.forEach((f) => { out[f] = toFiniteOrNull(row[f]); });
+  return out;
+}
+
+// ------------------------------------------------------------------
+// TOASTS: non-blocking replacement for alert() (confirm() is untouched)
+// ------------------------------------------------------------------
+function showToast(message, type) {
+  let host = document.getElementById('toastHost');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'toastHost';
+    host.className = 'fixed bottom-4 right-4 z-[60] flex flex-col gap-2 w-[calc(100%-2rem)] sm:w-96 pointer-events-none';
+    document.body.appendChild(host);
+  }
+  const text = String(message == null ? '' : message);
+  const lower = text.toLowerCase();
+  const kind = type || (/fail|error|could not|couldn't|invalid|denied|unable|must |required|not allowed/.test(lower)
+    ? 'error'
+    : /success|saved|released|approved|updated|imported|assigned|complete|created|removed/.test(lower) ? 'success' : 'info');
+  const tone = {
+    success: 'border-emerald-500/40 text-emerald-300',
+    error: 'border-rose-500/40 text-rose-300',
+    info: 'border-slate-600 text-slate-200'
+  }[kind];
+  const el = document.createElement('div');
+  el.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+  el.className = `pointer-events-auto px-4 py-3 rounded-xl border bg-slate-950/95 shadow-lg text-xs font-semibold whitespace-pre-line transition-all duration-300 opacity-0 translate-y-2 ${tone}`;
+  el.textContent = text;
+  host.appendChild(el);
+  while (host.children.length > 4) host.removeChild(host.firstChild);
+  requestAnimationFrame(() => { el.classList.remove('opacity-0', 'translate-y-2'); });
+  const close = () => { el.classList.add('opacity-0'); setTimeout(() => el.remove(), 300); };
+  el.addEventListener('click', close);
+  setTimeout(close, kind === 'error' ? 7000 : 4500);
+}
+window.alert = (m) => showToast(m);
+
+function animateNumber(id, target) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const to = Number(target) || 0;
+  const start = performance.now();
+  const dur = 600;
+  const tick = (now) => {
+    const t = Math.min((now - start) / dur, 1);
+    el.textContent = String(Math.round(to * (1 - Math.pow(1 - t, 3))));
+    if (t < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+function goToSidebarPage(page) {
+  const btn = document.querySelector(`#roleSidebar [id^="sidebarNav"]:not(.hidden) button[data-page="${page}"]`);
+  if (btn) btn.click();
+}
+
+// ------------------------------------------------------------------
+// HOME PAGES (read-only summaries built from data already in Firestore)
+// ------------------------------------------------------------------
+let homeAssignments = [];
+
+function syncClassSwitcher() {
+  const sel = document.getElementById('classSwitcher');
+  if (!sel) return;
+  const idx = homeAssignments.findIndex((x) => x.code === activeSubjectCode && x.section === activeInstructorSectionFilter);
+  if (idx !== -1) sel.value = String(idx);
+}
+
+function populateClassSwitcher() {
+  const sel = document.getElementById('classSwitcher');
+  if (!sel) return;
+  sel.innerHTML = homeAssignments.length
+    ? homeAssignments.map((x, i) => `<option value="${i}">${escapeHtml(x.code)} \u2022 ${escapeHtml(x.section)} \u2014 ${escapeHtml(x.subjectName)}</option>`).join('')
+    : '<option value="">No classes assigned</option>';
+  syncClassSwitcher();
+}
+
+function switchActiveClass(value) {
+  const x = homeAssignments[Number(value)];
+  if (x) selectSubject(x.code, x.subjectName, x.section, x.card);
+}
+
+function openHomeClass(i) {
+  const a = homeAssignments[i];
+  if (!a) return;
+  selectSubject(a.code, a.subjectName, a.section, a.card);
+  goToSidebarPage('record');
+}
+
+async function loadInstructorHome(prefetchedEnroll) {
+  const box = document.getElementById('instructorHomeClasses');
+  if (!box) return;
+  const list = homeAssignments.slice();
+  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+
+  if (!list.length) {
+    box.innerHTML = '<div class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 text-xs text-slate-500">No classes assigned yet. Please ask the ITE Admin to assign a subject to you.</div>';
+    ['ihClasses', 'ihEnrolled', 'ihReleased', 'ihPending'].forEach((id) => setText(id, '0'));
+    return;
+  }
+
+  const byCode = {};
+  await Promise.all([...new Set(list.map((x) => x.code))].map(async (code) => {
+    let enroll = [];
+    const grades = [];
+    const enrollP = (prefetchedEnroll && prefetchedEnroll[code])
+      ? Promise.resolve(prefetchedEnroll[code])
+      : db.collection('enrollments').where('subjectCode', '==', code).get().then((sn) => { const l = []; sn.forEach((d) => l.push(d.data())); return l; }).catch((e) => { console.warn("Home: enrollments", e); return []; });
+    const gradesP = db.collection('grades').where('classId', '==', code).get().then((sn) => { sn.forEach((d) => grades.push(d.data())); }).catch((e) => { console.warn("Home: grades", e); });
+    [enroll] = await Promise.all([enrollP, gradesP]);
+    byCode[code] = { enroll, grades };
+  }));
+
+  let totalEnrolled = 0, totalReleased = 0, totalPending = 0;
+  box.innerHTML = list.map((a, i) => {
+    const { enroll, grades } = byCode[a.code] || { enroll: [], grades: [] };
+    const inSection = (e) => a.section === 'ALL' || e.section === a.section;
+    const roster = new Set(enroll.filter((e) => e.status === 'approved' && inSection(e) && e.studentId).map((e) => String(e.studentId).trim()));
+    const pending = enroll.filter((e) => e.status === 'pending' && inSection(e)).length;
+    const graded = new Set();
+    const released = new Set();
+    grades.forEach((g) => {
+      const sid = String(g.studentId || '').trim();
+      if (!roster.has(sid)) return;
+      graded.add(sid);
+      if (g.isReleased) released.add(sid);
+    });
+    totalEnrolled += roster.size; totalReleased += released.size; totalPending += pending;
+    const pct = roster.size ? Math.round((graded.size / roster.size) * 100) : 0;
+    return `
+      <div class="p-5 rounded-2xl border ${(a.code === activeSubjectCode && a.section === activeInstructorSectionFilter) ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-slate-800 bg-slate-950/60'} space-y-3">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <div class="font-mono text-xs font-bold text-emerald-400">${escapeHtml(a.code)} &bull; ${escapeHtml(a.section)}${(a.code === activeSubjectCode && a.section === activeInstructorSectionFilter) ? ' &bull; <span class="text-emerald-300">SELECTED</span>' : ''}</div>
+            <div class="text-sm font-bold text-white truncate">${escapeHtml(a.subjectName)}</div>
+          </div>
+          ${pending ? `<span class="shrink-0 px-2 py-0.5 rounded-md border border-amber-500/30 bg-amber-500/15 text-amber-400 text-[10px] font-extrabold uppercase">${pending} pending</span>` : ''}
+        </div>
+        <div>
+          <div class="flex justify-between text-[11px] text-slate-400 mb-1"><span>${graded.size} of ${roster.size} graded</span><span>${pct}%</span></div>
+          <div class="h-1.5 rounded-full bg-slate-800 overflow-hidden"><div class="h-full bg-emerald-500 transition-all duration-500" data-w="${pct}" style="width:0%"></div></div>
+        </div>
+        <div class="text-[11px] text-slate-500">${released.size} released &bull; ${Math.max(graded.size - released.size, 0)} draft &bull; ${Math.max(roster.size - graded.size, 0)} not graded</div>
+        <button type="button" onclick="openHomeClass(${i})" class="w-full py-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-bold transition-all">Open class record</button>
+      </div>`;
+  }).join('');
+
+  animateNumber('ihClasses', list.length);
+  animateNumber('ihEnrolled', totalEnrolled);
+  setText('ihReleased', `${totalReleased} / ${totalEnrolled}`);
+  animateNumber('ihPending', totalPending);
+  requestAnimationFrame(() => box.querySelectorAll('[data-w]').forEach((b) => { b.style.width = b.dataset.w + '%'; }));
+}
+
+function renderAdminHomeActivity(logSnapshot) {
+  const box = document.getElementById('adminHomeActivity');
+  if (!box) return;
+  const items = [];
+  logSnapshot.forEach((doc) => items.push(doc.data()));
+  if (!items.length) { box.textContent = 'No activity recorded yet.'; return; }
+  box.innerHTML = items.slice(0, 6).map((l) => {
+    const t = l.timestamp && l.timestamp.toDate ? l.timestamp.toDate().toLocaleString() : 'Just now';
+    return `<div class="flex items-start justify-between gap-3 py-1.5 border-b border-slate-800/60 last:border-0">
+      <div class="min-w-0"><div class="text-xs text-slate-200 truncate">${escapeHtml(l.action || '')}</div><div class="text-[10px] text-slate-500 truncate">${escapeHtml(l.user || '')}</div></div>
+      <div class="shrink-0 text-[10px] font-mono text-slate-500">${escapeHtml(t)}</div></div>`;
+  }).join('');
+}
+
+function renderStudentHomeSubjects(rows) {
+  const box = document.getElementById('studentHomeSubjects');
+  if (!box) return;
+  if (!rows.length) { box.innerHTML = `<div class="py-2">No subject requests yet.<br><button type="button" onclick="goToSidebarPage('prospectus')" class="mt-2 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-[11px] font-bold">Choose subjects</button></div>`; return; }
+  const cls = { approved: 'text-emerald-400', pending: 'text-amber-400', rejected: 'text-rose-400' };
+  box.innerHTML = rows.slice(0, 5).map((e) => `
+    <div class="flex items-center justify-between py-1.5 border-b border-slate-800/60 last:border-0">
+      <div class="text-xs font-bold text-white">${escapeHtml(e.subjectCode || '')} <span class="font-normal text-slate-500">&bull; ${escapeHtml(e.section || '')}</span></div>
+      <div class="text-[10px] font-extrabold uppercase ${cls[e.status] || cls.pending}">${escapeHtml(e.status || 'pending')}</div>
+    </div>`).join('') + (rows.length > 5 ? `<div class="text-[10px] text-slate-500 pt-1">+ ${rows.length - 5} more</div>` : '');
+}
+
+function renderStudentHomeNotifs() {
+  const box = document.getElementById('studentHomeNotifs');
+  if (!box) return;
+  const lines = [];
+  if (latestProgression) {
+    lines.push(`<div class="py-1.5 border-b border-slate-800/60"><div class="text-xs font-bold text-emerald-400">Promotion progress</div><div class="text-[11px] text-slate-400">${escapeHtml(latestProgression.promotionNote || 'No promotion yet')} &bull; ${escapeHtml(String(latestProgression.unitsCompleted))} units completed</div></div>`);
+  }
+  notificationDocs.slice(0, 3).forEach((n) => {
+    lines.push(`<div class="py-1.5 border-b border-slate-800/60 last:border-0"><div class="text-xs font-bold text-white">${escapeHtml(n.title || '')}</div><div class="text-[11px] text-slate-400">${escapeHtml(n.message || '')}</div></div>`);
+  });
+  box.innerHTML = lines.length ? lines.join('') : "You're all caught up.";
+}
+
+function updateSidebarUserCard(role, userData) {
+  const name = (userData && (userData.fullName || userData.name)) || currentUserEmail || 'Signed in';
+  const initials = String(name).split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '--';
+  const labels = { admin: 'Administrator', instructor: 'Faculty', student: 'Student' };
+  const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+  set('sidebarUserName', name);
+  set('sidebarUserRole', labels[role] || role);
+  set('sidebarAvatar', initials);
+}
+
+function setupSidebarCollapse() {
+  const aside = document.getElementById('roleSidebar');
+  const btn = document.getElementById('sidebarCollapseBtn');
+  if (!aside || !btn) return;
+  try { if (localStorage.getItem('iteSidebarCollapsed') === '1') aside.classList.add('sidebar-collapsed'); } catch (e) { /* storage unavailable */ }
+  btn.addEventListener('click', () => {
+    const collapsed = aside.classList.toggle('sidebar-collapsed');
+    try { localStorage.setItem('iteSidebarCollapsed', collapsed ? '1' : '0'); } catch (e) { /* storage unavailable */ }
+  });
+}
+
+// Sidebar = one page at a time inside the logged-in role's own view.
+// Only elements tagged data-page inside that view are toggled; headers and the class rail stay put.
+function setupSectionNav() {
+  document.querySelectorAll('[data-subnav]').forEach((nav) => {
+    const view = document.getElementById(nav.dataset.view);
+    const btns = Array.from(nav.querySelectorAll('button[data-page]'));
+    if (!view || !btns.length) return;
+
+    const select = (page) => {
+      view.querySelectorAll('[data-page], [data-page-not]').forEach((el) => {
+        el.hidden = el.dataset.page !== undefined ? el.dataset.page !== page : el.dataset.pageNot === page;
+      });
+      btns.forEach((b) => b.classList.toggle('is-active', b.dataset.page === page));
+      window.scrollTo({ top: 0 });
+      const scrollPane = document.querySelector('#mainDashboard main');
+      if (scrollPane) scrollPane.scrollTop = 0; // desktop layout scrolls inside the content pane
+      // Charts drawn while hidden need a resize once visible
+      requestAnimationFrame(() => {
+        try { if (window.Chart && Chart.instances) Object.values(Chart.instances).forEach((c) => c.resize()); } catch (e) { /* ignore */ }
+      });
+    };
+
+    btns.forEach((b) => b.addEventListener('click', () => {
+      select(b.dataset.page);
+      // Home summaries are read-only snapshots, so refresh them whenever the page is opened
+      if (view.id === 'instructorView' && b.dataset.page === 'home' && homeAssignments.length) loadInstructorHome();
+    }));
+    nav.__selectDefault = () => select(btns[0].dataset.page);
+    nav.__selectDefault();
+  });
+}
+
+// ------------------------------------------------------------------
+// OFFICIAL STUDENT ROSTER (approved enrollments) + STUDENT "MY SUBJECTS"
+// ------------------------------------------------------------------
+const byFullName = (x, y) => String(x.fullName || '').localeCompare(String(y.fullName || ''), undefined, { sensitivity: 'base' });
+
+function rosterFromEnrollments(list, section) {
+  const seen = new Set();
+  const roster = [];
+  list.forEach((en) => {
+    if (en.status !== 'approved' || !en.studentId) return;
+    if (section && section !== 'ALL' && en.section !== section) return;
+    const id = String(en.studentId).trim();
+    if (seen.has(id)) return;
+    seen.add(id);
+    roster.push({ studentId: id, fullName: en.fullName || '', studentUid: en.studentUid || '', section: en.section || '' });
+  });
+  return roster.sort(byFullName);
+}
+
+async function fetchApprovedRoster(subjectCode, section) {
+  try {
+    const snap = await db.collection('enrollments').where('subjectCode', '==', subjectCode).get();
+    const list = [];
+    snap.forEach((d) => list.push(d.data()));
+    return rosterFromEnrollments(list, section);
+  } catch (err) {
+    console.warn("Could not load roster:", err);
+    return [];
+  }
+}
+
+let rosterData = [];
+let rosterSortKey = 'fullName';
+let rosterSortDir = 1;
+let rosterQuery = '';
+
+function renderStudentRoster(roster) {
+  rosterData = roster.slice();
+  drawStudentRoster();
+}
+
+function sortRoster(key) {
+  if (rosterSortKey === key) rosterSortDir *= -1;
+  else { rosterSortKey = key; rosterSortDir = 1; }
+  drawStudentRoster();
+}
+
+function filterRoster(value) {
+  rosterQuery = String(value || '').trim().toLowerCase();
+  drawStudentRoster();
+}
+
+function drawStudentRoster() {
+  const body = document.getElementById('studentRosterBody');
+  const count = document.getElementById('studentRosterCount');
+  const arrow = (key) => (rosterSortKey === key ? (rosterSortDir === 1 ? ' \u25B2' : ' \u25BC') : '');
+  const idMark = document.getElementById('rosterSortId');
+  const nameMark = document.getElementById('rosterSortName');
+  if (idMark) idMark.textContent = arrow('studentId');
+  if (nameMark) nameMark.textContent = arrow('fullName');
+
+  const shown = rosterData
+    .filter((r) => !rosterQuery || `${r.studentId} ${r.fullName}`.toLowerCase().includes(rosterQuery))
+    .sort((x, y) => rosterSortDir * String(x[rosterSortKey] || '').localeCompare(String(y[rosterSortKey] || ''), undefined, { numeric: true, sensitivity: 'base' }));
+
+  if (count) {
+    count.textContent = rosterQuery
+      ? `${shown.length} of ${rosterData.length} students`
+      : `${rosterData.length} student${rosterData.length === 1 ? '' : 's'}`;
+  }
+  if (!body) return;
+  if (!rosterData.length) {
+    body.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-slate-500">No approved students for this class yet.<br><button type="button" onclick="goToSidebarPage('requests')" class="mt-3 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-[11px] font-bold">Review roster requests</button></td></tr>`;
+    return;
+  }
+  if (!shown.length) {
+    body.innerHTML = '<tr><td colspan="4" class="px-4 py-6 text-center text-slate-500">No students match your search.</td></tr>';
+    return;
+  }
+  body.innerHTML = shown.map((r, i) => `
+    <tr>
+      <td class="px-4 py-2 text-slate-500 font-mono">${i + 1}</td>
+      <td class="px-4 py-2 font-mono text-slate-400">${escapeHtml(r.studentId)}</td>
+      <td class="px-4 py-2 font-bold text-white">${escapeHtml(r.fullName)}</td>
+      <td class="px-4 py-2 text-slate-400">${escapeHtml(r.section)}</td>
+    </tr>`).join('');
+}
+
+// Approved students without a grade record yet become blank, un-graded rows in the grid
+function mergeRosterIntoGrid(roster, gradeRows) {
+  const haveIds = new Set(gradeRows.map((g) => String(g.studentId || '').trim()));
+  const haveNames = new Set(gradeRows.map((g) => normalizeNameKey(g.fullName)));
+  const extra = roster
+    .filter((r) => !haveIds.has(r.studentId) && !haveNames.has(normalizeNameKey(r.fullName)))
+    .map((r) => ({ studentId: r.studentId, fullName: r.fullName, prelim: 0, midterm: 0, finals: 0, __rosterOnly: true }));
+  return gradeRows.concat(extra).sort(byFullName);
+}
+
+const isNotGradedRow = (row) => !!row.__rosterOnly && !row.__edited;
+
+let studentSubjectsUnsubscribe = null;
+let lastEnrollmentSignature = null;
+function setupStudentSubjectsListener(uid) {
+  if (typeof studentSubjectsUnsubscribe === 'function') studentSubjectsUnsubscribe();
+  studentSubjectsUnsubscribe = null;
+  lastEnrollmentSignature = null;
+  if (!uid) return;
+  studentSubjectsUnsubscribe = db.collection('enrollments').where('studentUid', '==', uid).onSnapshot((snap) => {
+    const body = document.getElementById('studentSubjectsBody');
+    if (!body) return;
+    const rows = [];
+    snap.forEach((d) => rows.push(d.data()));
+    rows.sort((x, y) => String(x.subjectCode || '').localeCompare(String(y.subjectCode || '')));
+    renderStudentHomeSubjects(rows);
+
+    // An approval/rejection (or new request) changed the picture: refresh the prospectus from fresh data
+    const signature = rows.map((r) => `${r.subjectCode}:${r.status}`).sort().join('|');
+    if (lastEnrollmentSignature !== null && signature !== lastEnrollmentSignature) {
+      if (!studentDataCache || Date.now() - studentDataCache.ts > 3000) {
+        invalidateStudentData();
+        loadAvailableSubjectsForStudent();
+      }
+    }
+    lastEnrollmentSignature = signature;
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="3" class="px-3 py-4 text-slate-500">No subject requests yet. Choose subjects in the Curriculum Prospectus.</td></tr>';
+      return;
+    }
+    const cls = { approved: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30', pending: 'bg-amber-500/15 text-amber-400 border-amber-500/30', rejected: 'bg-rose-500/15 text-rose-400 border-rose-500/30' };
+    body.innerHTML = rows.map((e) => `
+      <tr>
+        <td class="px-3 py-2 font-bold text-white">${escapeHtml(e.subjectCode || '')}</td>
+        <td class="px-3 py-2 text-slate-400">${escapeHtml(e.section || '')}</td>
+        <td class="px-3 py-2"><span class="px-2 py-0.5 rounded-md border text-[10px] font-extrabold uppercase tracking-wider ${cls[e.status] || cls.pending}">${escapeHtml(e.status || 'pending')}</span></td>
+      </tr>`).join('');
+  }, (err) => console.error("My Subjects listener error:", err));
 }
 
 function buildGradeDocId(subjectCode, studentId) {
@@ -313,6 +853,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   setupExcelDropzone();
   setupLiveRecordInteractions();
+  setupWeightLiveRecalc();
+  setupSectionNav();
+  setupSidebarCollapse();
   setupLoginEnterKey();
   updateSemesterToggleUI();
   initPortalView();
@@ -370,8 +913,8 @@ function setupExcelDropzone() {
     if (!droppedFiles || !droppedFiles.length) return;
 
     const file = droppedFiles[0];
-    if (!/\.(xlsx|xls)$/i.test(file.name)) {
-      alert("Please drop a valid Excel file (.xlsx or .xls).");
+    if (!/\.(xlsx|xls|csv)$/i.test(file.name)) {
+      alert("Please drop a valid spreadsheet file (.xlsx, .xls or .csv).");
       return;
     }
 
@@ -404,22 +947,45 @@ function setupLiveRecordInteractions() {
 
     const field = input.dataset.field;
     const parsed = parseFloat(input.value);
-    row[field] = isNaN(parsed) ? 0 : parsed;
+    if (field === 'studentId' || field === 'fullName') {
+      if (field === 'studentId' && row.__docId && row.__originalStudentId === undefined) {
+        row.__originalStudentId = row.studentId;
+      }
+      row[field] = input.value;
+    } else if (GRID_SCORE_FIELDS.includes(field)) {
+      row[field] = Number.isFinite(parsed) ? parsed : null; // blank = not recorded
+    } else {
+      row[field] = Number.isFinite(parsed) ? parsed : 0;
+    }
     row.__edited = true;
 
-    const finalsVal = row.finals !== undefined ? row.finals : row.final;
-    const stats = computeGradeStats(row.prelim, row.midterm, finalsVal);
-
-    const avgCell = tr.querySelector('[data-cell="average"]');
-    const standingCell = tr.querySelector('[data-cell="standing"]');
-    if (avgCell) {
-      avgCell.textContent = stats.averageDisplay;
-      avgCell.className = `px-4 py-3 font-black font-mono ${stats.isPassing ? 'text-white' : 'text-rose-400'}`;
-    }
-    if (standingCell) standingCell.innerHTML = liveStandingHtml(row, stats);
+    updateRowComputedCells(tr, row);
 
     liveRecordDirty = true;
     setFacultySyncState('dirty');
+  });
+
+  // Excel-like navigation: Enter / arrows move between cells, focus selects the value
+  tbody.addEventListener('focusin', (e) => {
+    if (e.target && e.target.matches && e.target.matches('input[data-field]')) e.target.select();
+  });
+  tbody.addEventListener('keydown', (e) => {
+    const input = e.target;
+    if (!input || !input.matches || !input.matches('input[data-field]')) return;
+    const keys = { Enter: [0, 1], ArrowDown: [0, 1], ArrowUp: [0, -1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+    const move = keys[e.key];
+    if (!move) return;
+    const tr = input.closest('tr');
+    const cells = Array.from(tr.querySelectorAll('input[data-field]'));
+    let target = null;
+    if (move[1] !== 0) {
+      let sib = tr;
+      do { sib = move[1] > 0 ? sib.nextElementSibling : sib.previousElementSibling; } while (sib && !sib.querySelector('input[data-field]'));
+      if (sib) target = sib.querySelectorAll('input[data-field]')[cells.indexOf(input)];
+    } else {
+      target = cells[cells.indexOf(input) + move[0]];
+    }
+    if (target) { e.preventDefault(); target.focus(); }
   });
 
   tbody.addEventListener('change', (e) => {
@@ -626,7 +1192,7 @@ async function handleSelfPasswordReset() {
       if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
         errDiv.innerText = 'Incorrect current password or account details.';
       } else {
-        errDiv.innerText = err.message || 'Failed to update password. Please check your credentials.';
+        errDiv.innerText = friendlyAuthError(err);
       }
     }
   }
@@ -645,13 +1211,15 @@ async function handleForgotPassword() {
   sendResetLink(email);
 }
 
+const has_user_not_found = (err) => String((err && err.code) || '').includes('user-not-found');
+
 async function sendResetLink(email) {
   try {
     await auth.sendPasswordResetEmail(email);
     alert(`Password reset link sent to ${email}. Please check your inbox or spam folder.`);
   } catch (err) {
     console.error("Password Reset Error:", err);
-    alert("Error sending password reset email: " + err.message);
+    alert(has_user_not_found(err) ? "Could not send a reset link. Please check the email address and try again." : "Error sending password reset email: " + friendlyAuthError(err));
   }
 }
 
@@ -685,7 +1253,33 @@ function detachSingleSessionGuard() {
   singleSessionUnsubscribe = null;
 }
 
+// Keeps #authLoadingScreen up (and both #authContainer / #mainDashboard hidden)
+// until Firebase has verified the persisted session and the role check is done.
+let authStateResolved = false;
+
+function showAuthLoadingGate() {
+  const authContainer = document.getElementById('authContainer');
+  const mainDashboard = document.getElementById('mainDashboard');
+  const authLoadingScreen = document.getElementById('authLoadingScreen');
+
+  if (authContainer) authContainer.classList.add('hidden');
+  if (mainDashboard) mainDashboard.classList.add('hidden');
+  if (authLoadingScreen) authLoadingScreen.classList.remove('hidden');
+}
+
+showAuthLoadingGate();
+
+// Safety net: if Firebase never answers (offline / blocked), fall back to the login screen.
+setTimeout(() => {
+  if (authStateResolved) return;
+  const authContainer = document.getElementById('authContainer');
+  const authLoadingScreen = document.getElementById('authLoadingScreen');
+  if (authLoadingScreen) authLoadingScreen.classList.add('hidden');
+  if (authContainer) authContainer.classList.remove('hidden');
+}, 8000);
+
 auth.onAuthStateChanged(async (user) => {
+  authStateResolved = true;
   const authContainer = document.getElementById('authContainer');
   const mainDashboard = document.getElementById('mainDashboard');
   const authLoadingScreen = document.getElementById('authLoadingScreen');
@@ -704,6 +1298,7 @@ auth.onAuthStateChanged(async (user) => {
   }
 
   if (user) {
+    showAuthLoadingGate();
     try {
       currentUserId = user.uid;
       currentUserEmail = user.email;
@@ -730,19 +1325,18 @@ auth.onAuthStateChanged(async (user) => {
           return;
         }
 
+        // The session write runs in the background; the single-session guard attaches only AFTER it lands
+        let sessionWrite = Promise.resolve();
         if (!currentSessionId) {
           currentSessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
-          try {
-            await db.collection('users').doc(user.uid).update({
-              activeSessionId: currentSessionId,
-              lastLoginAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
-          } catch (sessionErr) {
+          sessionWrite = db.collection('users').doc(user.uid).update({
+            activeSessionId: currentSessionId,
+            lastLoginAt: firebase.firestore.FieldValue.serverTimestamp()
+          }).catch((sessionErr) => {
             console.warn("Session tracking update skipped due to permissions:", sessionErr);
-          }
+          });
         }
 
-        setupSingleSessionGuard(user.uid);
         showDashboard();
 
         if (userInfo) {
@@ -753,6 +1347,10 @@ auth.onAuthStateChanged(async (user) => {
         }
 
         routeUserRole(data.role, data);
+
+        sessionWrite.then(() => {
+          if (auth.currentUser && auth.currentUser.uid === user.uid) setupSingleSessionGuard(user.uid);
+        });
       } else {
         isFreshLoginAttempt = false;
         detachSingleSessionGuard();
@@ -775,6 +1373,29 @@ auth.onAuthStateChanged(async (user) => {
   }
 });
 
+// Turns Firebase auth errors (including raw JSON like INVALID_LOGIN_CREDENTIALS) into short, readable messages.
+// Wrong password and unknown email deliberately share one message so the form never reveals which emails exist.
+function friendlyAuthError(err) {
+  const code = String((err && err.code) || '').toLowerCase();
+  const raw = String((err && err.message) || '');
+  const upper = raw.toUpperCase();
+  const has = (...keys) => keys.some((k) => code.includes(k) || upper.includes(k.toUpperCase().replace(/-/g, '_')));
+
+  if (has('invalid-login-credentials', 'invalid-credential', 'wrong-password', 'user-not-found', 'invalid_login_credentials')) {
+    return 'Incorrect email or password. Please check your details and try again.';
+  }
+  if (has('invalid-email')) return 'Please enter a valid email address.';
+  if (has('missing-password')) return 'Please enter your password.';
+  if (has('user-disabled')) return 'This account has been disabled. Please contact the ITE Department.';
+  if (has('too-many-requests')) return 'Too many failed attempts. Please wait a few minutes or reset your password, then try again.';
+  if (has('network-request-failed')) return 'Network problem. Please check your internet connection and try again.';
+  if (has('email-already-in-use')) return 'An account with this email already exists. Try signing in instead.';
+  if (has('weak-password')) return 'Password is too weak. Please use at least 6 characters.';
+  if (has('requires-recent-login')) return 'For security, please sign in again and retry.';
+  console.error('Unmapped auth error:', err);
+  return 'Something went wrong. Please try again.';
+}
+
 async function handleLogin() {
   const emailInput = document.getElementById('loginEmail');
   const passwordInput = document.getElementById('loginPassword');
@@ -784,6 +1405,12 @@ async function handleLogin() {
   const email = emailInput.value.trim();
   const password = passwordInput.value.trim();
   const authError = document.getElementById('authError');
+  if (authError) authError.innerText = '';
+
+  if (!email || !password) {
+    if (authError) authError.innerText = 'Please enter your email and password.';
+    return;
+  }
 
   try {
     isFreshLoginAttempt = true;
@@ -791,7 +1418,7 @@ async function handleLogin() {
     await auth.signInWithEmailAndPassword(email, password);
   } catch (err) {
     isFreshLoginAttempt = false;
-    if (authError) authError.innerText = err.message;
+    if (authError) authError.innerText = friendlyAuthError(err);
   }
 }
 
@@ -817,11 +1444,12 @@ async function handleStudentRegister() {
     await logActivity(email, `Registered student account (${studentId} - Year ${entryYearLevel})`);
     alert("Student registration completed successfully!");
   } catch (err) {
-    if (authError) authError.innerText = err.message;
+    if (authError) authError.innerText = friendlyAuthError(err);
   }
 }
 
 function routeUserRole(role, userData) {
+  currentUserRole = role;
   const adminView = document.getElementById('adminView');
   const instructorView = document.getElementById('instructorView');
   const studentView = document.getElementById('studentView');
@@ -829,6 +1457,19 @@ function routeUserRole(role, userData) {
   if (adminView) adminView.classList.add('hidden');
   if (instructorView) instructorView.classList.add('hidden');
   if (studentView) studentView.classList.add('hidden');
+
+  // Sidebar shows ONLY the group for the verified Firestore role
+  const sidebarGroups = { admin: 'sidebarNavAdmin', instructor: 'sidebarNavInstructor', student: 'sidebarNavStudent' };
+  Object.values(sidebarGroups).forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('hidden');
+  });
+  const activeGroup = document.getElementById(sidebarGroups[role]);
+  updateSidebarUserCard(role, userData);
+  if (window.lucide) lucide.createIcons();
+  if (activeGroup) activeGroup.classList.remove('hidden');
+  const activeNav = activeGroup && activeGroup.querySelector('[data-subnav]');
+  if (activeNav && typeof activeNav.__selectDefault === 'function') activeNav.__selectDefault(); // each login starts on the first page
 
   if (role === 'admin') {
     if (adminView) adminView.classList.remove('hidden');
@@ -847,8 +1488,9 @@ function routeUserRole(role, userData) {
     loadStudentDashboard(currentStudentSchoolId, currentStudentFullName, userData);
     loadAvailableSubjectsForStudent();
     setupNotificationsListener(currentUserId);
+    setupStudentSubjectsListener(currentUserId);
   } else {
-    detachNotificationsListener();
+    setupNotificationsListener(currentUserId); // admin + instructor
   }
 }
 
@@ -950,6 +1592,9 @@ async function loadInstructorAssignedSubjects() {
 
     if (assignSnapshot.empty) {
       if (countBadge) countBadge.textContent = '0 active';
+      homeAssignments = [];
+      populateClassSwitcher();
+      loadInstructorHome();
       container.innerHTML = `
         <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">
           No assigned subjects found for your account. Please ask the ITE Admin to assign a subject to you.
@@ -968,7 +1613,21 @@ async function loadInstructorAssignedSubjects() {
 
     if (countBadge) countBadge.textContent = `${assignmentsList.length} active`;
 
+    const railCodes = [...new Set(assignmentsList.map((x) => x.subjectCode))];
+    const subjectByCode = {};
+    const enrollByCode = {};
+    await Promise.all(railCodes.map(async (c) => {
+      const [subDoc, enrollSnap] = await Promise.all([
+        db.collection('subjects').doc(c).get().catch(() => null),
+        db.collection('enrollments').where('subjectCode', '==', c).get().catch((err) => { console.warn("Could not load enrollments:", err); return null; })
+      ]);
+      subjectByCode[c] = subDoc && subDoc.exists ? subDoc.data() : null;
+      enrollByCode[c] = [];
+      if (enrollSnap) enrollSnap.forEach((d) => enrollByCode[c].push(d.data()));
+    }));
+
     let isFirst = true;
+    homeAssignments = [];
 
     for (const assignment of assignmentsList) {
       const code = assignment.subjectCode;
@@ -977,24 +1636,17 @@ async function loadInstructorAssignedSubjects() {
       let subjectName = code;
       let units = 3;
 
-      const subDoc = await db.collection('subjects').doc(code).get();
-      if (subDoc.exists) {
-        const sData = subDoc.data();
+      const sData = subjectByCode[code];
+      if (sData) {
         subjectName = sData.subjectName || code;
         units = sData.units || 3;
       }
 
       // Dynamic roster size = approved enrollments for this subject/section
       let studentCount = 0;
-      try {
-        const enrollSnap = await db.collection('enrollments').where('subjectCode', '==', code).get();
-        enrollSnap.forEach((d) => {
-          const e = d.data();
-          if (e.status === 'approved' && (section === 'ALL' || e.section === section)) studentCount++;
-        });
-      } catch (countErr) {
-        console.warn("Could not count enrolled students:", countErr);
-      }
+      (enrollByCode[code] || []).forEach((e) => {
+        if (e.status === 'approved' && (section === 'ALL' || e.section === section)) studentCount++;
+      });
 
       const card = document.createElement('div');
       card.className = isFirst ? CLASS_CARD_ACTIVE : CLASS_CARD_INACTIVE;
@@ -1007,12 +1659,15 @@ async function loadInstructorAssignedSubjects() {
         <div class="text-[11px] text-slate-500">${Number(units) || 0} units · ${studentCount} student${studentCount === 1 ? '' : 's'}</div>
       `;
       container.appendChild(card);
+      homeAssignments.push({ code, section, subjectName, card });
 
       if (isFirst) {
         selectSubject(code, subjectName, section, card);
         isFirst = false;
       }
     }
+    populateClassSwitcher();
+    loadInstructorHome(enrollByCode);
   } catch (err) {
     console.error("Error loading instructor assigned subjects:", err);
   }
@@ -1022,6 +1677,7 @@ async function selectSubject(code, title, section = 'ALL', cardElement = null) {
   activeSubjectCode = code;
   activeSubjectTitle = title;
   activeInstructorSectionFilter = section;
+  syncClassSwitcher();
 
   liveRecordSearchTerm = '';
   const searchInput = document.getElementById('searchStudentInput');
@@ -1035,17 +1691,21 @@ async function selectSubject(code, title, section = 'ALL', cardElement = null) {
 
   updateClassHeader();
 
+  // Start the grid + requests loads right away; weights are applied (and the grid refreshed) when they arrive
+  loadInstructorGradesFromFirestore(code, section);
+  loadPendingEnrollments(code);
+
   try {
     let gf = null;
-    const formulaDoc = await db.collection('instructorFormulas').doc(`${currentUserId}_${code}`).get();
+    const [formulaDoc, subDoc] = await Promise.all([
+      db.collection('instructorFormulas').doc(`${currentUserId}_${code}`).get(),
+      db.collection('subjects').doc(code).get().catch(() => null)
+    ]);
 
     if (formulaDoc.exists && formulaDoc.data().gradingFormula) {
       gf = formulaDoc.data().gradingFormula;
-    } else {
-      const subDoc = await db.collection('subjects').doc(code).get();
-      if (subDoc.exists && subDoc.data().gradingFormula) {
-        gf = subDoc.data().gradingFormula;
-      }
+    } else if (subDoc && subDoc.exists && subDoc.data().gradingFormula) {
+      gf = subDoc.data().gradingFormula;
     }
 
     if (gf) {
@@ -1057,25 +1717,25 @@ async function selectSubject(code, title, section = 'ALL', cardElement = null) {
       const total = (gf.weightLab || 0) + (gf.weightQuizzes || 0) + (gf.weightOutput || 0) + (gf.weightExam || 0);
       const totalIndicator = document.getElementById('weightTotalIndicator');
       if (totalIndicator) totalIndicator.textContent = `Total: ${total}%`;
+      refreshWeightIndicator();
+      refreshGridComputedCells();
     }
   } catch (e) {
     console.warn("Could not load formula config:", e);
   }
-
-  loadInstructorGradesFromFirestore(code, section);
-  loadPendingEnrollments(code);
 }
 
 // ------------------------------------------------------------------
 // LIVE CLASS RECORD RENDERER (faculty)
 // ------------------------------------------------------------------
 
+const TEXT_CELL_CLASS = "px-2 py-1.5 rounded-md bg-slate-950 border border-slate-800 text-white text-xs font-bold text-left focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500";
 const LIVE_INPUT_CLASS = "w-16 px-2 py-1.5 rounded-md bg-slate-950 border border-slate-800 text-white text-xs font-mono font-bold text-center focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500";
 
 function emptyLiveRow(messageHtml) {
   return `
     <tr>
-      <td colspan="7" class="px-4 py-12 text-center text-slate-500 italic">${messageHtml}</td>
+      <td colspan="11" class="px-4 py-12 text-center text-slate-500 italic">${messageHtml}</td>
     </tr>
   `;
 }
@@ -1086,6 +1746,9 @@ function liveRowStateLabel(row) {
 }
 
 function liveStandingHtml(row, stats) {
+  if (isNotGradedRow(row)) {
+    return `<span class="inline-flex items-center justify-center px-2.5 py-1 rounded-md text-[10px] font-extrabold uppercase tracking-wider leading-none bg-slate-800 text-slate-400 border border-slate-700">NOT GRADED</span>`;
+  }
   const badge = stats.isPassing
     ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
     : 'bg-rose-500/15 text-rose-400 border border-rose-500/30';
@@ -1098,6 +1761,7 @@ function liveStandingHtml(row, stats) {
 function renderLiveClassRecord() {
   const tbody = document.getElementById('previewBody');
   if (!tbody) return;
+  updateGridSummary();
 
   if (!parsedGradeData.length) {
     tbody.innerHTML = liveRecordEmptyHtml || emptyLiveRow('No grade sheet parsed yet. Select an assigned class and import an Excel file to view grades.');
@@ -1122,20 +1786,25 @@ function renderLiveClassRecord() {
   const fragment = document.createDocumentFragment();
 
   visible.forEach(({ row, index }) => {
-    const finalsVal = row.finals !== undefined ? row.finals : row.final;
-    const stats = computeGradeStats(row.prelim, row.midterm, finalsVal);
+    const stats = computeFacultyRowStats(row);
+    const numCell = (f, v, ph = '') => `<input type="number" min="0" max="100" step="0.01" data-field="${f}" value="${v}" placeholder="${ph}" class="${LIVE_INPUT_CLASS}" />`;
+    const catVal = (f) => (toFiniteOrNull(row[f]) === null ? '' : toFiniteOrNull(row[f]));
 
     const tr = document.createElement('tr');
-    tr.className = "hover:bg-slate-800/40 transition-colors cursor-pointer";
+    tr.className = "hover:bg-slate-800/40 transition-colors cursor-pointer divide-x divide-slate-800/50";
     tr.title = "Click a row to view the itemized assessment breakdown";
     tr.dataset.rowIndex = String(index);
     tr.innerHTML = `
-      <td class="px-4 py-3 font-mono text-xs text-slate-400 whitespace-nowrap">${escapeHtml(row.studentId || 'N/A')}</td>
-      <td class="px-4 py-3 font-bold text-white whitespace-nowrap">${escapeHtml(row.fullName || 'Unnamed Student')}</td>
-      <td class="px-4 py-3"><input type="number" min="0" max="100" step="0.01" data-field="prelim" value="${stats.prelim}" class="${LIVE_INPUT_CLASS}" /></td>
-      <td class="px-4 py-3"><input type="number" min="0" max="100" step="0.01" data-field="midterm" value="${stats.midterm}" class="${LIVE_INPUT_CLASS}" /></td>
-      <td class="px-4 py-3"><input type="number" min="0" max="100" step="0.01" data-field="finals" value="${stats.finals}" class="${LIVE_INPUT_CLASS}" /></td>
-      <td data-cell="average" class="px-4 py-3 font-black font-mono ${stats.isPassing ? 'text-white' : 'text-rose-400'}">${stats.averageDisplay}</td>
+      <td class="px-2 py-2"><input type="text" data-field="studentId" value="${escapeHtml(row.studentId || '')}" placeholder="Student ID" class="${TEXT_CELL_CLASS} w-32 font-mono" /></td>
+      <td class="px-2 py-2"><input type="text" data-field="fullName" value="${escapeHtml(row.fullName || '')}" placeholder="Student name" class="${TEXT_CELL_CLASS} w-56" /></td>
+      <td class="px-2 py-2">${numCell('prelim', stats.prelim)}</td>
+      <td class="px-2 py-2">${numCell('midterm', stats.midterm)}</td>
+      <td class="px-2 py-2">${numCell('finals', stats.finals)}</td>
+      <td class="px-2 py-2">${numCell('labScore', catVal('labScore'), '-')}</td>
+      <td class="px-2 py-2">${numCell('quizzesScore', catVal('quizzesScore'), '-')}</td>
+      <td class="px-2 py-2">${numCell('oralRecitationScore', catVal('oralRecitationScore'), '-')}</td>
+      <td class="px-2 py-2">${numCell('attendanceScore', catVal('attendanceScore'), '-')}</td>
+      <td data-cell="average" class="px-4 py-3 font-black font-mono ${isNotGradedRow(row) ? 'text-slate-500' : stats.isPassing ? 'text-white' : 'text-rose-400'}">${isNotGradedRow(row) ? '—' : stats.averageDisplay}</td>
       <td data-cell="standing" class="px-4 py-3 whitespace-nowrap">${liveStandingHtml(row, stats)}</td>
     `;
     fragment.appendChild(tr);
@@ -1151,7 +1820,7 @@ async function loadInstructorGradesFromFirestore(subjectCode, section = activeIn
 
   tbody.innerHTML = `
     <tr>
-      <td colspan="7" class="px-4 py-8 text-center text-slate-400 animate-pulse">Loading grades for Section ${escapeHtml(section)}...</td>
+      <td colspan="11" class="px-4 py-8 text-center text-slate-400 animate-pulse">Loading grades for Section ${escapeHtml(section)}...</td>
     </tr>
   `;
 
@@ -1160,27 +1829,38 @@ async function loadInstructorGradesFromFirestore(subjectCode, section = activeIn
       ? ['1S', '1st Semester']
       : ['2S', '2nd Semester'];
 
+    const [enrollAllSnap, snapshot] = await Promise.all([
+      db.collection('enrollments').where('subjectCode', '==', subjectCode).get(),
+      db.collection('grades')
+        .where('classId', '==', subjectCode)
+        .where('semester', 'in', semQueryValues)
+        .get()
+    ]);
+
+    const enrollAll = [];
+    enrollAllSnap.forEach((d) => enrollAll.push(d.data()));
+
     let sectionStudentIds = null;
     if (section && section !== 'ALL') {
-      const enrollSnap = await db.collection('enrollments')
-        .where('subjectCode', '==', subjectCode)
-        .where('section', '==', section)
-        .get();
-
       sectionStudentIds = new Set();
-      enrollSnap.forEach(doc => {
-        const data = doc.data();
-        if (data.studentId) sectionStudentIds.add(String(data.studentId).trim());
+      enrollAll.forEach((en) => {
+        if (en.section === section && en.studentId) sectionStudentIds.add(String(en.studentId).trim());
       });
     }
 
-    const snapshot = await db.collection('grades')
-      .where('classId', '==', subjectCode)
-      .where('semester', 'in', semQueryValues)
-      .get();
+    const roster = rosterFromEnrollments(enrollAll, section);
+    renderStudentRoster(roster);
 
     liveRecordDirty = false;
     setFacultySyncState('synced');
+
+    if (snapshot.empty && roster.length) {
+      parsedGradeData = mergeRosterIntoGrid(roster, []);
+      liveRecordEmptyHtml = '';
+      renderLiveClassRecord();
+      renderInstructorAnalytics([]);
+      return;
+    }
 
     if (snapshot.empty) {
       parsedGradeData = [];
@@ -1231,6 +1911,7 @@ async function loadInstructorGradesFromFirestore(subjectCode, section = activeIn
     gradesByStudent.forEach((g) => {
       parsedGradeData.push(g);
     });
+    parsedGradeData = mergeRosterIntoGrid(roster, parsedGradeData);
 
     liveRecordEmptyHtml = parsedGradeData.length === 0
       ? emptyLiveRow(`No enrolled students in Section [${escapeHtml(section)}] have saved grades yet.`)
@@ -1259,6 +1940,7 @@ function destroyChartSafely(chartInstance) {
 }
 
 function renderInstructorAnalytics(grades) {
+  grades = (grades || []).filter((r) => !isNotGradedRow(r));
   const gradeCanvas = document.getElementById('instructorGradeDistributionChart');
   const passFailCanvas = document.getElementById('instructorPassFailChart');
 
@@ -1485,7 +2167,8 @@ function processMultiTabExcel(workbook) {
       prelim: parseFloat(prelim.toFixed(2)),
       midterm: parseFloat(midterm.toFixed(2)),
       finals: parseFloat(finals.toFixed(2)),
-      ...extractComponentFields(headers, row)
+      ...extractComponentFields(headers, row),
+      ...extractCategoryScores(headers, row)
     });
   }
 
@@ -1544,7 +2227,8 @@ function processSingleTabExcel(workbook) {
       prelim: parseFloat(prelim.toFixed(2)),
       midterm: parseFloat(midterm.toFixed(2)),
       finals: parseFloat(finals.toFixed(2)),
-      ...extractComponentFields(headers, row)
+      ...extractComponentFields(headers, row),
+      ...extractCategoryScores(headers, row)
     });
   }
 
@@ -1565,8 +2249,9 @@ function renderParsedGradesToTable() {
   renderLiveClassRecord();
 }
 
-async function buildRegisteredStudentIndex(subjectCode) {
+async function buildRegisteredStudentIndex(subjectCode, rows = []) {
   const index = new Map();
+  const knownIds = new Set();
 
   const enrollSnapshot = await db.collection('enrollments')
     .where('subjectCode', '==', subjectCode)
@@ -1574,18 +2259,42 @@ async function buildRegisteredStudentIndex(subjectCode) {
   enrollSnapshot.forEach((doc) => {
     const e = doc.data();
     const key = normalizeNameKey(e.fullName);
+    if (e.studentId) knownIds.add(String(e.studentId).trim());
     if (key && e.studentId) {
       index.set(key, { studentUid: e.studentUid, studentId: e.studentId, fullName: e.fullName });
     }
   });
 
-  const usersSnapshot = await db.collection('users').where('role', '==', 'student').get();
-  usersSnapshot.forEach((doc) => {
-    const u = doc.data();
-    const key = normalizeNameKey(u.fullName);
-    if (key && u.studentId && !index.has(key)) {
-      index.set(key, { studentUid: doc.id, studentId: u.studentId, fullName: u.fullName });
+  // Previously ALL student accounts were read here. Now only students that the rows reference
+  // but who are not enrolled in this subject are looked up (by ID, or by name for legacy name-keyed rows).
+  const lookups = [];
+  const queued = new Set();
+  rows.forEach((row) => {
+    if (isNotGradedRow(row)) return;
+    const sid = String(row.studentId || '').trim();
+    const nameKey = normalizeNameKey(row.fullName);
+    if (!sid) return;
+    if (sid === nameKey) {
+      if (nameKey && !index.has(nameKey) && !queued.has('n:' + nameKey)) {
+        queued.add('n:' + nameKey);
+        lookups.push(db.collection('users').where('role', '==', 'student').where('fullName', '==', String(row.fullName).trim()).limit(1).get());
+      }
+    } else if (!knownIds.has(sid) && !queued.has('i:' + sid)) {
+      queued.add('i:' + sid);
+      lookups.push(db.collection('users').where('role', '==', 'student').where('studentId', '==', sid).limit(1).get());
     }
+  });
+
+  const results = await Promise.all(lookups.slice(0, 40).map((p) => p.catch(() => null)));
+  results.forEach((snap) => {
+    if (!snap) return;
+    snap.forEach((doc) => {
+      const u = doc.data();
+      const key = normalizeNameKey(u.fullName);
+      if (key && u.studentId && !index.has(key)) {
+        index.set(key, { studentUid: doc.id, studentId: u.studentId, fullName: u.fullName });
+      }
+    });
   });
 
   return index;
@@ -1622,11 +2331,14 @@ async function saveDraftGrades() {
       });
     }
 
-    const registeredIndex = await buildRegisteredStudentIndex(activeSubjectCode);
+    const registeredIndex = await buildRegisteredStudentIndex(activeSubjectCode, parsedGradeData);
     const batch = db.batch();
     let savedCount = 0;
 
     parsedGradeData.forEach((row) => {
+      if (!String(row.studentId || '').trim() || !String(row.fullName || '').trim()) return; // incomplete row
+      if (isNotGradedRow(row)) return; // roster placeholder: nothing entered yet
+      queueRenamedDocCleanup(row, batch);
       const effectiveStudentId = resolveEffectiveStudentId(row, activeSubjectCode, registeredIndex, batch);
       const cleanStudentId = String(effectiveStudentId).trim();
 
@@ -1649,6 +2361,7 @@ async function saveDraftGrades() {
         finals: stats.finals,
 
         ...pickComponentFields(row),
+        ...pickCategoryScoreFields(row),
 
         semester: normalizeSemester(activeSemester),
         schoolYear: CURRENT_SCHOOL_YEAR,
@@ -1688,11 +2401,23 @@ async function releaseGrades() {
       });
     }
 
-    const registeredIndex = await buildRegisteredStudentIndex(activeSubjectCode);
+    const [registeredIndex, existingSnap] = await Promise.all([
+      buildRegisteredStudentIndex(activeSubjectCode, parsedGradeData),
+      db.collection('grades').where('classId', '==', activeSubjectCode).get()
+        .catch((e) => { console.warn("Could not read existing grades for change detection:", e); return null; })
+    ]);
+    const uidByStudentId = new Map();
+    registeredIndex.forEach((v) => { if (v.studentId && v.studentUid) uidByStudentId.set(String(v.studentId).trim(), v.studentUid); });
+    const existingById = new Map();
+    if (existingSnap) existingSnap.forEach((d) => existingById.set(d.id, d.data()));
+    const notifyItems = [];
     const batch = db.batch();
     let releasedCount = 0;
 
     parsedGradeData.forEach((row) => {
+      if (!String(row.studentId || '').trim() || !String(row.fullName || '').trim()) return; // incomplete row
+      if (isNotGradedRow(row)) return; // roster placeholder: nothing entered yet
+      queueRenamedDocCleanup(row, batch);
       const effectiveStudentId = resolveEffectiveStudentId(row, activeSubjectCode, registeredIndex, batch);
       const cleanStudentId = String(effectiveStudentId).trim();
 
@@ -1715,6 +2440,7 @@ async function releaseGrades() {
         finals: stats.finals,
 
         ...pickComponentFields(row),
+        ...pickCategoryScoreFields(row),
 
         semester: normalizeSemester(activeSemester),
         schoolYear: CURRENT_SCHOOL_YEAR,
@@ -1722,10 +2448,25 @@ async function releaseGrades() {
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
 
+      const prev = existingById.get(docId);
+      const changed = !prev || !prev.isReleased || ['prelim', 'midterm', 'finals'].some((k) => Number(prev[k]) !== Number(stats[k])) ||
+        GRID_SCORE_FIELDS.some((k) => (toFiniteOrNull(prev[k]) ?? null) !== (toFiniteOrNull(row[k]) ?? null));
+      const recipientUid = uidByStudentId.get(cleanStudentId);
+      if (changed && recipientUid) {
+        notifyItems.push({
+          recipientUid,
+          type: (!prev || !prev.isReleased) ? 'grade_released' : 'grade_updated',
+          title: (!prev || !prev.isReleased) ? 'Grades released' : 'Grades updated',
+          message: `Your ${(!prev || !prev.isReleased) ? 'official grades for' : 'grades in'} ${activeSubjectCode} ${(!prev || !prev.isReleased) ? 'have been released.' : 'were updated by your instructor.'}`,
+          subjectCode: activeSubjectCode
+        });
+      }
+
       releasedCount++;
     });
 
     await batch.commit();
+    await sendNotifications(notifyItems);
     await logActivity(currentUserEmail, `Released official grades for ${activeSubjectCode} [${activeInstructorSectionFilter}] (${releasedCount} records)`);
     alert(`Official grades successfully released for ${releasedCount} student(s) in Section ${activeInstructorSectionFilter}!`);
     loadInstructorGradesFromFirestore(activeSubjectCode, activeInstructorSectionFilter);
@@ -1990,23 +2731,42 @@ async function loadAdminDashboardData() {
       });
     }
 
-    loadActiveAssignmentsList();
+    renderAdminHomeActivity(recentLogsSnapshot);
+    loadActiveAssignmentsList({ assignmentsSnap: assignmentsSnapshot, subjectsSnap: subjectsSnapshot, facultySnap: facultySnapshot });
 
   } catch (err) {
     console.error("Error loading admin dashboard data:", err);
   }
 }
 
-async function loadActiveAssignmentsList() {
+async function loadActiveAssignmentsList(pre) {
   const container = document.getElementById('activeAssignmentsContainer');
   if (!container) return;
 
   try {
-    const [assignmentsSnap, usersSnap, subjectsSnap] = await Promise.all([
-      db.collection('assignments').get(),
-      db.collection('users').get(),
-      db.collection('subjects').get()
-    ]);
+    let assignmentsSnap, usersSnap, subjectsSnap;
+    if (pre) {
+      // Reuse what the admin dashboard already fetched; look up only assignees missing from the faculty list
+      assignmentsSnap = pre.assignmentsSnap;
+      subjectsSnap = pre.subjectsSnap;
+      const extra = [];
+      const known = new Set();
+      pre.facultySnap.forEach((d) => { known.add(d.id); extra.push(d); });
+      const missing = new Set();
+      assignmentsSnap.forEach((d) => {
+        const uid = d.data().facultyUid;
+        if (uid && !known.has(uid)) missing.add(uid);
+      });
+      const fetched = await Promise.all([...missing].map((uid) => db.collection('users').doc(uid).get().catch(() => null)));
+      fetched.forEach((d) => { if (d && d.exists) extra.push(d); });
+      usersSnap = { forEach: (fn) => extra.forEach(fn) };
+    } else {
+      [assignmentsSnap, usersSnap, subjectsSnap] = await Promise.all([
+        db.collection('assignments').get(),
+        db.collection('users').get(),
+        db.collection('subjects').get()
+      ]);
+    }
 
     if (assignmentsSnap.empty) {
       container.innerHTML = `
@@ -2502,22 +3262,23 @@ function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap =
   }
 
   let calculatedYearLevel = baseYear;
-  let headline = yearNames[baseYear];
   let subtext = '1st Semester • Good academic standing';
+  let promotionNote = '';
 
   if (hasPassed2ndSem && totalUnitsEarned >= FIRST_YEAR_UNITS_FOR_PROMOTION) {
     calculatedYearLevel = Math.max(baseYear, 2);
-    headline = `Promoted to ${yearNames[calculatedYearLevel]}`;
-    subtext = '1st Semester • Good academic standing';
+    promotionNote = `Promoted to ${yearNames[calculatedYearLevel]}`;
   } else if (totalUnitsEarned >= FIRST_SEM_UNITS_FOR_PROMOTION && !hasPassed2ndSem) {
-    headline = 'Promoted to 2nd Semester';
-    subtext = `${yearNames[baseYear]} • Good academic standing`;
+    subtext = '2nd Semester • Good academic standing';
+    promotionNote = 'Promoted to 2nd Semester';
   }
 
+  // Headline always states the student's CURRENT year level; promotion progress lives in Notifications
   return build({
     yearLevel: calculatedYearLevel,
     unitsCompleted: totalUnitsEarned,
-    headline,
+    headline: yearNames[calculatedYearLevel],
+    promotionNote,
     subtext,
     badgeText: `Regular • ${academicYearText}`,
     badgeClass: REGULAR_CLASS,
@@ -2532,6 +3293,8 @@ function renderYearLevelProgressionBanner(allGrades, subjectMap = {}) {
   const text = document.getElementById('studentStandingText');
 
   const progression = evaluateAcademicProgression(allGrades, currentStudentEntryYear, subjectMap);
+  latestProgression = progression;
+  renderNotificationPanel();
 
   if (banner && badge && text) {
     banner.classList.remove('hidden');
@@ -2542,6 +3305,80 @@ function renderYearLevelProgressionBanner(allGrades, subjectMap = {}) {
     text.textContent = progression.subtext;
   }
 }
+
+// ------------------------------------------------------------------
+// STUDENT DATA CACHE: one parallel fetch (subjects + this student's released grades + enrollments)
+// shared by the dashboard and the prospectus. Re-used for 5 minutes, cleared on logout / enrollment changes.
+// ------------------------------------------------------------------
+const STUDENT_DATA_TTL_MS = 5 * 60 * 1000;
+let studentDataCache = null;
+
+function invalidateStudentData() {
+  studentDataCache = null;
+}
+
+function getStudentData() {
+  const uid = currentUserId;
+  if (studentDataCache && studentDataCache.uid === uid && Date.now() - studentDataCache.ts < STUDENT_DATA_TTL_MS) {
+    return studentDataCache.promise;
+  }
+
+  const promise = (async () => {
+    let studentId = String(currentStudentSchoolId || '').trim();
+    let fullName = String(currentStudentFullName || '').trim();
+
+    if ((!studentId || !fullName) && uid) {
+      const uDoc = await db.collection('users').doc(uid).get();
+      if (uDoc.exists) {
+        const uData = uDoc.data();
+        studentId = String(uData.studentId || '').trim();
+        fullName = String(uData.fullName || '').trim();
+        currentStudentSchoolId = studentId;
+        currentStudentFullName = fullName;
+      }
+    }
+
+    const [subjectsSnapshot, gradeSnaps, enrollmentsSnapshot] = await Promise.all([
+      db.collection('subjects').get(),
+      Promise.all([
+        studentId ? db.collection('grades').where('isReleased', '==', true).where('studentId', '==', studentId).get() : null,
+        fullName ? db.collection('grades').where('isReleased', '==', true).where('fullName', '==', fullName).get() : null
+      ]),
+      uid ? db.collection('enrollments').where('studentUid', '==', uid).get() : null
+    ]);
+
+    const gradeDocsMap = new Map();
+    gradeSnaps.forEach((snap) => {
+      if (snap) snap.forEach((doc) => gradeDocsMap.set(doc.id, doc.data()));
+    });
+    const enrollments = [];
+    if (enrollmentsSnapshot) enrollmentsSnapshot.forEach((doc) => enrollments.push(doc.data()));
+
+    return { subjectsSnapshot, grades: Array.from(gradeDocsMap.values()), enrollments, studentId, fullName };
+  })();
+
+  studentDataCache = { uid, ts: Date.now(), promise };
+  promise.catch(() => {
+    if (studentDataCache && studentDataCache.promise === promise) studentDataCache = null;
+  });
+  return promise;
+}
+
+function computeStatusByCode(enrollments) {
+  const statusByCode = {};
+  enrollments.forEach((e) => {
+    if (e.subjectCode) {
+      const codeKey = e.subjectCode.trim().toUpperCase();
+      const existingStatus = statusByCode[codeKey];
+      if (!existingStatus || existingStatus === 'rejected' || e.status === 'pending' || e.status === 'approved') {
+        statusByCode[codeKey] = e.status;
+      }
+    }
+  });
+  return statusByCode;
+}
+
+const PROSPECTUS_SKELETON = Array.from({ length: 5 }, () => '<div class="h-14 rounded-lg bg-slate-800/50 animate-pulse"></div>').join('');
 
 async function loadStudentDashboard(studentId, fullName, userData = null) {
   const nameEl = document.getElementById('profileStudentName');
@@ -2578,14 +3415,8 @@ async function loadStudentDashboard(studentId, fullName, userData = null) {
       return;
     }
 
-    const [subjectsSnapshot, gradeSnapshots, enrollmentsSnapshot] = await Promise.all([
-      db.collection('subjects').get(),
-      Promise.all([
-        cleanStudentId ? db.collection('grades').where('isReleased', '==', true).where('studentId', '==', cleanStudentId).get() : null,
-        cleanFullName ? db.collection('grades').where('isReleased', '==', true).where('fullName', '==', cleanFullName).get() : null
-      ]),
-      currentUserId ? db.collection('enrollments').where('studentUid', '==', currentUserId).get() : null
-    ]);
+    const sd = await getStudentData();
+    const subjectsSnapshot = sd.subjectsSnapshot;
 
     const subjectMap = {};
     let totalCurriculumUnits = 0;
@@ -2597,16 +3428,7 @@ async function loadStudentDashboard(studentId, fullName, userData = null) {
       }
     });
 
-    const gradeDocsMap = new Map();
-    gradeSnapshots.forEach((snapshot) => {
-      if (snapshot) {
-        snapshot.forEach((doc) => {
-          gradeDocsMap.set(doc.id, doc.data());
-        });
-      }
-    });
-
-    const matchedGrades = Array.from(gradeDocsMap.values());
+    const matchedGrades = sd.grades.slice();
 
     const studentRecordsList = [];
     matchedGrades.forEach(g => {
@@ -2622,9 +3444,8 @@ async function loadStudentDashboard(studentId, fullName, userData = null) {
       });
     });
 
-    if (enrollmentsSnapshot) {
-      enrollmentsSnapshot.forEach(doc => {
-        const e = doc.data();
+    if (sd.enrollments.length) {
+      sd.enrollments.forEach((e) => {
         const codeKey = (e.subjectCode || '').toUpperCase().trim();
         const units = subjectMap[codeKey] ? Number(subjectMap[codeKey].units) || 3 : 3;
         if (e.status === 'approved' || e.status === 'pending') {
@@ -2709,7 +3530,7 @@ const COMPONENT_CATEGORIES = [
   { key: 'q', heading: 'Quizzes', label: 'Quiz' },
   { key: 'lab', heading: 'Laboratory Exercises', label: 'Lab Exercise' },
   { key: 'ass', heading: 'Assignments & Seatworks', label: 'Assignment' },
-  { key: 'out', heading: 'Major Output', label: 'Major Output' },
+  { key: 'out', heading: 'Oral Recitation', label: 'Oral Recitation' },
   { key: 'exam', heading: 'Major Exam', label: 'Major Exam' },
   { key: 'att', heading: 'Attendance / Participation', label: 'Attendance' }
 ];
@@ -2951,60 +3772,18 @@ async function loadAvailableSubjectsForStudent() {
   if (!container || !currentUserId) return;
 
   try {
-    let cleanStudentId = String(currentStudentSchoolId || '').trim();
-    let cleanFullName = String(currentStudentFullName || '').trim();
+    if (!container.children.length) container.innerHTML = PROSPECTUS_SKELETON;
 
-    if (!cleanStudentId || !cleanFullName) {
-      const uDoc = await db.collection('users').doc(currentUserId).get();
-      if (uDoc.exists) {
-        const uData = uDoc.data();
-        cleanStudentId = String(uData.studentId || '').trim();
-        cleanFullName = String(uData.fullName || '').trim();
-        currentStudentSchoolId = cleanStudentId;
-        currentStudentFullName = cleanFullName;
-      }
-    }
-
-    const [subjectsSnapshot, enrollmentsSnapshot, gradesSnapshot] = await Promise.all([
-      db.collection('subjects').get(),
-      db.collection('enrollments').where('studentUid', '==', currentUserId).get(),
-      db.collection('grades').where('isReleased', '==', true).get()
-    ]);
-
-    const statusByCode = {};
-    enrollmentsSnapshot.forEach((doc) => {
-      const e = doc.data();
-      if (e.subjectCode) {
-        const codeKey = e.subjectCode.trim().toUpperCase();
-        const existingStatus = statusByCode[codeKey];
-
-        if (!existingStatus || existingStatus === 'rejected' || e.status === 'pending' || e.status === 'approved') {
-          statusByCode[codeKey] = e.status;
-        }
-      }
-    });
+    const sd = await getStudentData();
+    const subjectsSnapshot = sd.subjectsSnapshot;
+    const statusByCode = computeStatusByCode(sd.enrollments);
 
     const passedSubjects = new Set();
-    const studentNameKey = normalizeNameKey(cleanFullName);
-
-    gradesSnapshot.forEach((doc) => {
-      const g = doc.data();
-      const docStudentId = String(g.studentId || '').trim();
-      const docNameKey = normalizeNameKey(g.fullName);
-
-      const isMatch = (cleanStudentId && docStudentId === cleanStudentId) ||
-                      (studentNameKey && docNameKey === studentNameKey);
-
-      if (isMatch) {
-        const finalsVal = g.finals !== undefined ? g.finals : g.final;
-        const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
-        const rawCode = g.classId || g.subjectCode || '';
-        const codeKey = String(rawCode).trim().toUpperCase();
-
-        if (stats.isPassing && codeKey) {
-          passedSubjects.add(codeKey);
-        }
-      }
+    sd.grades.forEach((g) => {
+      const finalsVal = g.finals !== undefined ? g.finals : g.final;
+      const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
+      const codeKey = String(g.classId || g.subjectCode || '').trim().toUpperCase();
+      if (stats.isPassing && codeKey) passedSubjects.add(codeKey);
     });
 
     container.innerHTML = '';
@@ -3170,6 +3949,7 @@ async function applySelectedSubjects() {
     await batch.commit();
     await logActivity(currentUserEmail, `Requested enrollment in ${subjectCodes.join(', ')} for Section ${cleanSection}`);
     alert(`Enrollment request(s) submitted for: ${subjectCodes.join(', ')} (Section: ${cleanSection}).`);
+    invalidateStudentData(); // enrollments changed: next load must be fresh
     loadAvailableSubjectsForStudent();
   } catch (err) {
     console.error("Error applying for selected subjects:", err);
@@ -3253,11 +4033,23 @@ async function loadPendingEnrollments(subjectCode) {
 
 async function updateEnrollmentStatus(enrollmentId, newStatus, subjectCode) {
   try {
-    await db.collection('enrollments').doc(enrollmentId).update({
+    const enrollRef = db.collection('enrollments').doc(enrollmentId);
+    const enrollSnap = await enrollRef.get();
+    const enrollData = enrollSnap.exists ? enrollSnap.data() : null;
+    await enrollRef.update({
       status: newStatus,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     await logActivity(currentUserEmail, `Set enrollment ${enrollmentId} status to ${newStatus}`);
+    if (enrollData && enrollData.studentUid && (newStatus === 'approved' || newStatus === 'rejected')) {
+      await sendNotifications([{
+        recipientUid: enrollData.studentUid,
+        type: newStatus === 'approved' ? 'enrollment_approved' : 'enrollment_rejected',
+        title: newStatus === 'approved' ? 'Enrollment approved' : 'Enrollment rejected',
+        message: `Your enrollment request for ${enrollData.subjectCode || subjectCode || 'a subject'} was ${newStatus}.`,
+        subjectCode: enrollData.subjectCode || subjectCode || ''
+      }]);
+    }
     loadPendingEnrollments(subjectCode || activeSubjectCode);
   } catch (err) {
     console.error("Update Enrollment Status Error:", err);
@@ -3283,39 +4075,121 @@ function detachNotificationsListener() {
     notificationsUnsubscribe();
   }
   notificationsUnsubscribe = null;
+  notificationDocs = [];
+  invalidateStudentData();
+  if (typeof studentSubjectsUnsubscribe === 'function') studentSubjectsUnsubscribe();
+  studentSubjectsUnsubscribe = null;
+}
+
+let notificationDocs = [];
+let latestProgression = null;
+
+function toggleNotificationDrawer(open) {
+  const drawer = document.getElementById('notificationDrawer');
+  const overlay = document.getElementById('notificationOverlay');
+  if (drawer) drawer.classList.toggle('hidden', !open);
+  if (overlay) overlay.classList.toggle('hidden', !open);
 }
 
 function renderNotifications(snapshot) {
+  notificationDocs = [];
+  snapshot.forEach((doc) => notificationDocs.push({ id: doc.id, ...doc.data() }));
+  notificationDocs.sort((x, y) => {
+    const tx = x.createdAt && x.createdAt.toMillis ? x.createdAt.toMillis() : 0;
+    const ty = y.createdAt && y.createdAt.toMillis ? y.createdAt.toMillis() : 0;
+    return ty - tx;
+  });
+  renderNotificationPanel();
+}
+
+function renderNotificationPanel() {
+  renderStudentHomeNotifs();
+  const count = notificationDocs.length;
   const badge = document.getElementById('notificationBadge');
-  const panel = document.getElementById('notificationPanel');
-
   if (badge) {
-    if (snapshot.size > 0) {
-      badge.textContent = String(snapshot.size);
-      badge.classList.remove('hidden');
-    } else {
-      badge.classList.add('hidden');
-    }
+    badge.textContent = String(count);
+    badge.classList.toggle('hidden', count === 0);
   }
+  document.querySelectorAll('[data-notif-count]').forEach((el) => {
+    el.textContent = String(count);
+    el.classList.toggle('hidden', count === 0);
+  });
 
+  const panel = document.getElementById('notificationPanel');
   if (!panel) return;
   panel.innerHTML = '';
 
-  snapshot.forEach((doc) => {
-    const n = doc.data();
+  // Derived (not stored) promotion-progress card for students
+  if (currentUserRole === 'student' && latestProgression) {
+    const p = latestProgression;
+    const card = document.createElement('div');
+    card.className = "p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 space-y-1";
+    card.innerHTML = `
+      <div class="text-xs font-bold text-emerald-400">Promotion progress</div>
+      <div class="text-xs text-slate-300">${escapeHtml(p.promotionNote || 'No promotion yet')} • Current standing: ${escapeHtml(p.headline)}</div>
+      <div class="text-[11px] text-slate-500">${escapeHtml(String(p.unitsCompleted))} units completed</div>
+    `;
+    panel.appendChild(card);
+  }
+
+  if (!count) {
+    const empty = document.createElement('div');
+    empty.className = "text-xs text-slate-500 text-center py-6";
+    empty.textContent = "You're all caught up.";
+    panel.appendChild(empty);
+    return;
+  }
+
+  notificationDocs.forEach((n) => {
+    const when = n.createdAt && n.createdAt.toDate ? n.createdAt.toDate().toLocaleString() : '';
     const card = document.createElement('div');
     card.className = "p-3 rounded-lg border border-slate-800 bg-slate-950 space-y-1";
     card.innerHTML = `
       <div class="text-xs font-bold text-emerald-400">${escapeHtml(n.title || '')}</div>
       <div class="text-xs text-slate-300">${escapeHtml(n.message || '')}</div>
-      <button onclick="markNotificationRead('${doc.id}')" class="mt-1 px-2.5 py-1 text-[11px] font-bold bg-slate-800 text-slate-300 rounded-lg">Mark as Read</button>
+      ${when ? `<div class="text-[10px] text-slate-500">${escapeHtml(when)}</div>` : ''}
+      <button onclick="markNotificationRead('${n.id}')" class="mt-1 px-2.5 py-1 text-[11px] font-bold bg-slate-800 text-slate-300 rounded-lg">Mark as Read</button>
     `;
     panel.appendChild(card);
   });
 }
 
 async function markNotificationRead(id) {
-  await db.collection('notifications').doc(id).update({ isRead: true });
+  try {
+    await db.collection('notifications').doc(id).update({ isRead: true });
+  } catch (err) {
+    console.error("Mark notification read error:", err);
+  }
+}
+
+async function markAllNotificationsRead() {
+  if (!notificationDocs.length) return;
+  try {
+    const batch = db.batch();
+    notificationDocs.forEach((n) => batch.update(db.collection('notifications').doc(n.id), { isRead: true }));
+    await batch.commit();
+  } catch (err) {
+    console.error("Mark all notifications read error:", err);
+  }
+}
+
+// Notification writes never block the main action; failures are logged only.
+async function sendNotifications(items) {
+  if (!items.length) return;
+  try {
+    const batch = db.batch();
+    items.forEach((n) => {
+      batch.set(db.collection('notifications').doc(), {
+        ...n,
+        isRead: false,
+        createdBy: currentUserId || '',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    });
+    await batch.commit();
+  } catch (err) {
+    console.warn("Could not send notifications:", err);
+  }
 }
 
 async function logActivity(user, action) {
