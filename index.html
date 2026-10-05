@@ -107,6 +107,18 @@
       .subnav-btn.is-active { background: rgb(16 185 129 / 0.15); color: rgb(52 211 153); box-shadow: inset 3px 0 0 rgb(16 185 129); }
       html { scroll-behavior: smooth; }
       [data-page][hidden], [data-page-not][hidden] { display: none !important; }
+      /* Printing: only #printRoot is printed (student grade slip / instructor class record) */
+      #printRoot { display: none; }
+      @media print {
+        html, body { background: #fff !important; color: #000 !important; height: auto !important; overflow: visible !important; }
+        body > *:not(#printRoot) { display: none !important; }
+        #printRoot { display: block !important; font-family: Arial, Helvetica, sans-serif; color: #000; }
+        #printRoot table { border-collapse: collapse; width: 100%; }
+        #printRoot th, #printRoot td { border: 1px solid #444; padding: 4px 6px; font-size: 11px; }
+        #printRoot th { background: #eee !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        #printRoot tr { page-break-inside: avoid; }
+        #printRoot thead { display: table-header-group; }
+      }
       .subnav-btn { display: flex; align-items: center; gap: 0.65rem; }
       #roleSidebar { transition: width .2s ease; }
       @media (min-width: 1024px) {
@@ -160,10 +172,13 @@
             class="relative rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl group max-w-2xl w-full hover-card-glow"
           >
             <img
-              src="ITEStaff.png"
+              src="ITEStaff.webp"
+              width="1600"
+              height="840"
+              decoding="async"
               alt="ITE Department Faculty"
               class="w-full h-auto object-cover group-hover:scale-105 transition-all duration-500 opacity-90"
-              onError="this.src='https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=1200&q=80'"
+              onError="if(!this.dataset.fb){this.dataset.fb=1;this.src='ITEStaff.png';}else{this.src='https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=1200&q=80';}"
             />
             <div
               class="absolute inset-0 bg-gradient-to-t from-[#090d16] via-transparent to-transparent"
@@ -525,6 +540,7 @@
               <button type="button" data-page="assignments" class="subnav-btn"><i data-lucide="link" class="w-4 h-4 shrink-0"></i><span class="nav-label">Course Assignments</span></button>
               <button type="button" data-page="atrisk" class="subnav-btn"><i data-lucide="flag" class="w-4 h-4 shrink-0"></i><span class="nav-label">At-Risk Tracker</span></button>
               <button type="button" data-page="logs" class="subnav-btn"><i data-lucide="scroll-text" class="w-4 h-4 shrink-0"></i><span class="nav-label">Audit Logs</span></button>
+              <button type="button" data-page="settings" class="subnav-btn"><i data-lucide="settings" class="w-4 h-4 shrink-0"></i><span class="nav-label">Settings</span></button>
               <button type="button" onclick="toggleNotificationDrawer(true)" class="subnav-btn"><i data-lucide="bell" class="w-4 h-4 shrink-0"></i><span class="nav-label">Notifications</span><span data-notif-count class="hidden ml-auto px-1.5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black">0</span></button>
             </nav>
           </div>
@@ -803,6 +819,13 @@
                   breakdown.
                 </p>
               </div>
+              <button
+                type="button"
+                onclick="printStudentGradeSlip()"
+                class="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-emerald-500/30 text-xs font-bold text-emerald-400 transition-all whitespace-nowrap"
+              >
+                Print grade slip
+              </button>
             </div>
 
             <!-- 1st Semester Table -->
@@ -1141,6 +1164,13 @@
                         class="w-44 pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                       />
                     </div>
+                    <button
+                      onclick="printClassRecord()"
+                      type="button"
+                      class="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-bold text-slate-200 transition-all"
+                    >
+                      Print class record
+                    </button>
                     <button
                       onclick="addGridRow()"
                       type="button"
@@ -1672,6 +1702,28 @@
             </div>
           </div>
 
+          <!-- Academic settings (admin): school year, passing grade, promotion thresholds -->
+          <div data-page="settings" class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-4">
+            <div>
+              <h3 class="text-sm font-black text-white uppercase tracking-wider">Academic settings</h3>
+              <p class="text-xs text-slate-500">These values were previously fixed in the code. Changes apply system-wide the next time each user signs in.</p>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+              <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="settingSchoolYear">School year</label><input id="settingSchoolYear" type="text" placeholder="2026-2027" maxlength="9" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500" /></div>
+              <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="settingPassing">Passing grade</label><input id="settingPassing" type="number" min="50" max="100" step="0.5" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500" /></div>
+              <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="settingFirstSemUnits">Units for 2nd semester</label><input id="settingFirstSemUnits" type="number" min="1" max="200" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500" /></div>
+              <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="settingFirstYearUnits">Units for next year level</label><input id="settingFirstYearUnits" type="number" min="1" max="200" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500" /></div>
+            </div>
+            <ul class="text-[11px] text-slate-500 list-disc pl-5 space-y-0.5">
+              <li>The school year is stamped on grades saved from now on; older records keep their own year.</li>
+              <li>Changing the passing grade changes PASS / AT RISK for existing records everywhere.</li>
+            </ul>
+            <div class="flex items-center gap-3">
+              <button type="button" onclick="saveAcademicSettings()" class="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider transition-all">Save settings</button>
+              <span id="settingsUpdatedInfo" class="text-[11px] text-slate-500"></span>
+            </div>
+          </div>
+
           <!-- System Activity & Audit Logs -->
           <div id="adminSecLogs" data-page="logs" style="scroll-margin-top:6rem"
             class="glass-panel p-6 rounded-2xl border border-slate-800 space-y-4 hover-card-glow"
@@ -2008,5 +2060,6 @@
     </script>
 
     <script src="app.js"></script>
+    <div id="printRoot" aria-hidden="true"></div>
   </body>
 </html>

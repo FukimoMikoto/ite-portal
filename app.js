@@ -97,9 +97,11 @@ let isAdminProspectusItOnly = false;
 let isItOnlyFilterActive = false;
 
 // Academic configuration
-const CURRENT_SCHOOL_YEAR = '2026-2027';
-const FIRST_SEM_UNITS_FOR_PROMOTION = 8;
-const FIRST_YEAR_UNITS_FOR_PROMOTION = 16;
+// Academic constants: defaults below are used until the admin-managed settings/academic record is loaded
+const ACADEMIC_DEFAULTS = { schoolYear: '2026-2027', passingGrade: 75, promotionFirstSemUnits: 8, promotionFirstYearUnits: 16 };
+let CURRENT_SCHOOL_YEAR = ACADEMIC_DEFAULTS.schoolYear;
+let FIRST_SEM_UNITS_FOR_PROMOTION = ACADEMIC_DEFAULTS.promotionFirstSemUnits;
+let FIRST_YEAR_UNITS_FOR_PROMOTION = ACADEMIC_DEFAULTS.promotionFirstYearUnits;
 
 // ------------------------------------------------------------------
 // 1. ISOLATED PORTAL ROUTER & HELPER FUNCTIONS
@@ -182,7 +184,7 @@ function buildEnrollmentDocId(subjectCode, section, studentUid) {
   return `${subjectCode}_${cleanSection}_${studentUid}`;
 }
 
-const PASSING_THRESHOLD = 75;
+let PASSING_THRESHOLD = ACADEMIC_DEFAULTS.passingGrade;
 
 function escapeHtml(value) {
   const str = (value === null || value === undefined) ? '' : String(value);
@@ -536,6 +538,240 @@ function renderStudentHomeNotifs() {
     lines.push(`<div class="py-1.5 border-b border-slate-800/60 last:border-0"><div class="text-xs font-bold text-white">${escapeHtml(n.title || '')}</div><div class="text-[11px] text-slate-400">${escapeHtml(n.message || '')}</div></div>`);
   });
   box.innerHTML = lines.length ? lines.join('') : "You're all caught up.";
+}
+
+// ------------------------------------------------------------------
+// ACADEMIC SETTINGS (settings/academic): school year, passing grade, promotion thresholds
+// ------------------------------------------------------------------
+function applyAcademicSettings(s) {
+  const d = ACADEMIC_DEFAULTS;
+  const src = s || {};
+  const pass = Number(src.passingGrade);
+  const semUnits = parseInt(src.promotionFirstSemUnits, 10);
+  const yearUnits = parseInt(src.promotionFirstYearUnits, 10);
+  CURRENT_SCHOOL_YEAR = /^\d{4}-\d{4}$/.test(String(src.schoolYear || '')) ? src.schoolYear : d.schoolYear;
+  PASSING_THRESHOLD = Number.isFinite(pass) && pass >= 50 && pass <= 100 ? pass : d.passingGrade;
+  FIRST_SEM_UNITS_FOR_PROMOTION = Number.isFinite(semUnits) && semUnits > 0 ? semUnits : d.promotionFirstSemUnits;
+  FIRST_YEAR_UNITS_FOR_PROMOTION = Number.isFinite(yearUnits) && yearUnits > 0 ? yearUnits : d.promotionFirstYearUnits;
+}
+
+// Never rejects: if the record is missing or unreadable the built-in defaults keep the system working
+let academicSettingsMeta = null;
+async function loadAcademicSettings() {
+  try {
+    const snap = await db.collection('settings').doc('academic').get();
+    academicSettingsMeta = snap.exists ? snap.data() : null;
+    applyAcademicSettings(academicSettingsMeta);
+  } catch (err) {
+    console.warn("Academic settings unavailable, using defaults:", err);
+    academicSettingsMeta = null;
+    applyAcademicSettings(null);
+  }
+}
+
+function renderAcademicSettingsForm() {
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  set('settingSchoolYear', CURRENT_SCHOOL_YEAR);
+  set('settingPassing', PASSING_THRESHOLD);
+  set('settingFirstSemUnits', FIRST_SEM_UNITS_FOR_PROMOTION);
+  set('settingFirstYearUnits', FIRST_YEAR_UNITS_FOR_PROMOTION);
+  const info = document.getElementById('settingsUpdatedInfo');
+  if (info) {
+    const when = academicSettingsMeta && academicSettingsMeta.updatedAt && academicSettingsMeta.updatedAt.toDate
+      ? academicSettingsMeta.updatedAt.toDate().toLocaleString() : '';
+    info.textContent = academicSettingsMeta && academicSettingsMeta.updatedBy
+      ? `Last updated by ${academicSettingsMeta.updatedBy}${when ? ' on ' + when : ''}`
+      : 'Using built-in defaults until you save.';
+  }
+}
+
+async function saveAcademicSettings() {
+  const val = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  const schoolYear = val('settingSchoolYear');
+  const passingGrade = Number(val('settingPassing'));
+  const semUnits = parseInt(val('settingFirstSemUnits'), 10);
+  const yearUnits = parseInt(val('settingFirstYearUnits'), 10);
+
+  const m = schoolYear.match(/^(\d{4})-(\d{4})$/);
+  if (!m || Number(m[2]) !== Number(m[1]) + 1) return alert("School year must look like 2026-2027 (the second year is one more than the first).");
+  if (!Number.isFinite(passingGrade) || passingGrade < 50 || passingGrade > 100) return alert("Passing grade must be a number from 50 to 100.");
+  if (!Number.isFinite(semUnits) || !Number.isFinite(yearUnits) || semUnits < 1 || yearUnits < 1) return alert("Promotion units must be whole numbers of at least 1.");
+  if (yearUnits < semUnits) return alert("Units for the next year level must be greater than or equal to units for the 2nd semester.");
+
+  const before = `${CURRENT_SCHOOL_YEAR}/${PASSING_THRESHOLD}/${FIRST_SEM_UNITS_FOR_PROMOTION}/${FIRST_YEAR_UNITS_FOR_PROMOTION}`;
+  try {
+    await db.collection('settings').doc('academic').set({
+      schoolYear,
+      passingGrade,
+      promotionFirstSemUnits: semUnits,
+      promotionFirstYearUnits: yearUnits,
+      updatedBy: currentUserEmail,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    applyAcademicSettings({ schoolYear, passingGrade, promotionFirstSemUnits: semUnits, promotionFirstYearUnits: yearUnits });
+    academicSettingsMeta = { updatedBy: currentUserEmail, updatedAt: { toDate: () => new Date() } };
+    renderAcademicSettingsForm();
+    await logActivity(currentUserEmail, `Updated academic settings (school year / passing grade / units): ${before} -> ${schoolYear}/${passingGrade}/${semUnits}/${yearUnits}`);
+    alert("Academic settings saved successfully. Other users get the new values the next time they sign in.");
+  } catch (err) {
+    console.error("Save settings error:", err);
+    alert(err && err.code === 'permission-denied'
+      ? "Could not save settings: permission denied. Publish the updated Firestore rules (they add the settings collection) and try again."
+      : "Could not save settings: " + (err.message || err));
+  }
+}
+
+// ------------------------------------------------------------------
+// PRINTABLE GRADE SUMMARIES (browser print / "Save as PDF"; no library, no extra database reads)
+// ------------------------------------------------------------------
+function openPrintJob(html, pageSize) {
+  const root = document.getElementById('printRoot');
+  if (!root) return alert("Printing is not available on this page.");
+  let st = document.getElementById('printPageStyle');
+  if (!st) {
+    st = document.createElement('style');
+    st.id = 'printPageStyle';
+    document.head.appendChild(st);
+  }
+  st.textContent = `@page { size: ${pageSize}; margin: 12mm; }`;
+  root.innerHTML = html;
+
+  const cleanup = () => { root.innerHTML = ''; window.removeEventListener('afterprint', cleanup); };
+  window.addEventListener('afterprint', cleanup);
+  const pending = Array.from(root.querySelectorAll('img')).filter((img) => !img.complete)
+    .map((img) => new Promise((resolve) => { img.onload = resolve; img.onerror = resolve; }));
+  // Wait for the logo, but never hang: print after at most 1.5 seconds
+  Promise.race([Promise.all(pending), new Promise((resolve) => setTimeout(resolve, 1500))]).then(() => window.print());
+}
+
+function printHeader(title) {
+  return `
+    <div style="display:flex;align-items:center;gap:12px;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:10px;">
+      <img src="ITELogo.jpg" alt="" style="width:54px;height:54px;object-fit:contain;" />
+      <div style="flex:1;text-align:center;">
+        <div style="font-size:15px;font-weight:bold;">COLEGIO DE KIDAPAWAN, INC.</div>
+        <div style="font-size:11px;">Information Technology Education Department</div>
+        <div style="font-size:13px;font-weight:bold;margin-top:4px;letter-spacing:1px;">${escapeHtml(title)}</div>
+      </div>
+      <div style="width:54px;"></div>
+    </div>`;
+}
+
+const printStamp = () => new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' });
+const printNum = (v) => (Number.isFinite(Number(v)) ? Number(v).toFixed(2) : '-');
+
+async function printStudentGradeSlip() {
+  let sd;
+  try {
+    sd = await getStudentData();
+  } catch (err) {
+    return alert("Could not load your records. Please check your connection and try again.");
+  }
+  if (!sd.grades.length) return alert("You have no released grades to print yet.");
+
+  const subjectMap = {};
+  sd.subjectsSnapshot.forEach((doc) => {
+    const d = doc.data();
+    if (d.subjectCode) subjectMap[String(d.subjectCode).toUpperCase().trim()] = d;
+  });
+
+  const groups = new Map();
+  let points = 0;
+  let gradedUnits = 0;
+  sd.grades.forEach((g) => {
+    const finalsValue = g.finals !== undefined ? g.finals : g.final;
+    const stats = computeGradeStats(g.prelim, g.midterm, finalsValue);
+    const code = String(g.classId || g.subjectCode || '').toUpperCase().trim();
+    const subj = subjectMap[code] || {};
+    const units = Number(subj.units) || 3;
+    const key = `S.Y. ${g.schoolYear || CURRENT_SCHOOL_YEAR} \u2022 ${normalizeSemester(g.semester)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ code, title: subj.subjectName || '', units, stats });
+    if (stats.average > 0) { points += stats.average * units; gradedUnits += units; }
+  });
+  const gwa = gradedUnits > 0 ? (points / gradedUnits).toFixed(2) : '-';
+
+  const sections = Array.from(groups.entries()).sort(([x], [y]) => x.localeCompare(y)).map(([label, rows]) => `
+    <div style="font-weight:bold;font-size:12px;margin:12px 0 4px;">${escapeHtml(label)}</div>
+    <table>
+      <thead><tr><th>Subject</th><th style="text-align:left;">Title</th><th>Units</th><th>Prelim</th><th>Midterm</th><th>Finals</th><th>Average</th><th>Remarks</th></tr></thead>
+      <tbody>${rows.sort((p, q) => p.code.localeCompare(q.code)).map((r) => `
+        <tr>
+          <td>${escapeHtml(r.code)}</td><td style="text-align:left;">${escapeHtml(r.title)}</td>
+          <td style="text-align:center;">${r.units}</td>
+          <td style="text-align:center;">${printNum(r.stats.prelim)}</td>
+          <td style="text-align:center;">${printNum(r.stats.midterm)}</td>
+          <td style="text-align:center;">${printNum(r.stats.finals)}</td>
+          <td style="text-align:center;font-weight:bold;">${r.stats.averageDisplay}</td>
+          <td style="text-align:center;">${r.stats.isPassing ? 'PASSED' : 'FAILED'}</td>
+        </tr>`).join('')}</tbody>
+    </table>`).join('');
+
+  const name = sd.fullName || currentStudentFullName || '';
+  const sid = sd.studentId || currentStudentSchoolId || '';
+  const year = latestProgression && latestProgression.headline ? latestProgression.headline : '';
+  openPrintJob(`
+    ${printHeader('STUDENT GRADE SLIP')}
+    <table style="margin-bottom:6px;">
+      <tr><td style="width:18%;"><b>Student</b></td><td>${escapeHtml(name)}</td><td style="width:18%;"><b>Student ID</b></td><td>${escapeHtml(sid)}</td></tr>
+      <tr><td><b>Program</b></td><td>BS Information Technology</td><td><b>Year level</b></td><td>${escapeHtml(year || '-')}</td></tr>
+    </table>
+    ${sections}
+    <div style="margin-top:10px;font-size:12px;"><b>General Weighted Average (released grades):</b> ${gwa} &nbsp;&nbsp;|&nbsp;&nbsp; <b>Passing grade:</b> ${PASSING_THRESHOLD}</div>
+    <div style="margin-top:14px;font-size:10px;color:#444;">Generated from the ITE Academic Portal on ${escapeHtml(printStamp())}. Lists released grades only and is for monitoring purposes; it is not an official transcript of records.</div>
+  `, 'A4 portrait');
+}
+
+function printClassRecord() {
+  if (!activeSubjectCode) return alert("Select an active class first.");
+  if (!parsedGradeData.length) return alert("There are no students in this class record to print.");
+
+  const asg = homeAssignments.find((x) => x.code === activeSubjectCode && x.section === activeInstructorSectionFilter);
+  const title = asg ? asg.subjectName : activeSubjectCode;
+  const extras = [['labScore', 'Lab'], ['quizzesScore', 'Quizzes'], ['oralRecitationScore', 'Oral Rec.'], ['attendanceScore', 'Attendance']]
+    .filter(([f]) => parsedGradeData.some((r) => toFiniteOrNull(r[f]) !== null));
+  const wide = extras.length > 0;
+
+  let graded = 0, passed = 0, sum = 0;
+  const rows = parsedGradeData.map((row, i) => {
+    const notGraded = isNotGradedRow(row);
+    const stats = computeFacultyRowStats(row);
+    if (!notGraded) { graded++; sum += stats.average; if (stats.isPassing) passed++; }
+    const state = notGraded ? '-' : liveRowStateLabel(row);
+    return `<tr>
+      <td style="text-align:center;">${i + 1}</td>
+      <td>${escapeHtml(row.studentId || '')}</td>
+      <td style="text-align:left;">${escapeHtml(row.fullName || '')}</td>
+      <td style="text-align:center;">${notGraded ? '-' : printNum(stats.prelim)}</td>
+      <td style="text-align:center;">${notGraded ? '-' : printNum(stats.midterm)}</td>
+      <td style="text-align:center;">${notGraded ? '-' : printNum(stats.finals)}</td>
+      ${extras.map(([f]) => `<td style="text-align:center;">${toFiniteOrNull(row[f]) === null ? '-' : escapeHtml(toFiniteOrNull(row[f]))}</td>`).join('')}
+      <td style="text-align:center;font-weight:bold;">${notGraded ? '-' : stats.averageDisplay}</td>
+      <td style="text-align:center;">${notGraded ? 'NOT GRADED' : (stats.isPassing ? 'PASSED' : 'FAILED')}</td>
+      <td style="text-align:center;">${escapeHtml(state)}</td>
+    </tr>`;
+  }).join('');
+
+  const instructor = (document.getElementById('sidebarUserName') || {}).textContent || currentUserEmail;
+  openPrintJob(`
+    ${printHeader('CLASS RECORD')}
+    <table style="margin-bottom:6px;">
+      <tr><td style="width:14%;"><b>Subject</b></td><td>${escapeHtml(activeSubjectCode)} - ${escapeHtml(title)}</td><td style="width:14%;"><b>Section</b></td><td>${escapeHtml(activeInstructorSectionFilter)}</td></tr>
+      <tr><td><b>Semester</b></td><td>${escapeHtml(normalizeSemester(activeSemester))}</td><td><b>School year</b></td><td>${escapeHtml(CURRENT_SCHOOL_YEAR)}</td></tr>
+      <tr><td><b>Instructor</b></td><td colspan="3">${escapeHtml(instructor)}</td></tr>
+    </table>
+    <table>
+      <thead><tr><th>No.</th><th>Student ID</th><th style="text-align:left;">Student name</th><th>Prelim</th><th>Midterm</th><th>Finals</th>${extras.map(([, l]) => `<th>${l}</th>`).join('')}<th>Average</th><th>Remarks</th><th>Status</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div style="margin-top:10px;font-size:12px;"><b>Students:</b> ${parsedGradeData.length} &nbsp;|&nbsp; <b>Graded:</b> ${graded} &nbsp;|&nbsp; <b>Passed:</b> ${passed} &nbsp;|&nbsp; <b>Failed:</b> ${graded - passed} &nbsp;|&nbsp; <b>Not graded:</b> ${parsedGradeData.length - graded} &nbsp;|&nbsp; <b>Class average:</b> ${graded ? (sum / graded).toFixed(2) : '-'} &nbsp;|&nbsp; <b>Passing grade:</b> ${PASSING_THRESHOLD}</div>
+    ${liveRecordDirty ? '<div style="margin-top:6px;font-size:11px;font-weight:bold;">Note: this printout includes changes that have not been saved yet.</div>' : ''}
+    <div style="display:flex;justify-content:space-between;margin-top:40px;font-size:11px;">
+      <div style="width:42%;text-align:center;"><div style="border-top:1px solid #000;padding-top:3px;">Prepared by: ${escapeHtml(instructor)}</div></div>
+      <div style="width:42%;text-align:center;"><div style="border-top:1px solid #000;padding-top:3px;">Noted by: Department Head</div></div>
+    </div>
+    <div style="margin-top:12px;font-size:10px;color:#444;">Printed from the ITE Academic Portal on ${escapeHtml(printStamp())}.</div>
+  `, wide ? 'A4 landscape' : 'A4 portrait');
 }
 
 function updateSidebarUserCard(role, userData) {
@@ -1330,7 +1566,7 @@ auth.onAuthStateChanged(async (user) => {
     try {
       currentUserId = user.uid;
       currentUserEmail = user.email;
-      const userDoc = await db.collection('users').doc(user.uid).get();
+      const [userDoc] = await Promise.all([db.collection('users').doc(user.uid).get(), loadAcademicSettings()]);
 
       if (userDoc.exists) {
         const data = userDoc.data();
@@ -2788,6 +3024,7 @@ async function loadAdminDashboardData() {
     }
 
     renderAdminHomeActivity(recentLogsSnapshot);
+    renderAcademicSettingsForm();
     backfillSubjectAccessMarkers(assignmentsSnapshot);
     loadActiveAssignmentsList({ assignmentsSnap: assignmentsSnapshot, subjectsSnap: subjectsSnapshot, facultySnap: facultySnapshot });
 
