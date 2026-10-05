@@ -6,6 +6,11 @@
     <title>Colegio de Kidapawan - Digital Class Record & ITE Portal</title>
 
     <!-- Tailwind CSS v3 & Modern Fonts -->
+    <link rel="preconnect" href="https://www.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://securetoken.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -15,16 +20,14 @@
     />
 
     <!-- Lucide Icons & Chart.js -->
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
 
     <!-- Firebase v8 SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
     <!-- SheetJS for Excel Parsing -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
     <script>
       tailwind.config = {
@@ -1155,6 +1158,8 @@
                   </div>
                 </div>
 
+                <div id="importReport" class="hidden px-5 py-3 border-b border-slate-800 bg-amber-500/5 text-xs space-y-1" role="status"></div>
+
                 <div id="gridSummaryStrip" class="flex flex-wrap gap-x-6 gap-y-1 px-5 py-2.5 border-b border-slate-800 text-[11px] font-bold text-slate-400"></div>
 
                 <div class="overflow-x-auto">
@@ -1422,6 +1427,18 @@
             </div>
           </div>
 
+          <!-- Admin charts (grade distribution + pass/fail from released grades) -->
+          <div data-page="overview" class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3">
+              <h3 class="text-sm font-black text-white uppercase tracking-wider">Grade distribution</h3>
+              <div class="relative h-56"><canvas id="adminGradeDistributionChart"></canvas></div>
+            </div>
+            <div class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3">
+              <h3 class="text-sm font-black text-white uppercase tracking-wider">Pass / fail</h3>
+              <div class="relative h-56"><canvas id="adminPassFailChart"></canvas></div>
+            </div>
+          </div>
+
           <!-- Admin Home: recent activity + quick actions -->
           <div data-page="overview" class="grid grid-cols-1 xl:grid-cols-3 gap-4">
             <div class="xl:col-span-2 p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3">
@@ -1547,6 +1564,22 @@
                 <i data-lucide="chevron-right" class="w-4 h-4"></i>
               </button>
             </div>
+          </div>
+
+          <!-- Add subject to the curriculum catalog -->
+          <div data-page="assignments" class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-4">
+            <div>
+              <h3 class="text-sm font-black text-white uppercase tracking-wider">Add subject</h3>
+              <p class="text-xs text-slate-500">Adds (or updates) a subject in the curriculum catalog. Sections are assigned separately.</p>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+              <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="adminSubCode">Subject code</label><input id="adminSubCode" type="text" placeholder="e.g. IT 101" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500" /></div>
+              <div class="col-span-2"><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="adminSubTitle">Subject title</label><input id="adminSubTitle" type="text" placeholder="e.g. Introduction to Computing" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500" /></div>
+              <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="adminSubYear">Year level</label><select id="adminSubYear" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"><option value="1">1st Year</option><option value="2">2nd Year</option><option value="3">3rd Year</option><option value="4">4th Year</option></select></div>
+              <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="adminSubSem">Semester</label><select id="adminSubSem" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"><option value="1S">1st Semester</option><option value="2S">2nd Semester</option></select></div>
+              <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="adminSubUnits">Units</label><input id="adminSubUnits" type="number" min="1" max="12" value="3" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500" /></div>
+            </div>
+            <button type="button" onclick="addNewSubjectCode()" class="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider transition-all">Save subject</button>
           </div>
 
           <!-- Active Subject Assignments List Panel -->

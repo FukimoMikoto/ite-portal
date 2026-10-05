@@ -17,6 +17,49 @@ if (!firebase.apps.length) {
 
 const auth = firebase.auth();
 const db = firebase.firestore();
+try {
+  db.settings({ experimentalAutoDetectLongPolling: true, merge: true });
+} catch (settingsErr) {
+  console.warn('Firestore connection settings skipped:', settingsErr);
+}
+
+// ------------------------------------------------------------------
+// LAZY LIBRARIES: SheetJS and Chart.js load only when needed (keeps first paint fast on deployed sites)
+// ------------------------------------------------------------------
+const LIB_URLS = {
+  xlsx: 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+  chart: 'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js'
+};
+const libPromises = {};
+
+function loadLib(key) {
+  const present = key === 'xlsx' ? typeof XLSX !== 'undefined' : typeof Chart !== 'undefined';
+  if (present) return Promise.resolve();
+  if (libPromises[key]) return libPromises[key];
+  libPromises[key] = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = LIB_URLS[key];
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => { delete libPromises[key]; reject(new Error('Could not load ' + key)); };
+    document.head.appendChild(s);
+  });
+  return libPromises[key];
+}
+
+function preloadLibsWhenIdle(keys) {
+  const run = () => keys.forEach((k) => loadLib(k).catch(() => {}));
+  if (window.requestIdleCallback) window.requestIdleCallback(run, { timeout: 4000 });
+  else setTimeout(run, 1500);
+}
+
+// Tells the user when a request is slow instead of looking frozen
+function notifySlow(promise, label) {
+  const timer = setTimeout(() => showToast(`${label} is taking longer than usual. Your connection may be slow; still loading...`, 'info'), 8000);
+  const done = () => clearTimeout(timer);
+  promise.then(done, done);
+  return promise;
+}
 
 let parsedGradeData = [];
 let currentUserEmail = '';
@@ -192,29 +235,11 @@ function getActiveWeights() {
   };
 }
 
+// Official grade = plain average of Prelim, Midterm and Finals (same as saved grades and the student view).
+// The evaluation weights are descriptive only and shown in the Assessment Breakdown.
 function computeFacultyRowStats(row) {
   const finalsVal = row.finals !== undefined ? row.finals : row.final;
-  const base = computeGradeStats(row.prelim, row.midterm, finalsVal);
-  const examAvg = (base.prelim + base.midterm + base.finals) / 3;
-  const w = getActiveWeights();
-
-  const parts = [{ w: w.exam, v: examAvg }];
-  [['labScore', w.lab], ['quizzesScore', w.quizzes], ['oralRecitationScore', w.oral]].forEach(([field, weight]) => {
-    const v = toFiniteOrNull(row[field]);
-    if (v !== null) parts.push({ w: weight, v });
-  });
-
-  const totalW = parts.reduce((sum, p) => sum + p.w, 0);
-  const average = totalW > 0
-    ? parts.reduce((sum, p) => sum + p.w * p.v, 0) / totalW
-    : examAvg;
-
-  return {
-    ...base,
-    average,
-    averageDisplay: average.toFixed(2),
-    isPassing: average >= PASSING_THRESHOLD
-  };
+  return computeGradeStats(row.prelim, row.midterm, finalsVal);
 }
 
 function refreshWeightIndicator() {
@@ -230,10 +255,7 @@ function setupWeightLiveRecalc() {
   ['weightLab', 'weightQuizzes', 'weightOutput', 'weightExam'].forEach((id) => {
     const el = document.getElementById(id);
     if (!el) return;
-    el.addEventListener('input', () => {
-      refreshWeightIndicator();
-      refreshGridComputedCells();
-    });
+    el.addEventListener('input', refreshWeightIndicator);
   });
 }
 
@@ -252,7 +274,8 @@ function updateGridSummary() {
     `<span>Class average: <span class="text-white font-mono">${avg.toFixed(2)}</span></span>` +
     `<span>Passing: <span class="text-emerald-400">${pass}</span></span>` +
     `<span>At risk: <span class="text-rose-400">${stats.length - pass}</span></span>` +
-    (notGraded ? `<span>Not graded: <span class="text-white">${notGraded}</span></span>` : '');
+    (notGraded ? `<span>Not graded: <span class="text-white">${notGraded}</span></span>` : '') +
+    `<span class="ml-auto text-slate-500">Average = (Prelim + Midterm + Finals) \u00F7 3</span>`;
 }
 
 function refreshGridComputedCells() {
@@ -285,7 +308,7 @@ function extractCategoryScores(headers, row) {
   const patterns = [
     ['labScore', /^(lab|laboratory)(\s*score)?$/i],
     ['quizzesScore', /^(quiz|quizzes)(\s*score)?$/i],
-    ['oralRecitationScore', /^(oral|oral\s*recitation)(\s*score)?$/i],
+    ['oralRecitationScore', /^(oral|recitation|participation|oral\s*recitation(\s*\/?\s*participation)?)(\s*score)?$/i],
     ['attendanceScore', /^(att|attendance)(\s*score)?$/i]
   ];
   patterns.forEach(([field, re]) => {
@@ -952,10 +975,13 @@ function setupLiveRecordInteractions() {
         row.__originalStudentId = row.studentId;
       }
       row[field] = input.value;
-    } else if (GRID_SCORE_FIELDS.includes(field)) {
-      row[field] = Number.isFinite(parsed) ? parsed : null; // blank = not recorded
     } else {
-      row[field] = Number.isFinite(parsed) ? parsed : 0;
+      const clamped = Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : null;
+      if (clamped !== null && clamped !== parsed) {
+        input.value = clamped; // scores are limited to 0-100
+        showToast('Scores must be between 0 and 100.', 'error');
+      }
+      row[field] = GRID_SCORE_FIELDS.includes(field) ? clamped : (clamped === null ? 0 : clamped); // extra columns: blank = not recorded
     }
     row.__edited = true;
 
@@ -1066,7 +1092,7 @@ function setSemester(sem) {
 
 function downloadExcelTemplate() {
   if (typeof XLSX === 'undefined') {
-    alert("Excel processing library (SheetJS) is loading. Please try again in a moment.");
+    loadLib('xlsx').then(downloadExcelTemplate).catch(() => alert("Could not load the Excel library. Check your internet connection and try again."));
     return;
   }
 
@@ -1075,13 +1101,14 @@ function downloadExcelTemplate() {
       "Student ID", "Student Name",
       "P_Q1", "P_Q2", "P_Q3", "P_Lab", "P_Att", "P_Exam", "PRELIM",
       "M_Q1", "M_Q2", "M_Q3", "M_Lab", "M_Att", "M_Exam", "MIDTERM",
-      "F_Q1", "F_Q2", "F_Q3", "F_Lab", "F_Att", "F_Exam", "FINAL"
+      "F_Q1", "F_Q2", "F_Q3", "F_Lab", "F_Att", "F_Exam", "FINAL",
+      "LAB", "QUIZZES", "ORAL RECITATION", "ATTENDANCE"
     ]
   ];
 
   const sampleData = [
-    ["2026-0001", "Dela Cruz, Juan", 18, 20, 19, 92, 95, 88, 89.20, 20, 18, 20, 94, 100, 90, 92.50, 19, 19, 20, 95, 95, 91, 92.00],
-    ["2026-0002", "Santos, Maria Clara", 15, 14, 16, 80, 85, 75, 76.50, 16, 17, 15, 82, 90, 78, 79.20, 18, 16, 17, 85, 90, 82, 83.10]
+    ["2026-0001", "Dela Cruz, Juan", 18, 20, 19, 92, 95, 88, 89.20, 20, 18, 20, 94, 100, 90, 92.50, 19, 19, 20, 95, 95, 91, 92.00, 93, 94, 90, 98],
+    ["2026-0002", "Santos, Maria Clara", 15, 14, 16, 80, 85, 75, 76.50, 16, 17, 15, 82, 90, 78, 79.20, 18, 16, 17, 85, 90, 82, 83.10, 82, 85, 80, 95]
   ];
 
   const sheetData = [...templateHeaders, ...sampleData];
@@ -1091,7 +1118,8 @@ function downloadExcelTemplate() {
     { wch: 14 }, { wch: 22 },
     { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 10 },
     { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 10 },
-    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 10 }
+    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 10 },
+    { wch: 8 }, { wch: 10 }, { wch: 17 }, { wch: 12 }
   ];
 
   const workbook = XLSX.utils.book_new();
@@ -1307,6 +1335,7 @@ auth.onAuthStateChanged(async (user) => {
       if (userDoc.exists) {
         const data = userDoc.data();
 
+        const wasFreshLogin = isFreshLoginAttempt;
         if (isFreshLoginAttempt) {
           isFreshLoginAttempt = false;
           if (data.role !== selectedPortalRole && !(selectedPortalRole === 'instructor' && data.role === 'admin')) {
@@ -1347,6 +1376,7 @@ auth.onAuthStateChanged(async (user) => {
         }
 
         routeUserRole(data.role, data);
+        if (wasFreshLogin) logActivity(user.email, 'Signed in');
 
         sessionWrite.then(() => {
           if (auth.currentUser && auth.currentUser.uid === user.uid) setupSingleSessionGuard(user.uid);
@@ -1466,6 +1496,7 @@ function routeUserRole(role, userData) {
   });
   const activeGroup = document.getElementById(sidebarGroups[role]);
   updateSidebarUserCard(role, userData);
+  preloadLibsWhenIdle(role === 'instructor' ? ['chart', 'xlsx'] : role === 'admin' ? ['chart'] : []);
   if (window.lucide) lucide.createIcons();
   if (activeGroup) activeGroup.classList.remove('hidden');
   const activeNav = activeGroup && activeGroup.querySelector('[data-subnav]');
@@ -1718,7 +1749,6 @@ async function selectSubject(code, title, section = 'ALL', cardElement = null) {
       const totalIndicator = document.getElementById('weightTotalIndicator');
       if (totalIndicator) totalIndicator.textContent = `Total: ${total}%`;
       refreshWeightIndicator();
-      refreshGridComputedCells();
     }
   } catch (e) {
     console.warn("Could not load formula config:", e);
@@ -1944,7 +1974,8 @@ function renderInstructorAnalytics(grades) {
   const gradeCanvas = document.getElementById('instructorGradeDistributionChart');
   const passFailCanvas = document.getElementById('instructorPassFailChart');
 
-  if (!gradeCanvas || !passFailCanvas || !window.Chart) return;
+  if (!gradeCanvas || !passFailCanvas) return;
+  if (!window.Chart) { loadLib('chart').then(() => renderInstructorAnalytics(grades)).catch(() => {}); return; }
 
   instructorGradeChartInstance = destroyChartSafely(instructorGradeChartInstance);
   instructorPassFailChartInstance = destroyChartSafely(instructorPassFailChartInstance);
@@ -2013,7 +2044,8 @@ function renderAdminAnalytics(allReleasedGrades) {
   const gradeCanvas = document.getElementById('adminGradeDistributionChart');
   const passFailCanvas = document.getElementById('adminPassFailChart');
 
-  if (!gradeCanvas || !passFailCanvas || !window.Chart) return;
+  if (!gradeCanvas || !passFailCanvas) return;
+  if (!window.Chart) { loadLib('chart').then(() => renderAdminAnalytics(allReleasedGrades)).catch(() => {}); return; }
 
   adminGradeChartInstance = destroyChartSafely(adminGradeChartInstance);
   adminPassFailChartInstance = destroyChartSafely(adminPassFailChartInstance);
@@ -2085,6 +2117,12 @@ function renderAdminAnalytics(allReleasedGrades) {
 function processExcel() {
   const fileInput = document.getElementById('excelFile');
   if (!fileInput || !fileInput.files.length) return alert("Select an Excel file.");
+
+  if (typeof XLSX === 'undefined') {
+    showToast('Preparing the Excel reader...', 'info');
+    loadLib('xlsx').then(processExcel).catch(() => alert("Could not load the Excel library. Check your internet connection and try again."));
+    return;
+  }
 
   const file = fileInput.files[0];
   const reader = new FileReader();
@@ -2237,8 +2275,56 @@ function processSingleTabExcel(workbook) {
   alert(`Imported ${parsedGradeData.length} student record(s).`);
 }
 
+function validateImportedRows() {
+  const issues = [];
+  const seen = new Map();
+  const rosterIds = new Set(rosterData.map((r) => r.studentId));
+  parsedGradeData.forEach((row, i) => {
+    const line = i + 2; // spreadsheet row (header is row 1)
+    const sid = String(row.studentId || '').trim();
+    if (!sid) issues.push({ line, level: 'error', msg: `Row ${line}: missing Student ID` });
+    if (!String(row.fullName || '').trim()) issues.push({ line, level: 'error', msg: `Row ${line}: missing student name` });
+    if (sid) {
+      if (seen.has(sid)) issues.push({ line, level: 'error', msg: `Row ${line}: duplicate of row ${seen.get(sid)} (${sid})` });
+      else seen.set(sid, line);
+      if (rosterIds.size && !rosterIds.has(sid)) issues.push({ line, level: 'warn', msg: `Row ${line}: ${sid} is not on the approved roster for this class` });
+    }
+    ['prelim', 'midterm', 'finals', ...GRID_SCORE_FIELDS].forEach((f) => {
+      const v = toFiniteOrNull(row[f]);
+      if (v !== null && (v < 0 || v > 100)) {
+        issues.push({ line, level: 'warn', msg: `Row ${line}: ${f} ${v} is outside 0-100 and was limited to the valid range` });
+        row[f] = Math.min(100, Math.max(0, v));
+      }
+    });
+    const blankTerms = ['prelim', 'midterm', 'finals'].filter((f) => !Number(row[f])).length;
+    if (blankTerms) issues.push({ line, level: 'warn', msg: `Row ${line}: ${blankTerms} term score(s) blank or 0` });
+  });
+  renderImportReport(issues);
+}
+
+function dismissImportReport() {
+  const el = document.getElementById('importReport');
+  if (el) { el.classList.add('hidden'); el.innerHTML = ''; }
+}
+
+function renderImportReport(issues) {
+  const el = document.getElementById('importReport');
+  if (!el) return;
+  if (!issues.length) { dismissImportReport(); return; }
+  const errors = issues.filter((x) => x.level === 'error').length;
+  el.classList.remove('hidden');
+  el.innerHTML = `
+    <div class="flex items-center justify-between gap-3">
+      <div class="font-bold ${errors ? 'text-rose-400' : 'text-amber-400'}">Import check: ${errors} error(s), ${issues.length - errors} warning(s). Review and fix in the grid before saving.</div>
+      <button type="button" onclick="dismissImportReport()" class="px-2 py-1 rounded-md bg-slate-800 text-slate-300 text-[11px] font-bold">Dismiss</button>
+    </div>
+    <ul class="list-disc pl-5 space-y-0.5 text-slate-300">${issues.slice(0, 12).map((x) => `<li class="${x.level === 'error' ? 'text-rose-300' : ''}">${escapeHtml(x.msg)}</li>`).join('')}</ul>
+    ${issues.length > 12 ? `<div class="text-slate-500">+ ${issues.length - 12} more</div>` : ''}`;
+}
+
 function renderParsedGradesToTable() {
   parsedGradeData.forEach((row) => { row.__staged = true; });
+  validateImportedRows();
   liveRecordEmptyHtml = emptyLiveRow('No grade sheet parsed yet. Select an assigned class and import an Excel file to view grades.');
 
   if (parsedGradeData.length) {
@@ -2249,15 +2335,16 @@ function renderParsedGradesToTable() {
   renderLiveClassRecord();
 }
 
-async function buildRegisteredStudentIndex(subjectCode, rows = []) {
+async function buildRegisteredStudentIndex(subjectCode, rows = [], prefetchedEnroll = null) {
   const index = new Map();
   const knownIds = new Set();
 
-  const enrollSnapshot = await db.collection('enrollments')
-    .where('subjectCode', '==', subjectCode)
-    .get();
-  enrollSnapshot.forEach((doc) => {
-    const e = doc.data();
+  let enrollList = prefetchedEnroll;
+  if (!enrollList) {
+    enrollList = [];
+    (await db.collection('enrollments').where('subjectCode', '==', subjectCode).get()).forEach((d) => enrollList.push(d.data()));
+  }
+  enrollList.forEach((e) => {
     const key = normalizeNameKey(e.fullName);
     if (e.studentId) knownIds.add(String(e.studentId).trim());
     if (key && e.studentId) {
@@ -2312,125 +2399,69 @@ function resolveEffectiveStudentId(row, subjectCode, registeredIndex, batch) {
   return match.studentId;
 }
 
-async function saveDraftGrades() {
-  if (!activeSubjectCode) return alert("Select an active subject first.");
-  if (!parsedGradeData.length) return alert("Upload an Excel sheet to parse grades first.");
+// Shared reads for saving/releasing: ONE enrollments read, ONE grades read, targeted student lookups only if needed
+async function gatherGradeWriteContext() {
+  const [enrollSnap, existingSnap] = await Promise.all([
+    db.collection('enrollments').where('subjectCode', '==', activeSubjectCode).get(),
+    db.collection('grades').where('classId', '==', activeSubjectCode).get()
+      .catch((e) => { console.warn("Could not read existing grades for change detection:", e); return null; })
+  ]);
 
-  try {
-    let allowedStudentIds = null;
-    if (activeInstructorSectionFilter && activeInstructorSectionFilter !== 'ALL') {
-      const sectionEnrollments = await db.collection('enrollments')
-        .where('subjectCode', '==', activeSubjectCode)
-        .where('section', '==', activeInstructorSectionFilter)
-        .get();
+  const enrollAll = [];
+  enrollSnap.forEach((d) => enrollAll.push(d.data()));
 
-      allowedStudentIds = new Set();
-      sectionEnrollments.forEach(doc => {
-        const data = doc.data();
-        if (data.studentId) allowedStudentIds.add(String(data.studentId).trim());
-      });
-    }
-
-    const registeredIndex = await buildRegisteredStudentIndex(activeSubjectCode, parsedGradeData);
-    const batch = db.batch();
-    let savedCount = 0;
-
-    parsedGradeData.forEach((row) => {
-      if (!String(row.studentId || '').trim() || !String(row.fullName || '').trim()) return; // incomplete row
-      if (isNotGradedRow(row)) return; // roster placeholder: nothing entered yet
-      queueRenamedDocCleanup(row, batch);
-      const effectiveStudentId = resolveEffectiveStudentId(row, activeSubjectCode, registeredIndex, batch);
-      const cleanStudentId = String(effectiveStudentId).trim();
-
-      if (allowedStudentIds && allowedStudentIds.size > 0 && !allowedStudentIds.has(cleanStudentId)) {
-        return;
-      }
-
-      const docId = buildGradeDocId(activeSubjectCode, cleanStudentId);
-      const docRef = db.collection('grades').doc(docId);
-      const finalsVal = row.finals !== undefined ? row.finals : row.final;
-      const stats = computeGradeStats(row.prelim, row.midterm, finalsVal);
-
-      batch.set(docRef, {
-        classId: activeSubjectCode,
-        studentId: cleanStudentId,
-        fullName: row.fullName,
-        section: activeInstructorSectionFilter,
-        prelim: stats.prelim,
-        midterm: stats.midterm,
-        finals: stats.finals,
-
-        ...pickComponentFields(row),
-        ...pickCategoryScoreFields(row),
-
-        semester: normalizeSemester(activeSemester),
-        schoolYear: CURRENT_SCHOOL_YEAR,
-        isReleased: false,
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
-
-      savedCount++;
+  let allowedStudentIds = null;
+  if (activeInstructorSectionFilter && activeInstructorSectionFilter !== 'ALL') {
+    allowedStudentIds = new Set();
+    enrollAll.forEach((en) => {
+      if (en.section === activeInstructorSectionFilter && en.studentId) allowedStudentIds.add(String(en.studentId).trim());
     });
-
-    await batch.commit();
-    await logActivity(currentUserEmail, `Saved draft grades for ${activeSubjectCode} [${activeInstructorSectionFilter}] (${savedCount} records)`);
-    alert(`Draft grades successfully saved for ${savedCount} student(s) in Section ${activeInstructorSectionFilter}!`);
-    loadInstructorGradesFromFirestore(activeSubjectCode, activeInstructorSectionFilter);
-  } catch (err) {
-    console.error("Save Draft Error:", err);
-    alert("Error saving draft: " + err.message);
   }
+
+  const registeredIndex = await buildRegisteredStudentIndex(activeSubjectCode, parsedGradeData, enrollAll);
+  const uidByStudentId = new Map();
+  registeredIndex.forEach((v) => { if (v.studentId && v.studentUid) uidByStudentId.set(String(v.studentId).trim(), v.studentUid); });
+  const existingById = new Map();
+  if (existingSnap) existingSnap.forEach((d) => existingById.set(d.id, d.data()));
+
+  return { allowedStudentIds, registeredIndex, uidByStudentId, existingById };
 }
 
-async function releaseGrades() {
+async function commitGrades(mode) {
+  const release = mode === 'release';
   if (!activeSubjectCode) return alert("Select an active subject first.");
   if (!parsedGradeData.length) return alert("Upload an Excel sheet to parse grades first.");
 
+  const gradable = parsedGradeData.filter((r) => String(r.studentId || '').trim() && String(r.fullName || '').trim() && !isNotGradedRow(r));
+  if (!gradable.length) return alert(`There are no graded rows to ${release ? 'release' : 'save'}. Enter or import scores first.`);
+
+  if (release && !confirm(`Release official grades for ${gradable.length} student(s) in ${activeSubjectCode} [${activeInstructorSectionFilter}]?\n\nStudents will be able to see these grades and will be notified.`)) return;
+
   try {
-    let allowedStudentIds = null;
-    if (activeInstructorSectionFilter && activeInstructorSectionFilter !== 'ALL') {
-      const sectionEnrollments = await db.collection('enrollments')
-        .where('subjectCode', '==', activeSubjectCode)
-        .where('section', '==', activeInstructorSectionFilter)
-        .get();
-
-      allowedStudentIds = new Set();
-      sectionEnrollments.forEach(doc => {
-        const data = doc.data();
-        if (data.studentId) allowedStudentIds.add(String(data.studentId).trim());
-      });
-    }
-
-    const [registeredIndex, existingSnap] = await Promise.all([
-      buildRegisteredStudentIndex(activeSubjectCode, parsedGradeData),
-      db.collection('grades').where('classId', '==', activeSubjectCode).get()
-        .catch((e) => { console.warn("Could not read existing grades for change detection:", e); return null; })
-    ]);
-    const uidByStudentId = new Map();
-    registeredIndex.forEach((v) => { if (v.studentId && v.studentUid) uidByStudentId.set(String(v.studentId).trim(), v.studentUid); });
-    const existingById = new Map();
-    if (existingSnap) existingSnap.forEach((d) => existingById.set(d.id, d.data()));
-    const notifyItems = [];
+    const ctx = await gatherGradeWriteContext();
     const batch = db.batch();
-    let releasedCount = 0;
+    const notifyItems = [];
+    const diffs = [];
+    let savedCount = 0;
+    let updatedReleased = 0;
 
     parsedGradeData.forEach((row) => {
       if (!String(row.studentId || '').trim() || !String(row.fullName || '').trim()) return; // incomplete row
       if (isNotGradedRow(row)) return; // roster placeholder: nothing entered yet
       queueRenamedDocCleanup(row, batch);
-      const effectiveStudentId = resolveEffectiveStudentId(row, activeSubjectCode, registeredIndex, batch);
+      const effectiveStudentId = resolveEffectiveStudentId(row, activeSubjectCode, ctx.registeredIndex, batch);
       const cleanStudentId = String(effectiveStudentId).trim();
 
-      if (allowedStudentIds && allowedStudentIds.size > 0 && !allowedStudentIds.has(cleanStudentId)) {
-        return;
-      }
+      if (ctx.allowedStudentIds && ctx.allowedStudentIds.size > 0 && !ctx.allowedStudentIds.has(cleanStudentId)) return;
 
       const docId = buildGradeDocId(activeSubjectCode, cleanStudentId);
       const gradeRef = db.collection('grades').doc(docId);
       const finalsVal = row.finals !== undefined ? row.finals : row.final;
       const stats = computeGradeStats(row.prelim, row.midterm, finalsVal);
+      const prev = ctx.existingById.get(docId);
+      const wasReleased = !!(prev && prev.isReleased);
 
-      batch.set(gradeRef, {
+      const payload = {
         classId: activeSubjectCode,
         studentId: cleanStudentId,
         fullName: row.fullName,
@@ -2444,36 +2475,61 @@ async function releaseGrades() {
 
         semester: normalizeSemester(activeSemester),
         schoolYear: CURRENT_SCHOOL_YEAR,
-        isReleased: true,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
+      };
+      // Releasing publishes. Saving a draft must NEVER hide a grade that is already released.
+      if (release) payload.isReleased = true;
+      else if (!wasReleased) payload.isReleased = false;
 
-      const prev = existingById.get(docId);
-      const changed = !prev || !prev.isReleased || ['prelim', 'midterm', 'finals'].some((k) => Number(prev[k]) !== Number(stats[k])) ||
-        GRID_SCORE_FIELDS.some((k) => (toFiniteOrNull(prev[k]) ?? null) !== (toFiniteOrNull(row[k]) ?? null));
-      const recipientUid = uidByStudentId.get(cleanStudentId);
-      if (changed && recipientUid) {
+      batch.set(gradeRef, payload, { merge: true });
+
+      const termChanges = ['prelim', 'midterm', 'finals']
+        .filter((k) => !prev || Number(prev[k]) !== Number(stats[k]))
+        .map((k) => `${k} ${prev ? prev[k] : '-'}->${stats[k]}`);
+      const extraChanged = GRID_SCORE_FIELDS.some((k) => (toFiniteOrNull(prev && prev[k]) ?? null) !== (toFiniteOrNull(row[k]) ?? null));
+      const changed = !prev || !wasReleased && release || termChanges.length > 0 || extraChanged;
+      if (prev && (termChanges.length || extraChanged)) diffs.push(`${cleanStudentId}: ${termChanges.join(', ') || 'recorded scores'}`);
+
+      const recipientUid = ctx.uidByStudentId.get(cleanStudentId);
+      const students_see_it = release || wasReleased;
+      if (changed && students_see_it && recipientUid) {
+        const firstRelease = release && !wasReleased;
         notifyItems.push({
           recipientUid,
-          type: (!prev || !prev.isReleased) ? 'grade_released' : 'grade_updated',
-          title: (!prev || !prev.isReleased) ? 'Grades released' : 'Grades updated',
-          message: `Your ${(!prev || !prev.isReleased) ? 'official grades for' : 'grades in'} ${activeSubjectCode} ${(!prev || !prev.isReleased) ? 'have been released.' : 'were updated by your instructor.'}`,
+          type: firstRelease ? 'grade_released' : 'grade_updated',
+          title: firstRelease ? 'Grades released' : 'Grades updated',
+          message: `Your ${firstRelease ? 'official grades for' : 'grades in'} ${activeSubjectCode} ${firstRelease ? 'have been released.' : 'were updated by your instructor.'}`,
           subjectCode: activeSubjectCode
         });
       }
-
-      releasedCount++;
+      if (!release && wasReleased && changed) updatedReleased++;
+      savedCount++;
     });
 
     await batch.commit();
     await sendNotifications(notifyItems);
-    await logActivity(currentUserEmail, `Released official grades for ${activeSubjectCode} [${activeInstructorSectionFilter}] (${releasedCount} records)`);
-    alert(`Official grades successfully released for ${releasedCount} student(s) in Section ${activeInstructorSectionFilter}!`);
+    const detail = diffs.length ? ` | changes: ${diffs.slice(0, 6).join('; ')}${diffs.length > 6 ? ` (+${diffs.length - 6} more)` : ''}` : '';
+    await logActivity(currentUserEmail, `${release ? 'Released official grades for' : 'Saved draft grades for'} ${activeSubjectCode} [${activeInstructorSectionFilter}] (${savedCount} records)${detail}`);
+
+    if (release) {
+      alert(`Official grades successfully released for ${savedCount} student(s) in Section ${activeInstructorSectionFilter}!`);
+    } else {
+      alert(`Draft grades successfully saved for ${savedCount} student(s) in Section ${activeInstructorSectionFilter}!` +
+        (updatedReleased ? `\n${updatedReleased} already-released record(s) were updated and the student(s) were notified.` : ''));
+    }
     loadInstructorGradesFromFirestore(activeSubjectCode, activeInstructorSectionFilter);
   } catch (err) {
-    console.error("Release Error:", err);
-    alert("Error releasing grades: " + err.message);
+    console.error(release ? "Release Error:" : "Save Draft Error:", err);
+    alert(`Error ${release ? 'releasing grades' : 'saving draft'}: ` + err.message);
   }
+}
+
+async function saveDraftGrades() {
+  return commitGrades('draft');
+}
+
+async function releaseGrades() {
+  return commitGrades('release');
 }
 
 // ------------------------------------------------------------------
@@ -2732,6 +2788,7 @@ async function loadAdminDashboardData() {
     }
 
     renderAdminHomeActivity(recentLogsSnapshot);
+    backfillSubjectAccessMarkers(assignmentsSnapshot);
     loadActiveAssignmentsList({ assignmentsSnap: assignmentsSnapshot, subjectsSnap: subjectsSnapshot, facultySnap: facultySnapshot });
 
   } catch (err) {
@@ -2851,7 +2908,20 @@ async function unassignSubjectFromFaculty(assignmentDocId, subjectCode, facultyN
   if (!confirm(`Are you sure you want to unassign ${subjectCode} from ${facultyName}?`)) return;
 
   try {
-    await db.collection('assignments').doc(assignmentDocId).delete();
+    const asgRef = db.collection('assignments').doc(assignmentDocId);
+    const asgSnap = await asgRef.get();
+    const facultyUid = asgSnap.exists ? asgSnap.data().facultyUid : null;
+    await asgRef.delete();
+
+    // Drop the access marker only when this instructor has no other section of the subject left
+    if (facultyUid) {
+      try {
+        const left = await db.collection('assignments').where('facultyUid', '==', facultyUid).where('subjectCode', '==', subjectCode).limit(1).get();
+        if (left.empty) await db.collection('subjectAccess').doc(`${facultyUid}_${subjectCode}`).delete();
+      } catch (markerErr) {
+        console.warn("Subject access cleanup skipped:", markerErr);
+      }
+    }
     await logActivity(currentUserEmail, `Unassigned subject ${subjectCode} from ${facultyName}`);
     alert(`Successfully unassigned ${subjectCode}.`);
     loadActiveAssignmentsList();
@@ -2929,18 +2999,21 @@ async function createFacultyAccount() {
 }
 
 async function addNewSubjectCode() {
-  const subjectCode = document.getElementById('adminSubCode').value.trim();
-  const subjectName = document.getElementById('adminSubTitle').value.trim();
-  const yearLevel = document.getElementById('adminSubYear').value;
-  const semester = document.getElementById('adminSubSem').value;
+  const val = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
+  const subjectCode = val('adminSubCode').trim().toUpperCase().replace(/\s+/g, ' ');
+  const subjectName = val('adminSubTitle').trim();
+  const yearLevel = val('adminSubYear') || '1';
+  const semester = val('adminSubSem') || '1S';
+  const units = Math.min(12, Math.max(1, parseInt(val('adminSubUnits'), 10) || 3));
 
   if (!subjectCode || !subjectName) return alert("Complete both Code and Subject Name.");
+  if (/[\/]/.test(subjectCode)) return alert("Subject code cannot contain a slash.");
 
   try {
     await db.collection('subjects').doc(subjectCode).set({
       subjectCode,
       subjectName,
-      units: 3,
+      units,
       yearLevel,
       semester,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -2948,9 +3021,54 @@ async function addNewSubjectCode() {
 
     await logActivity(currentUserEmail, `Added subject code ${subjectCode}`);
     alert(`Subject ${subjectCode} saved successfully!`);
+    ['adminSubCode', 'adminSubTitle'].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
     loadAdminDashboardData();
   } catch (err) {
     alert("Error saving subject: " + err.message);
+  }
+}
+
+// Any section code is accepted (BSIT-1A, BSIT-2D, ALL, ...); only the format is checked, never a fixed list.
+function normalizeSectionCode(input) {
+  const v = String(input || '').trim().toUpperCase().replace(/\s+/g, '-');
+  return /^[A-Z0-9][A-Z0-9_-]{0,29}$/.test(v) ? v : null;
+}
+
+// subjectAccess/{facultyUid}_{subjectCode} lets Firestore rules authorize an instructor for ANY section of a subject
+async function ensureSubjectAccessMarker(facultyUid, subjectCode) {
+  try {
+    await db.collection('subjectAccess').doc(`${facultyUid}_${subjectCode}`).set({
+      facultyUid,
+      subjectCode,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+  } catch (err) {
+    console.warn("Subject access marker skipped:", err);
+  }
+}
+
+async function backfillSubjectAccessMarkers(assignmentsSnap) {
+  try {
+    const have = new Set();
+    (await db.collection('subjectAccess').get()).forEach((d) => have.add(d.id));
+    const batch = db.batch();
+    let pending = 0;
+    assignmentsSnap.forEach((d) => {
+      const asg = d.data();
+      if (!asg.facultyUid || !asg.subjectCode) return;
+      const id = `${asg.facultyUid}_${asg.subjectCode}`;
+      if (have.has(id)) return;
+      have.add(id);
+      batch.set(db.collection('subjectAccess').doc(id), {
+        facultyUid: asg.facultyUid,
+        subjectCode: asg.subjectCode,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+      pending++;
+    });
+    if (pending) await batch.commit();
+  } catch (err) {
+    console.warn("Subject access backfill skipped:", err);
   }
 }
 
@@ -2966,7 +3084,11 @@ async function assignSubjectToFaculty() {
 
   const promptedSection = prompt("Enter the Section code to assign (e.g., BSIT-1A, BSIT-1B, ALL):", "BSIT-1A");
   if (!promptedSection) return;
-  const selectedSection = promptedSection.trim().toUpperCase();
+  const selectedSection = normalizeSectionCode(promptedSection);
+  if (!selectedSection) {
+    alert("Invalid section code. Use letters, numbers and hyphens only (for example BSIT-2D, or ALL).");
+    return;
+  }
 
   const facultyEmail = facultySelect.options[facultySelect.selectedIndex]?.text || facultyUid;
   const assignmentId = buildAssignmentDocId(facultyUid, subjectCode, selectedSection);
@@ -2987,6 +3109,7 @@ async function assignSubjectToFaculty() {
       assignedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
 
+    await ensureSubjectAccessMarker(facultyUid, subjectCode);
     await logActivity(currentUserEmail, `Assigned ${subjectCode} (${selectedSection}) to instructor ${facultyUid}`);
     alert(`Successfully assigned ${subjectCode} [Section: ${selectedSection}] to ${facultyEmail}!`);
     loadAdminDashboardData();
@@ -3315,6 +3438,89 @@ let studentDataCache = null;
 
 function invalidateStudentData() {
   studentDataCache = null;
+  swrClear('student:');
+}
+
+const SWR_PREFIX = 'iteSWR:v1:';
+const SWR_TTL_MS = 30 * 60 * 1000;
+
+function swrReplacer(key, value) {
+  if (value && typeof value === 'object' && typeof value.seconds === 'number' && typeof value.nanoseconds === 'number') {
+    return { __ts: value.seconds * 1000 + Math.floor(value.nanoseconds / 1e6) };
+  }
+  return value;
+}
+function swrReviver(key, value) {
+  if (value && typeof value === 'object' && typeof value.__ts === 'number') return firebase.firestore.Timestamp.fromMillis(value.__ts);
+  return value;
+}
+function swrRead(key) {
+  try {
+    const raw = sessionStorage.getItem(SWR_PREFIX + key);
+    if (!raw) return null;
+    const obj = JSON.parse(raw, swrReviver);
+    return obj && Date.now() - obj.ts < SWR_TTL_MS ? obj.data : null;
+  } catch (e) { return null; }
+}
+function swrWrite(key, data) {
+  try { sessionStorage.setItem(SWR_PREFIX + key, JSON.stringify({ ts: Date.now(), data }, swrReplacer)); } catch (e) { /* storage full or unavailable */ }
+}
+function swrClear(prefix) {
+  try {
+    Object.keys(sessionStorage).filter((k) => k.startsWith(SWR_PREFIX + (prefix || ''))).forEach((k) => sessionStorage.removeItem(k));
+  } catch (e) { /* ignore */ }
+}
+const swrSignature = (raw) => JSON.stringify(raw, swrReplacer);
+
+function inflateStudentData(raw) {
+  const list = raw.subjects || [];
+  return {
+    subjectsSnapshot: { empty: list.length === 0, size: list.length, forEach: (fn) => list.forEach((x) => fn({ id: x.id, data: () => x.data })) },
+    grades: raw.grades || [],
+    enrollments: raw.enrollments || [],
+    studentId: raw.studentId,
+    fullName: raw.fullName
+  };
+}
+
+function refreshStudentViews() {
+  loadStudentDashboard(currentStudentSchoolId, currentStudentFullName);
+  loadAvailableSubjectsForStudent();
+}
+
+async function fetchStudentDataRaw() {
+  const uid = currentUserId;
+  let studentId = String(currentStudentSchoolId || '').trim();
+  let fullName = String(currentStudentFullName || '').trim();
+
+  if ((!studentId || !fullName) && uid) {
+    const uDoc = await db.collection('users').doc(uid).get();
+    if (uDoc.exists) {
+      const uData = uDoc.data();
+      studentId = String(uData.studentId || '').trim();
+      fullName = String(uData.fullName || '').trim();
+      currentStudentSchoolId = studentId;
+      currentStudentFullName = fullName;
+    }
+  }
+
+  const [subjectsSnapshot, gradeSnaps, enrollmentsSnapshot] = await Promise.all([
+    db.collection('subjects').get(),
+    Promise.all([
+      studentId ? db.collection('grades').where('isReleased', '==', true).where('studentId', '==', studentId).get() : null,
+      fullName ? db.collection('grades').where('isReleased', '==', true).where('fullName', '==', fullName).get() : null
+    ]),
+    uid ? db.collection('enrollments').where('studentUid', '==', uid).get() : null
+  ]);
+
+  const subjects = [];
+  subjectsSnapshot.forEach((d) => subjects.push({ id: d.id, data: d.data() }));
+  const gradeDocsMap = new Map();
+  gradeSnaps.forEach((snap) => { if (snap) snap.forEach((doc) => gradeDocsMap.set(doc.id, doc.data())); });
+  const enrollments = [];
+  if (enrollmentsSnapshot) enrollmentsSnapshot.forEach((doc) => enrollments.push(doc.data()));
+
+  return { subjects, grades: Array.from(gradeDocsMap.values()), enrollments, studentId, fullName };
 }
 
 function getStudentData() {
@@ -3323,39 +3529,26 @@ function getStudentData() {
     return studentDataCache.promise;
   }
 
-  const promise = (async () => {
-    let studentId = String(currentStudentSchoolId || '').trim();
-    let fullName = String(currentStudentFullName || '').trim();
+  const key = 'student:' + uid;
+  const cachedRaw = uid ? swrRead(key) : null;
+  let promise;
 
-    if ((!studentId || !fullName) && uid) {
-      const uDoc = await db.collection('users').doc(uid).get();
-      if (uDoc.exists) {
-        const uData = uDoc.data();
-        studentId = String(uData.studentId || '').trim();
-        fullName = String(uData.fullName || '').trim();
-        currentStudentSchoolId = studentId;
-        currentStudentFullName = fullName;
+  if (cachedRaw) {
+    // Instant paint from this tab's session cache, then refresh quietly and re-render only if something changed
+    promise = Promise.resolve(inflateStudentData(cachedRaw));
+    fetchStudentDataRaw().then((raw) => {
+      swrWrite(key, raw);
+      if (swrSignature(raw) !== swrSignature(cachedRaw) && studentDataCache && studentDataCache.promise === promise) {
+        studentDataCache = { uid, ts: Date.now(), promise: Promise.resolve(inflateStudentData(raw)) };
+        refreshStudentViews();
       }
-    }
-
-    const [subjectsSnapshot, gradeSnaps, enrollmentsSnapshot] = await Promise.all([
-      db.collection('subjects').get(),
-      Promise.all([
-        studentId ? db.collection('grades').where('isReleased', '==', true).where('studentId', '==', studentId).get() : null,
-        fullName ? db.collection('grades').where('isReleased', '==', true).where('fullName', '==', fullName).get() : null
-      ]),
-      uid ? db.collection('enrollments').where('studentUid', '==', uid).get() : null
-    ]);
-
-    const gradeDocsMap = new Map();
-    gradeSnaps.forEach((snap) => {
-      if (snap) snap.forEach((doc) => gradeDocsMap.set(doc.id, doc.data()));
+    }).catch((err) => console.warn('Background refresh failed:', err));
+  } else {
+    promise = notifySlow(fetchStudentDataRaw(), 'Loading your records').then((raw) => {
+      swrWrite(key, raw);
+      return inflateStudentData(raw);
     });
-    const enrollments = [];
-    if (enrollmentsSnapshot) enrollmentsSnapshot.forEach((doc) => enrollments.push(doc.data()));
-
-    return { subjectsSnapshot, grades: Array.from(gradeDocsMap.values()), enrollments, studentId, fullName };
-  })();
+  }
 
   studentDataCache = { uid, ts: Date.now(), promise };
   promise.catch(() => {
@@ -3569,6 +3762,61 @@ function formatComponentScore(entry, categoryKey, maxScores) {
   return String(entry.value);
 }
 
+// ------------------------------------------------------------------
+// DESCRIPTIVE COURSE EVALUATION WEIGHTS (shown in the Assessment Breakdown; never used to compute grades)
+// ------------------------------------------------------------------
+const assessmentWeightsCache = new Map();
+
+async function fetchAssessmentWeights(subjectCode) {
+  const key = String(subjectCode || '').trim();
+  if (!key) return null;
+  if (currentUserRole === 'instructor' && key === activeSubjectCode) return getActiveWeights();
+  if (assessmentWeightsCache.has(key)) return assessmentWeightsCache.get(key);
+
+  let gf = null;
+  try {
+    const snap = await db.collection('instructorFormulas').where('subjectCode', '==', key).limit(5).get();
+    snap.forEach((d) => { if (!gf && d.data().gradingFormula) gf = d.data().gradingFormula; });
+    if (!gf) {
+      const sd = await db.collection('subjects').doc(key).get();
+      if (sd.exists && sd.data().gradingFormula) gf = sd.data().gradingFormula;
+    }
+  } catch (err) {
+    console.warn("Could not load course evaluation weights:", err);
+  }
+
+  const weights = gf ? {
+    lab: Number(gf.weightLab) || 0,
+    quizzes: Number(gf.weightQuizzes) || 0,
+    oral: Number(gf.weightOutput) || 0, // stored key kept for compatibility; this is Oral Recitation / Participation
+    exam: Number(gf.weightExam) || 0
+  } : null;
+  assessmentWeightsCache.set(key, weights);
+  return weights;
+}
+
+function renderWeightsCard(el, weights, stats) {
+  const formula = `Overall grade = (Prelim ${stats.prelim.toFixed(2)} + Midterm ${stats.midterm.toFixed(2)} + Finals ${stats.finals.toFixed(2)}) \u00F7 3 = ${stats.averageDisplay}`;
+  const head = '<div class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400">Grade structure (descriptive)</div>';
+  if (!weights) {
+    el.innerHTML = `${head}<div class="text-[11px] text-slate-500 italic">Course evaluation weights have not been set for this subject.</div><div class="text-[11px] text-slate-400">${escapeHtml(formula)}</div>`;
+    return;
+  }
+  const rows = [
+    ['Laboratory', weights.lab],
+    ['Quizzes', weights.quizzes],
+    ['Oral Recitation / Participation', weights.oral],
+    ['Major Exam', weights.exam]
+  ];
+  el.innerHTML = head + rows.map(([label, pct]) => `
+    <div>
+      <div class="flex justify-between text-[11px] text-slate-300 mb-1"><span>${escapeHtml(label)}</span><span class="font-mono font-bold text-white">${pct}%</span></div>
+      <div class="h-1.5 rounded-full bg-slate-800 overflow-hidden"><div class="h-full bg-emerald-500" style="width:${Math.max(0, Math.min(100, pct))}%"></div></div>
+    </div>`).join('') +
+    `<div class="text-[11px] text-slate-400 pt-1">${escapeHtml(formula)}</div>
+     <div class="text-[10px] text-slate-500 italic">The percentages describe how the course is evaluated. They do not change the computed grade.</div>`;
+}
+
 async function openStudentGradeBreakdownModal(g) {
   const modal = document.getElementById('studentGradeBreakdownModal');
   const panel = document.getElementById('studentGradeBreakdownModalPanel');
@@ -3605,6 +3853,13 @@ async function openStudentGradeBreakdownModal(g) {
     </span>
   `;
   body.appendChild(summary);
+
+  // Descriptive weights load in the background so the modal still opens instantly
+  const weightsCard = document.createElement('div');
+  weightsCard.className = "rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-2";
+  weightsCard.innerHTML = '<div class="h-3 w-1/3 rounded bg-slate-800/70 animate-pulse"></div><div class="h-2 rounded bg-slate-800/70 animate-pulse"></div><div class="h-2 rounded bg-slate-800/70 animate-pulse"></div>';
+  body.appendChild(weightsCard);
+  fetchAssessmentWeights(subjectCode).then((w) => renderWeightsCard(weightsCard, w, stats));
 
   // One block per grading period
   let totalItems = 0;
@@ -3917,7 +4172,10 @@ async function applySelectedSubjects() {
     return alert("Section selection is required to submit an enrollment request.");
   }
 
-  const cleanSection = selectedSection.trim().toUpperCase();
+  const cleanSection = normalizeSectionCode(selectedSection);
+  if (!cleanSection) {
+    return alert("Invalid section code. Use letters, numbers and hyphens only (for example BSIT-2D).");
+  }
 
   try {
     const batch = db.batch();
@@ -4077,6 +4335,7 @@ function detachNotificationsListener() {
   notificationsUnsubscribe = null;
   notificationDocs = [];
   invalidateStudentData();
+  swrClear();
   if (typeof studentSubjectsUnsubscribe === 'function') studentSubjectsUnsubscribe();
   studentSubjectsUnsubscribe = null;
 }
@@ -4193,12 +4452,21 @@ async function sendNotifications(items) {
 }
 
 async function logActivity(user, action) {
-  await db.collection('logs').add({
-    user, action,
-    timestamp: firebase.firestore.FieldValue.serverTimestamp()
-  });
+  try {
+    await db.collection('logs').add({
+      user,
+      action: String(action || '').slice(0, 500),
+      uid: currentUserId || '',
+      role: currentUserRole || '',
+      timestamp: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } catch (err) {
+    console.warn("Audit log write failed (action was still completed):", err);
+  }
 }
 
-function handleLogout() {
+async function handleLogout() {
+  await logActivity(currentUserEmail, 'Signed out');
+  swrClear();
   auth.signOut();
 }
