@@ -832,6 +832,144 @@ function setupSectionNav() {
 // ------------------------------------------------------------------
 const byFullName = (x, y) => String(x.fullName || '').localeCompare(String(y.fullName || ''), undefined, { sensitivity: 'base' });
 
+// ------------------------------------------------------------------
+// ENROLLMENT GATE + ACCOUNT LINKING (a grade may only belong to an APPROVED, enrolled student)
+// ------------------------------------------------------------------
+// Approved enrollments for the class/section keyed by Student ID. Pending and rejected never count.
+function approvedRosterMap(enrollList, section) {
+  const map = new Map();
+  enrollList.forEach((en) => {
+    if (en.status !== 'approved' || !en.studentId) return;
+    if (section && section !== 'ALL' && en.section !== section) return;
+    const id = String(en.studentId).trim();
+    if (!map.has(id)) map.set(id, { studentUid: en.studentUid || '', fullName: en.fullName || '', section: en.section || '' });
+  });
+  return map;
+}
+
+// Student side: a released grade is shown only if it is linked to MY account, or (older records without
+// an account link) I have an approved enrollment in that subject. Prevents grades released to a name/ID
+// before the student was registered or enrolled from appearing later.
+function filterVisibleGrades(grades, uid, enrollments) {
+  const approvedCodes = new Set(enrollments
+    .filter((e) => e.status === 'approved' && e.subjectCode)
+    .map((e) => String(e.subjectCode).trim().toUpperCase()));
+  return grades.filter((g) => (g.studentUid
+    ? g.studentUid === uid
+    : approvedCodes.has(String(g.classId || g.subjectCode || '').trim().toUpperCase())));
+}
+
+// Admin data health: split saved grades into OK / needs account link / orphan
+function classifyGradeHealth(grades, enrollList) {
+  const byId = new Map();
+  const byName = new Map();
+  enrollList.forEach((en) => {
+    if (en.status !== 'approved' || !en.subjectCode || !en.studentId) return;
+    const code = String(en.subjectCode).trim().toUpperCase();
+    byId.set(`${code}|${String(en.studentId).trim()}`, en);
+    const nk = `${code}|${normalizeNameKey(en.fullName)}`;
+    byName.set(nk, byName.has(nk) ? null : en); // ambiguous names are never auto-linked
+  });
+  const result = { ok: 0, toLink: [], orphans: [] };
+  grades.forEach(({ id, data: g }) => {
+    const code = String(g.classId || '').trim().toUpperCase();
+    const en = byId.get(`${code}|${String(g.studentId || '').trim()}`) || byName.get(`${code}|${normalizeNameKey(g.fullName)}`);
+    if (!en) { result.orphans.push({ id, g }); return; }
+    if (en.studentUid && g.studentUid !== en.studentUid) result.toLink.push({ id, uid: en.studentUid, studentId: en.studentId, g });
+    else result.ok++;
+  });
+  return result;
+}
+
+async function commitInChunks(items, applyFn, size = 400) {
+  for (let i = 0; i < items.length; i += size) {
+    const batch = db.batch();
+    items.slice(i, i + size).forEach((it) => applyFn(batch, it));
+    await batch.commit();
+  }
+}
+
+let healthScan = null;
+
+function renderDataHealth() {
+  const sum = document.getElementById('healthSummary');
+  const actions = document.getElementById('healthActions');
+  const table = document.getElementById('healthOrphans');
+  if (!healthScan || !sum) return;
+  const card = (label, value, tone) => `<div class="p-3 rounded-xl border border-slate-800 bg-slate-950"><div class="text-[10px] font-extrabold uppercase tracking-widest text-slate-500">${label}</div><div class="mt-1 text-xl font-black ${tone}">${value}</div></div>`;
+  sum.innerHTML = card('Grades checked', healthScan.total, 'text-white') + card('Linked / OK', healthScan.ok, 'text-emerald-400') +
+    card('Need account link', healthScan.toLink.length, healthScan.toLink.length ? 'text-amber-400' : 'text-white') +
+    card('Orphan grades', healthScan.orphans.length, healthScan.orphans.length ? 'text-rose-400' : 'text-white');
+  const btn = (fn, label, tone) => `<button type="button" onclick="${fn}" class="px-3.5 py-2 rounded-xl border text-xs font-bold ${tone}">${label}</button>`;
+  actions.innerHTML = (healthScan.toLink.length ? btn('linkGradeAccounts()', `Link ${healthScan.toLink.length} grade(s) to accounts`, 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400') : '') +
+    (healthScan.orphans.some((o) => o.g.isReleased) ? btn('holdOrphanGrades()', 'Hold released orphans (hide from students)', 'border-amber-500/30 bg-amber-500/10 text-amber-400') : '') +
+    (healthScan.orphans.length ? btn('deleteOrphanGrades()', `Delete ${healthScan.orphans.length} orphan(s)`, 'border-rose-500/30 bg-rose-500/10 text-rose-400') : '');
+  actions.classList.toggle('hidden', !actions.innerHTML);
+  table.innerHTML = healthScan.orphans.length
+    ? `<table class="w-full text-left text-xs"><thead><tr class="text-[10px] font-extrabold uppercase tracking-widest text-slate-500"><th class="py-2 pr-3">Subject</th><th class="py-2 pr-3">Student ID</th><th class="py-2 pr-3">Name</th><th class="py-2 pr-3">Section</th><th class="py-2">Released</th></tr></thead><tbody class="divide-y divide-slate-800/60">` +
+      healthScan.orphans.slice(0, 100).map(({ g }) => `<tr><td class="py-1.5 pr-3 font-mono text-slate-300">${escapeHtml(g.classId)}</td><td class="py-1.5 pr-3 font-mono text-slate-400">${escapeHtml(g.studentId)}</td><td class="py-1.5 pr-3 text-white">${escapeHtml(g.fullName)}</td><td class="py-1.5 pr-3 text-slate-400">${escapeHtml(g.section || '')}</td><td class="py-1.5 ${g.isReleased ? 'text-rose-400' : 'text-slate-500'}">${g.isReleased ? 'Yes' : 'No'}</td></tr>`).join('') +
+      `</tbody></table>${healthScan.orphans.length > 100 ? `<div class="text-[11px] text-slate-500 pt-2">Showing 100 of ${healthScan.orphans.length}.</div>` : ''}`
+    : '<div class="text-xs text-slate-500">No orphan grades found.</div>';
+}
+
+async function scanDataHealth() {
+  const status = document.getElementById('healthStatus');
+  if (status) status.textContent = 'Scanning...';
+  try {
+    const [gradesSnap, enrollSnap] = await Promise.all([db.collection('grades').get(), db.collection('enrollments').get()]);
+    const grades = [];
+    gradesSnap.forEach((d) => grades.push({ id: d.id, data: d.data() }));
+    const enrolls = [];
+    enrollSnap.forEach((d) => enrolls.push(d.data()));
+    const res = classifyGradeHealth(grades, enrolls);
+    healthScan = { total: grades.length, ...res };
+    if (status) status.textContent = `Scanned ${grades.length} grades and ${enrolls.length} enrollments at ${new Date().toLocaleTimeString()}`;
+    renderDataHealth();
+  } catch (err) {
+    console.error("Data health scan error:", err);
+    if (status) status.textContent = '';
+    alert("Could not scan: " + (err.message || err));
+  }
+}
+
+async function linkGradeAccounts() {
+  if (!healthScan || !healthScan.toLink.length) return;
+  const items = healthScan.toLink.slice();
+  try {
+    await commitInChunks(items, (b, it) => b.update(db.collection('grades').doc(it.id), { studentUid: it.uid, studentId: it.studentId }));
+    await logActivity(currentUserEmail, `Data health: linked ${items.length} grade record(s) to student accounts`);
+    healthScan.ok += items.length;
+    healthScan.toLink = [];
+    renderDataHealth();
+    alert(`${items.length} grade record(s) linked to student accounts.`);
+  } catch (err) { alert("Could not link grades: " + (err.message || err)); }
+}
+
+async function holdOrphanGrades() {
+  const items = healthScan ? healthScan.orphans.filter((o) => o.g.isReleased) : [];
+  if (!items.length || !confirm(`Hide ${items.length} released orphan grade(s) from students? They stay in the database as drafts.`)) return;
+  try {
+    await commitInChunks(items, (b, it) => b.update(db.collection('grades').doc(it.id), { isReleased: false }));
+    await logActivity(currentUserEmail, `Data health: held ${items.length} released orphan grade(s)`);
+    items.forEach((o) => { o.g.isReleased = false; });
+    renderDataHealth();
+    alert(`${items.length} orphan grade(s) are now hidden from students.`);
+  } catch (err) { alert("Could not hold grades: " + (err.message || err)); }
+}
+
+async function deleteOrphanGrades() {
+  const items = healthScan ? healthScan.orphans.slice() : [];
+  if (!items.length || !confirm(`Permanently delete ${items.length} orphan grade record(s)? This cannot be undone.`)) return;
+  try {
+    await commitInChunks(items, (b, it) => b.delete(db.collection('grades').doc(it.id)));
+    await logActivity(currentUserEmail, `Data health: deleted ${items.length} orphan grade record(s)`);
+    healthScan.total -= items.length;
+    healthScan.orphans = [];
+    renderDataHealth();
+    alert(`${items.length} orphan grade record(s) deleted.`);
+  } catch (err) { alert("Could not delete grades: " + (err.message || err)); }
+}
+
 function rosterFromEnrollments(list, section) {
   const seen = new Set();
   const roster = [];
@@ -2523,7 +2661,7 @@ function validateImportedRows() {
     if (sid) {
       if (seen.has(sid)) issues.push({ line, level: 'error', msg: `Row ${line}: duplicate of row ${seen.get(sid)} (${sid})` });
       else seen.set(sid, line);
-      if (rosterIds.size && !rosterIds.has(sid)) issues.push({ line, level: 'warn', msg: `Row ${line}: ${sid} is not on the approved roster for this class` });
+      if (!rosterIds.has(sid)) issues.push({ line, level: 'error', msg: `Row ${line}: ${sid} is not an approved student of this class and will be skipped when saving` });
     }
     ['prelim', 'midterm', 'finals', ...GRID_SCORE_FIELDS].forEach((f) => {
       const v = toFiniteOrNull(row[f]);
@@ -2646,21 +2784,12 @@ async function gatherGradeWriteContext() {
   const enrollAll = [];
   enrollSnap.forEach((d) => enrollAll.push(d.data()));
 
-  let allowedStudentIds = null;
-  if (activeInstructorSectionFilter && activeInstructorSectionFilter !== 'ALL') {
-    allowedStudentIds = new Set();
-    enrollAll.forEach((en) => {
-      if (en.section === activeInstructorSectionFilter && en.studentId) allowedStudentIds.add(String(en.studentId).trim());
-    });
-  }
-
-  const registeredIndex = await buildRegisteredStudentIndex(activeSubjectCode, parsedGradeData, enrollAll);
-  const uidByStudentId = new Map();
-  registeredIndex.forEach((v) => { if (v.studentId && v.studentUid) uidByStudentId.set(String(v.studentId).trim(), v.studentUid); });
+  const approved = approvedRosterMap(enrollAll, activeInstructorSectionFilter);
+  const registeredIndex = await buildRegisteredStudentIndex(activeSubjectCode, [], enrollAll); // enrolled students only: no extra reads
   const existingById = new Map();
   if (existingSnap) existingSnap.forEach((d) => existingById.set(d.id, d.data()));
 
-  return { allowedStudentIds, registeredIndex, uidByStudentId, existingById };
+  return { approved, registeredIndex, existingById };
 }
 
 async function commitGrades(mode) {
@@ -2668,27 +2797,41 @@ async function commitGrades(mode) {
   if (!activeSubjectCode) return alert("Select an active subject first.");
   if (!parsedGradeData.length) return alert("Upload an Excel sheet to parse grades first.");
 
-  const gradable = parsedGradeData.filter((r) => String(r.studentId || '').trim() && String(r.fullName || '').trim() && !isNotGradedRow(r));
-  if (!gradable.length) return alert(`There are no graded rows to ${release ? 'release' : 'save'}. Enter or import scores first.`);
-
-  if (release && !confirm(`Release official grades for ${gradable.length} student(s) in ${activeSubjectCode} [${activeInstructorSectionFilter}]?\n\nStudents will be able to see these grades and will be notified.`)) return;
-
   try {
     const ctx = await gatherGradeWriteContext();
+    if (!ctx.approved.size) {
+      return alert("This class has no approved students yet. Approve enrollment requests (Roster Requests) first. Grades can only be saved for enrolled students.");
+    }
+
+    // Enrollment gate: only students with an APPROVED enrollment in this subject/section get a grade
+    const plan = [];
+    const skipped = [];
+    parsedGradeData.forEach((row) => {
+      if (!String(row.studentId || '').trim() || !String(row.fullName || '').trim()) return; // incomplete row
+      if (isNotGradedRow(row)) return; // roster placeholder: nothing entered yet
+      const cleanups = [];
+      const effectiveStudentId = resolveEffectiveStudentId(row, activeSubjectCode, ctx.registeredIndex, { delete: (ref) => cleanups.push(ref) });
+      const cleanStudentId = String(effectiveStudentId).trim();
+      const member = ctx.approved.get(cleanStudentId);
+      if (!member) { skipped.push(`${cleanStudentId} (${row.fullName})`); return; }
+      plan.push({ row, cleanStudentId, member, cleanups });
+    });
+
+    if (!plan.length) {
+      return alert(`Nothing to ${release ? 'release' : 'save'}: ${skipped.length} row(s) are not approved students of this class (${skipped.slice(0, 4).join(', ')}${skipped.length > 4 ? ', ...' : ''}).`);
+    }
+    const skippedNote = skipped.length ? `\n\n${skipped.length} row(s) will be SKIPPED because they are not approved students of this class.` : '';
+    if (release && !confirm(`Release official grades for ${plan.length} student(s) in ${activeSubjectCode} [${activeInstructorSectionFilter}]?\n\nStudents will be able to see these grades and will be notified.${skippedNote}`)) return;
+
     const batch = db.batch();
     const notifyItems = [];
     const diffs = [];
     let savedCount = 0;
     let updatedReleased = 0;
 
-    parsedGradeData.forEach((row) => {
-      if (!String(row.studentId || '').trim() || !String(row.fullName || '').trim()) return; // incomplete row
-      if (isNotGradedRow(row)) return; // roster placeholder: nothing entered yet
+    plan.forEach(({ row, cleanStudentId, member, cleanups }) => {
+      cleanups.forEach((ref) => batch.delete(ref));
       queueRenamedDocCleanup(row, batch);
-      const effectiveStudentId = resolveEffectiveStudentId(row, activeSubjectCode, ctx.registeredIndex, batch);
-      const cleanStudentId = String(effectiveStudentId).trim();
-
-      if (ctx.allowedStudentIds && ctx.allowedStudentIds.size > 0 && !ctx.allowedStudentIds.has(cleanStudentId)) return;
 
       const docId = buildGradeDocId(activeSubjectCode, cleanStudentId);
       const gradeRef = db.collection('grades').doc(docId);
@@ -2713,6 +2856,7 @@ async function commitGrades(mode) {
         schoolYear: CURRENT_SCHOOL_YEAR,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       };
+      if (member.studentUid) payload.studentUid = member.studentUid; // ties the grade to the student's account
       // Releasing publishes. Saving a draft must NEVER hide a grade that is already released.
       if (release) payload.isReleased = true;
       else if (!wasReleased) payload.isReleased = false;
@@ -2726,12 +2870,11 @@ async function commitGrades(mode) {
       const changed = !prev || !wasReleased && release || termChanges.length > 0 || extraChanged;
       if (prev && (termChanges.length || extraChanged)) diffs.push(`${cleanStudentId}: ${termChanges.join(', ') || 'recorded scores'}`);
 
-      const recipientUid = ctx.uidByStudentId.get(cleanStudentId);
-      const students_see_it = release || wasReleased;
-      if (changed && students_see_it && recipientUid) {
+      const studentsSeeIt = release || wasReleased;
+      if (changed && studentsSeeIt && member.studentUid) {
         const firstRelease = release && !wasReleased;
         notifyItems.push({
-          recipientUid,
+          recipientUid: member.studentUid,
           type: firstRelease ? 'grade_released' : 'grade_updated',
           title: firstRelease ? 'Grades released' : 'Grades updated',
           message: `Your ${firstRelease ? 'official grades for' : 'grades in'} ${activeSubjectCode} ${firstRelease ? 'have been released.' : 'were updated by your instructor.'}`,
@@ -2745,14 +2888,14 @@ async function commitGrades(mode) {
     await batch.commit();
     await sendNotifications(notifyItems);
     const detail = diffs.length ? ` | changes: ${diffs.slice(0, 6).join('; ')}${diffs.length > 6 ? ` (+${diffs.length - 6} more)` : ''}` : '';
-    await logActivity(currentUserEmail, `${release ? 'Released official grades for' : 'Saved draft grades for'} ${activeSubjectCode} [${activeInstructorSectionFilter}] (${savedCount} records)${detail}`);
+    const skipDetail = skipped.length ? ` | skipped (not enrolled): ${skipped.slice(0, 6).join('; ')}${skipped.length > 6 ? ` (+${skipped.length - 6} more)` : ''}` : '';
+    await logActivity(currentUserEmail, `${release ? 'Released official grades for' : 'Saved draft grades for'} ${activeSubjectCode} [${activeInstructorSectionFilter}] (${savedCount} records)${detail}${skipDetail}`);
 
-    if (release) {
-      alert(`Official grades successfully released for ${savedCount} student(s) in Section ${activeInstructorSectionFilter}!`);
-    } else {
-      alert(`Draft grades successfully saved for ${savedCount} student(s) in Section ${activeInstructorSectionFilter}!` +
-        (updatedReleased ? `\n${updatedReleased} already-released record(s) were updated and the student(s) were notified.` : ''));
-    }
+    alert((release
+      ? `Official grades successfully released for ${savedCount} student(s) in Section ${activeInstructorSectionFilter}!`
+      : `Draft grades successfully saved for ${savedCount} student(s) in Section ${activeInstructorSectionFilter}!`) +
+      (updatedReleased ? `\n${updatedReleased} already-released record(s) were updated and the student(s) were notified.` : '') +
+      (skipped.length ? `\n\n${skipped.length} row(s) were NOT saved because the student is not enrolled (approved) in this class:\n${skipped.slice(0, 5).join('\n')}${skipped.length > 5 ? '\n...' : ''}` : ''));
     loadInstructorGradesFromFirestore(activeSubjectCode, activeInstructorSectionFilter);
   } catch (err) {
     console.error(release ? "Release Error:" : "Save Draft Error:", err);
@@ -3678,7 +3821,7 @@ function invalidateStudentData() {
   swrClear('student:');
 }
 
-const SWR_PREFIX = 'iteSWR:v1:';
+const SWR_PREFIX = 'iteSWR:v2:';
 const SWR_TTL_MS = 30 * 60 * 1000;
 
 function swrReplacer(key, value) {
@@ -3745,7 +3888,8 @@ async function fetchStudentDataRaw() {
     db.collection('subjects').get(),
     Promise.all([
       studentId ? db.collection('grades').where('isReleased', '==', true).where('studentId', '==', studentId).get() : null,
-      fullName ? db.collection('grades').where('isReleased', '==', true).where('fullName', '==', fullName).get() : null
+      fullName ? db.collection('grades').where('isReleased', '==', true).where('fullName', '==', fullName).get() : null,
+      uid ? db.collection('grades').where('isReleased', '==', true).where('studentUid', '==', uid).get().catch(() => null) : null // needs the updated rules; harmless until then
     ]),
     uid ? db.collection('enrollments').where('studentUid', '==', uid).get() : null
   ]);
@@ -3757,7 +3901,7 @@ async function fetchStudentDataRaw() {
   const enrollments = [];
   if (enrollmentsSnapshot) enrollmentsSnapshot.forEach((doc) => enrollments.push(doc.data()));
 
-  return { subjects, grades: Array.from(gradeDocsMap.values()), enrollments, studentId, fullName };
+  return { subjects, grades: filterVisibleGrades(Array.from(gradeDocsMap.values()), uid, enrollments), enrollments, studentId, fullName };
 }
 
 function getStudentData() {

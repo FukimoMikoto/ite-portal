@@ -541,6 +541,7 @@
               <button type="button" data-page="atrisk" class="subnav-btn"><i data-lucide="flag" class="w-4 h-4 shrink-0"></i><span class="nav-label">At-Risk Tracker</span></button>
               <button type="button" data-page="logs" class="subnav-btn"><i data-lucide="scroll-text" class="w-4 h-4 shrink-0"></i><span class="nav-label">Audit Logs</span></button>
               <button type="button" data-page="settings" class="subnav-btn"><i data-lucide="settings" class="w-4 h-4 shrink-0"></i><span class="nav-label">Settings</span></button>
+              <button type="button" data-page="health" class="subnav-btn"><i data-lucide="shield-check" class="w-4 h-4 shrink-0"></i><span class="nav-label">Data Health</span></button>
               <button type="button" onclick="toggleNotificationDrawer(true)" class="subnav-btn"><i data-lucide="bell" class="w-4 h-4 shrink-0"></i><span class="nav-label">Notifications</span><span data-notif-count class="hidden ml-auto px-1.5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black">0</span></button>
             </nav>
           </div>
@@ -1700,6 +1701,21 @@
                 </tbody>
               </table>
             </div>
+          </div>
+
+          <!-- Data health (admin): finds grades that belong to nobody enrolled, links grades to student accounts -->
+          <div data-page="health" class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-4">
+            <div>
+              <h3 class="text-sm font-black text-white uppercase tracking-wider">Data health</h3>
+              <p class="text-xs text-slate-500">Checks every saved grade against approved enrollments. Grades for students who are not enrolled in that subject are "orphans". The scan reads all grades and enrollments once, so run it occasionally.</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-3">
+              <button type="button" onclick="scanDataHealth()" class="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider transition-all">Scan grades</button>
+              <span id="healthStatus" class="text-[11px] text-slate-500"></span>
+            </div>
+            <div id="healthSummary" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+            <div id="healthActions" class="hidden flex flex-wrap gap-2"></div>
+            <div id="healthOrphans" class="overflow-x-auto"></div>
           </div>
 
           <!-- Academic settings (admin): school year, passing grade, promotion thresholds -->
