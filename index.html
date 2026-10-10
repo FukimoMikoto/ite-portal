@@ -385,12 +385,23 @@
                   class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1"
                   >Password</label
                 >
-                <input
-                  type="password"
-                  id="regPassword"
-                  placeholder="••••••••"
-                  class="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500"
-                />
+                <div class="relative">
+                  <input
+                    type="password"
+                    id="regPassword"
+                    placeholder="••••••••"
+                    autocomplete="new-password"
+                    class="w-full px-4 py-2.5 pr-11 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    type="button"
+                    onclick="togglePasswordVisibility('regPassword', 'regPassIcon')"
+                    aria-label="Show or hide password"
+                    class="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                  >
+                    <i data-lucide="eye" id="regPassIcon" class="w-4 h-4"></i>
+                  </button>
+                </div>
               </div>
               <button
                 onclick="handleStudentRegister()"
@@ -797,10 +808,11 @@
                     <th class="py-2 px-3">SUBJECT</th>
                     <th class="py-2 px-3">SECTION</th>
                     <th class="py-2 px-3">STATUS</th>
+                    <th class="py-2 px-3 text-right">ACTION</th>
                   </tr>
                 </thead>
                 <tbody id="studentSubjectsBody" class="divide-y divide-slate-800/60 text-xs">
-                  <tr><td colspan="3" class="px-3 py-4 text-slate-500">Loading your subjects...</td></tr>
+                  <tr><td colspan="4" class="px-3 py-4 text-slate-500">Loading your subjects...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -1088,7 +1100,7 @@
                 <div class="flex items-center justify-between gap-4 p-5 border-b border-slate-800">
                   <div>
                     <h2 class="text-base font-black text-white">Official student roster</h2>
-                    <p class="text-xs text-slate-500">Approved enrollments for the selected class, alphabetical.</p>
+                    <p class="text-xs text-slate-500">Enrolled students of the selected class, alphabetical. Dropping a student removes them from the roster; their saved grades are kept as history.</p>
                   </div>
                   <div class="flex items-center gap-2">
                     <input type="text" oninput="filterRoster(this.value)" placeholder="Search roster..." aria-label="Search roster" class="w-40 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500" />
@@ -1103,10 +1115,11 @@
                         <th class="py-3 px-4 cursor-pointer select-none hover:text-emerald-400" onclick="sortRoster('studentId')" title="Sort by ID">STUDENT ID<span id="rosterSortId"></span></th>
                         <th class="py-3 px-4 cursor-pointer select-none hover:text-emerald-400" onclick="sortRoster('fullName')" title="Sort by name">STUDENT NAME<span id="rosterSortName"> ▲</span></th>
                         <th class="py-3 px-4">SECTION</th>
+                        <th class="py-3 px-4 text-right">ACTION</th>
                       </tr>
                     </thead>
                     <tbody id="studentRosterBody" class="divide-y divide-slate-800/60 text-xs">
-                      <tr><td colspan="4" class="px-4 py-6 text-center text-slate-500">Select an assigned class to view its roster.</td></tr>
+                      <tr><td colspan="5" class="px-4 py-6 text-center text-slate-500">Select an assigned class to view its roster.</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -1328,6 +1341,8 @@
                   PENDING CLASS ROSTER REQUESTS
                 </h3>
                 <div id="pendingEnrollmentsList" class="space-y-2"></div>
+                <h3 class="pt-3 text-xs font-bold text-white uppercase tracking-wider">DROP REQUESTS</h3>
+                <div id="dropRequestsList" class="space-y-2"></div>
               </div>
             </section>
           </div>
@@ -1597,6 +1612,18 @@
             </div>
           </div>
 
+          <!-- Drop requests (admin): students asking to leave a subject; the instructor or the admin decides -->
+          <div data-page="assignments" class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h3 class="text-sm font-black text-white uppercase tracking-wider">Drop requests</h3>
+                <p class="text-xs text-slate-500">Students who asked to drop a subject. Instructors normally decide these; you can decide any of them here.</p>
+              </div>
+              <span id="adminDropCount" class="px-2.5 py-1 rounded-md text-[10px] font-extrabold uppercase tracking-wider bg-slate-800 text-slate-400 border border-slate-700">0</span>
+            </div>
+            <div id="adminDropRequestsList" class="space-y-2"></div>
+          </div>
+
           <!-- Add subject to the curriculum catalog -->
           <div data-page="assignments" class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-4">
             <div>
@@ -1609,6 +1636,7 @@
               <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="adminSubYear">Year level</label><select id="adminSubYear" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"><option value="1">1st Year</option><option value="2">2nd Year</option><option value="3">3rd Year</option><option value="4">4th Year</option></select></div>
               <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="adminSubSem">Semester</label><select id="adminSubSem" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"><option value="1S">1st Semester</option><option value="2S">2nd Semester</option></select></div>
               <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="adminSubUnits">Units</label><input id="adminSubUnits" type="number" min="1" max="12" value="3" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500" /></div>
+              <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="adminSubType">Subject type</label><select id="adminSubType" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"><option value="auto">Auto (by code)</option><option value="major">IT major</option><option value="general">Non-IT (GE / other)</option></select></div>
             </div>
             <button type="button" onclick="addNewSubjectCode()" class="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider transition-all">Save subject</button>
           </div>
@@ -1703,6 +1731,26 @@
             </div>
           </div>
 
+          <!-- Student accounts and IDs (admin): one account per Student ID, duplicate resolution, release an ID -->
+          <div id="studentIdTools" data-page="users" class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-4">
+            <div>
+              <h3 class="text-sm font-black text-white uppercase tracking-wider">Student accounts and IDs</h3>
+              <p class="text-xs text-slate-500">Each Student ID can belong to only one account. Protect existing IDs once, resolve any duplicates, and release an ID that was registered by the wrong person. The scan reads all student accounts once, so run it when needed.</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-3">
+              <button type="button" onclick="scanStudentIds()" class="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider transition-all">Scan student IDs</button>
+              <span id="studentIdStatus" class="text-[11px] text-slate-500"></span>
+            </div>
+            <div id="studentIdSummary" class="grid grid-cols-2 md:grid-cols-5 gap-3"></div>
+            <div id="studentIdActions" class="hidden flex flex-wrap gap-2"></div>
+            <div id="studentIdConflicts" class="space-y-3"></div>
+            <div class="pt-3 border-t border-slate-800 space-y-2">
+              <label for="studentIdSearch" class="block text-[10px] font-bold text-slate-400 uppercase">Find a student (name, ID or email)</label>
+              <input id="studentIdSearch" type="text" oninput="renderStudentIdSearch()" placeholder="Type at least 2 characters" class="w-full md:w-1/2 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500" />
+              <div id="studentIdSearchResults"></div>
+            </div>
+          </div>
+
           <!-- Data health (admin): finds grades that belong to nobody enrolled, links grades to student accounts -->
           <div data-page="health" class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-4">
             <div>
@@ -1718,21 +1766,38 @@
             <div id="healthOrphans" class="overflow-x-auto"></div>
           </div>
 
+          <!-- Export (admin): CSV files built in the browser, free -->
+          <div data-page="health" class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3">
+            <div>
+              <h3 class="text-sm font-black text-white uppercase tracking-wider">Export data (CSV)</h3>
+              <p class="text-xs text-slate-500">Downloads a spreadsheet you can open in Excel. Each export reads its whole collection once, so use it when you need it. Grades include earlier school years (retakes).</p>
+            </div>
+            <div class="flex flex-wrap items-end gap-3">
+              <div>
+                <label for="exportSchoolYear" class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">School year (optional)</label>
+                <input id="exportSchoolYear" type="text" placeholder="2026-2027" maxlength="9" class="w-32 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500" />
+              </div>
+              <button type="button" onclick="exportGradesCsv()" class="px-4 py-2.5 rounded-xl border text-xs font-bold border-emerald-500/30 bg-emerald-500/10 text-emerald-400">Export grades</button>
+              <button type="button" onclick="exportEnrollmentsCsv()" class="px-4 py-2.5 rounded-xl border text-xs font-bold border-slate-600 bg-slate-800/60 text-slate-200">Export enrollments</button>
+              <button type="button" onclick="exportStudentsCsv()" class="px-4 py-2.5 rounded-xl border text-xs font-bold border-slate-600 bg-slate-800/60 text-slate-200">Export students</button>
+            </div>
+            <div id="exportStatus" class="text-[11px] text-slate-500" role="status"></div>
+          </div>
+
           <!-- Academic settings (admin): school year, passing grade, promotion thresholds -->
           <div data-page="settings" class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-4">
             <div>
               <h3 class="text-sm font-black text-white uppercase tracking-wider">Academic settings</h3>
               <p class="text-xs text-slate-500">These values were previously fixed in the code. Changes apply system-wide the next time each user signs in.</p>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
               <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="settingSchoolYear">School year</label><input id="settingSchoolYear" type="text" placeholder="2026-2027" maxlength="9" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500" /></div>
               <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="settingPassing">Passing grade</label><input id="settingPassing" type="number" min="50" max="100" step="0.5" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500" /></div>
-              <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="settingFirstSemUnits">Units for 2nd semester</label><input id="settingFirstSemUnits" type="number" min="1" max="200" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500" /></div>
-              <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5" for="settingFirstYearUnits">Units for next year level</label><input id="settingFirstYearUnits" type="number" min="1" max="200" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500" /></div>
             </div>
             <ul class="text-[11px] text-slate-500 list-disc pl-5 space-y-0.5">
               <li>The school year is stamped on grades saved from now on; older records keep their own year.</li>
               <li>Changing the passing grade changes PASS / AT RISK for existing records everywhere.</li>
+              <li>Year level and semester progression follow the IT (major) subjects of the prospectus: pass every IT subject of a semester to become eligible for the next one. Credited subjects of transferees count as passed (set them under User Management).</li>
             </ul>
             <div class="flex items-center gap-3">
               <button type="button" onclick="saveAcademicSettings()" class="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider transition-all">Save settings</button>
@@ -1862,6 +1927,79 @@
           >
             Update
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dialog: messages that must stay on screen until dismissed (e.g. Student ID already registered) -->
+    <div
+      id="appDialogModal"
+      class="hidden fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="appDialogTitle"
+    >
+      <div
+        id="appDialogPanel"
+        class="glass-panel w-full max-w-sm rounded-2xl p-6 space-y-4 transition-all duration-200 opacity-0 scale-95 border border-slate-800"
+      >
+        <h3 id="appDialogTitle" class="text-sm font-bold text-white"></h3>
+        <p id="appDialogMessage" class="text-xs text-slate-300 whitespace-pre-line leading-relaxed"></p>
+        <div class="flex items-center justify-end pt-2">
+          <button
+            type="button"
+            onclick="closeInfoDialog()"
+            class="px-4 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-bold"
+          >
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: a student without a Student ID enters it (after an admin cleared a duplicate) -->
+    <div
+      id="studentIdClaimModal"
+      class="hidden fixed inset-0 z-[65] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="studentIdClaimTitle"
+    >
+      <div
+        id="studentIdClaimPanel"
+        class="glass-panel w-full max-w-sm rounded-2xl p-6 space-y-4 transition-all duration-200 opacity-0 scale-95 border border-slate-800"
+      >
+        <h3 id="studentIdClaimTitle" class="text-sm font-bold text-white">Enter your Student ID</h3>
+        <p class="text-xs text-slate-400 leading-relaxed">
+          Your account has no Student ID. Enter your official Student ID so your enrollments and grades can be matched to you.
+        </p>
+        <input
+          type="text"
+          id="claimStudentIdInput"
+          placeholder="Student ID"
+          maxlength="40"
+          autocomplete="off"
+          class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500"
+        />
+        <div id="claimStudentIdError" class="text-xs text-rose-400 empty:hidden"></div>
+        <div class="flex items-center justify-between gap-2 pt-2">
+          <button type="button" onclick="handleLogout()" class="px-3 py-1.5 rounded-lg text-xs text-slate-400">Sign out</button>
+          <button type="button" onclick="claimMyStudentId()" class="px-4 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-bold">Save Student ID</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: credited subjects of a transferee (admin) -->
+    <div id="creditsModal" class="hidden fixed inset-0 z-[66] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="creditsTitle">
+      <div id="creditsPanel" class="glass-panel w-full max-w-md rounded-2xl p-6 space-y-4 transition-all duration-200 opacity-0 scale-95 border border-slate-800">
+        <h3 id="creditsTitle" class="text-sm font-bold text-white">Credited subjects</h3>
+        <p id="creditsStudentLabel" class="text-xs text-emerald-400 font-semibold"></p>
+        <p class="text-xs text-slate-400 leading-relaxed">Subjects this student already passed elsewhere. They count as passed for year and semester progression and for prerequisites, but never affect the GWA. Separate codes with commas, exactly as in the subject catalogue.</p>
+        <textarea id="creditsInput" rows="4" placeholder="IT 101, IT 102, PROG 1" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500"></textarea>
+        <div id="creditsError" class="text-xs text-rose-400 empty:hidden"></div>
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button type="button" onclick="closeCreditsModal()" class="px-3 py-1.5 rounded-lg text-xs text-slate-400">Cancel</button>
+          <button type="button" onclick="saveCredits()" class="px-4 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-bold">Save credits</button>
         </div>
       </div>
     </div>

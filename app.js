@@ -74,12 +74,14 @@ let activeSemester = '1st Semester';
 let currentStudentSchoolId = '';
 let currentStudentFullName = '';
 let currentStudentEntryYear = 1;
+let currentStudentCredited = []; // subject codes credited by the admin (transferees): count as passed
 let notificationsUnsubscribe = null;
 let singleSessionUnsubscribe = null;
 let currentSessionId = null;
 
 let selectedPortalRole = 'student';
 let isFreshLoginAttempt = false;
+let registrationInProgress = false; // while true the auth listener waits, so the half-created account is never routed
 
 // Live class record (faculty) UI state
 let liveRecordSearchTerm = '';
@@ -98,10 +100,8 @@ let isItOnlyFilterActive = false;
 
 // Academic configuration
 // Academic constants: defaults below are used until the admin-managed settings/academic record is loaded
-const ACADEMIC_DEFAULTS = { schoolYear: '2026-2027', passingGrade: 75, promotionFirstSemUnits: 8, promotionFirstYearUnits: 16 };
+const ACADEMIC_DEFAULTS = { schoolYear: '2026-2027', passingGrade: 75 };
 let CURRENT_SCHOOL_YEAR = ACADEMIC_DEFAULTS.schoolYear;
-let FIRST_SEM_UNITS_FOR_PROMOTION = ACADEMIC_DEFAULTS.promotionFirstSemUnits;
-let FIRST_YEAR_UNITS_FOR_PROMOTION = ACADEMIC_DEFAULTS.promotionFirstYearUnits;
 
 // ------------------------------------------------------------------
 // 1. ISOLATED PORTAL ROUTER & HELPER FUNCTIONS
@@ -464,8 +464,8 @@ async function loadInstructorHome(prefetchedEnroll) {
   box.innerHTML = list.map((a, i) => {
     const { enroll, grades } = byCode[a.code] || { enroll: [], grades: [] };
     const inSection = (e) => a.section === 'ALL' || e.section === a.section;
-    const roster = new Set(enroll.filter((e) => e.status === 'approved' && inSection(e) && e.studentId).map((e) => String(e.studentId).trim()));
-    const pending = enroll.filter((e) => e.status === 'pending' && inSection(e)).length;
+    const roster = new Set(enroll.filter((e) => isEnrolledStatus(e.status) && inSection(e) && e.studentId).map((e) => String(e.studentId).trim()));
+    const pending = enroll.filter((e) => (e.status === 'pending' || e.status === 'pending_drop') && inSection(e)).length;
     const graded = new Set();
     const released = new Set();
     grades.forEach((g) => {
@@ -519,11 +519,11 @@ function renderStudentHomeSubjects(rows) {
   const box = document.getElementById('studentHomeSubjects');
   if (!box) return;
   if (!rows.length) { box.innerHTML = `<div class="py-2">No subject requests yet.<br><button type="button" onclick="goToSidebarPage('prospectus')" class="mt-2 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-[11px] font-bold">Choose subjects</button></div>`; return; }
-  const cls = { approved: 'text-emerald-400', pending: 'text-amber-400', rejected: 'text-rose-400' };
+  const cls = { approved: 'text-emerald-400', pending: 'text-amber-400', rejected: 'text-rose-400', pending_drop: 'text-amber-400', dropped: 'text-slate-400' };
   box.innerHTML = rows.slice(0, 5).map((e) => `
     <div class="flex items-center justify-between py-1.5 border-b border-slate-800/60 last:border-0">
       <div class="text-xs font-bold text-white">${escapeHtml(e.subjectCode || '')} <span class="font-normal text-slate-500">&bull; ${escapeHtml(e.section || '')}</span></div>
-      <div class="text-[10px] font-extrabold uppercase ${cls[e.status] || cls.pending}">${escapeHtml(e.status || 'pending')}</div>
+      <div class="text-[10px] font-extrabold uppercase ${cls[e.status] || cls.pending}">${escapeHtml(enrollmentStatusLabel(e.status))}</div>
     </div>`).join('') + (rows.length > 5 ? `<div class="text-[10px] text-slate-500 pt-1">+ ${rows.length - 5} more</div>` : '');
 }
 
@@ -532,7 +532,7 @@ function renderStudentHomeNotifs() {
   if (!box) return;
   const lines = [];
   if (latestProgression) {
-    lines.push(`<div class="py-1.5 border-b border-slate-800/60"><div class="text-xs font-bold text-emerald-400">Promotion progress</div><div class="text-[11px] text-slate-400">${escapeHtml(latestProgression.promotionNote || 'No promotion yet')} &bull; ${escapeHtml(String(latestProgression.unitsCompleted))} units completed</div></div>`);
+    lines.push(`<div class="py-1.5 border-b border-slate-800/60"><div class="text-xs font-bold text-emerald-400">Promotion progress</div><div class="text-[11px] text-slate-400">${escapeHtml(latestProgression.promotionNote || 'No promotion yet')} &bull; ${escapeHtml(String(latestProgression.unitsCompleted))} units completed</div>${latestProgression.remainingNote ? `<div class="text-[11px] text-slate-500">${escapeHtml(latestProgression.remainingNote)}</div>` : ''}</div>`);
   }
   notificationDocs.slice(0, 3).forEach((n) => {
     lines.push(`<div class="py-1.5 border-b border-slate-800/60 last:border-0"><div class="text-xs font-bold text-white">${escapeHtml(n.title || '')}</div><div class="text-[11px] text-slate-400">${escapeHtml(n.message || '')}</div></div>`);
@@ -547,12 +547,8 @@ function applyAcademicSettings(s) {
   const d = ACADEMIC_DEFAULTS;
   const src = s || {};
   const pass = Number(src.passingGrade);
-  const semUnits = parseInt(src.promotionFirstSemUnits, 10);
-  const yearUnits = parseInt(src.promotionFirstYearUnits, 10);
   CURRENT_SCHOOL_YEAR = /^\d{4}-\d{4}$/.test(String(src.schoolYear || '')) ? src.schoolYear : d.schoolYear;
   PASSING_THRESHOLD = Number.isFinite(pass) && pass >= 50 && pass <= 100 ? pass : d.passingGrade;
-  FIRST_SEM_UNITS_FOR_PROMOTION = Number.isFinite(semUnits) && semUnits > 0 ? semUnits : d.promotionFirstSemUnits;
-  FIRST_YEAR_UNITS_FOR_PROMOTION = Number.isFinite(yearUnits) && yearUnits > 0 ? yearUnits : d.promotionFirstYearUnits;
 }
 
 // Never rejects: if the record is missing or unreadable the built-in defaults keep the system working
@@ -573,8 +569,6 @@ function renderAcademicSettingsForm() {
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
   set('settingSchoolYear', CURRENT_SCHOOL_YEAR);
   set('settingPassing', PASSING_THRESHOLD);
-  set('settingFirstSemUnits', FIRST_SEM_UNITS_FOR_PROMOTION);
-  set('settingFirstYearUnits', FIRST_YEAR_UNITS_FOR_PROMOTION);
   const info = document.getElementById('settingsUpdatedInfo');
   if (info) {
     const when = academicSettingsMeta && academicSettingsMeta.updatedAt && academicSettingsMeta.updatedAt.toDate
@@ -589,29 +583,23 @@ async function saveAcademicSettings() {
   const val = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
   const schoolYear = val('settingSchoolYear');
   const passingGrade = Number(val('settingPassing'));
-  const semUnits = parseInt(val('settingFirstSemUnits'), 10);
-  const yearUnits = parseInt(val('settingFirstYearUnits'), 10);
 
   const m = schoolYear.match(/^(\d{4})-(\d{4})$/);
   if (!m || Number(m[2]) !== Number(m[1]) + 1) return alert("School year must look like 2026-2027 (the second year is one more than the first).");
   if (!Number.isFinite(passingGrade) || passingGrade < 50 || passingGrade > 100) return alert("Passing grade must be a number from 50 to 100.");
-  if (!Number.isFinite(semUnits) || !Number.isFinite(yearUnits) || semUnits < 1 || yearUnits < 1) return alert("Promotion units must be whole numbers of at least 1.");
-  if (yearUnits < semUnits) return alert("Units for the next year level must be greater than or equal to units for the 2nd semester.");
 
-  const before = `${CURRENT_SCHOOL_YEAR}/${PASSING_THRESHOLD}/${FIRST_SEM_UNITS_FOR_PROMOTION}/${FIRST_YEAR_UNITS_FOR_PROMOTION}`;
+  const before = `${CURRENT_SCHOOL_YEAR}/${PASSING_THRESHOLD}`;
   try {
     await db.collection('settings').doc('academic').set({
       schoolYear,
       passingGrade,
-      promotionFirstSemUnits: semUnits,
-      promotionFirstYearUnits: yearUnits,
       updatedBy: currentUserEmail,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
-    applyAcademicSettings({ schoolYear, passingGrade, promotionFirstSemUnits: semUnits, promotionFirstYearUnits: yearUnits });
+    applyAcademicSettings({ schoolYear, passingGrade });
     academicSettingsMeta = { updatedBy: currentUserEmail, updatedAt: { toDate: () => new Date() } };
     renderAcademicSettingsForm();
-    await logActivity(currentUserEmail, `Updated academic settings (school year / passing grade / units): ${before} -> ${schoolYear}/${passingGrade}/${semUnits}/${yearUnits}`);
+    await logActivity(currentUserEmail, `Updated academic settings (school year / passing grade): ${before} -> ${schoolYear}/${passingGrade}`);
     alert("Academic settings saved successfully. Other users get the new values the next time they sign in.");
   } catch (err) {
     console.error("Save settings error:", err);
@@ -678,6 +666,7 @@ async function printStudentGradeSlip() {
   const groups = new Map();
   let points = 0;
   let gradedUnits = 0;
+  const countedAttempts = new Set(latestAttemptPerSubject(sd.grades)); // every attempt is listed, only the newest counts in the GWA
   sd.grades.forEach((g) => {
     const finalsValue = g.finals !== undefined ? g.finals : g.final;
     const stats = computeGradeStats(g.prelim, g.midterm, finalsValue);
@@ -687,7 +676,7 @@ async function printStudentGradeSlip() {
     const key = `S.Y. ${g.schoolYear || CURRENT_SCHOOL_YEAR} \u2022 ${normalizeSemester(g.semester)}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push({ code, title: subj.subjectName || '', units, stats });
-    if (stats.average > 0) { points += stats.average * units; gradedUnits += units; }
+    if (stats.average > 0 && countedAttempts.has(g)) { points += stats.average * units; gradedUnits += units; }
   });
   const gwa = gradedUnits > 0 ? (points / gradedUnits).toFixed(2) : '-';
 
@@ -835,11 +824,21 @@ const byFullName = (x, y) => String(x.fullName || '').localeCompare(String(y.ful
 // ------------------------------------------------------------------
 // ENROLLMENT GATE + ACCOUNT LINKING (a grade may only belong to an APPROVED, enrolled student)
 // ------------------------------------------------------------------
-// Approved enrollments for the class/section keyed by Student ID. Pending and rejected never count.
+// Enrollment lifecycle: pending -> approved -> (pending_drop) -> dropped; rejected ends a request.
+// A student whose drop request is still waiting (pending_drop) is STILL enrolled: they stay on the roster and can
+// still be graded until the drop is approved. A dropped student leaves the roster; their grade records stay in the
+// database (history) but stop counting anywhere.
+const ENROLLED_STATUSES = ['approved', 'pending_drop'];
+function isEnrolledStatus(status) { return ENROLLED_STATUSES.indexOf(status) !== -1; }
+function enrollmentStatusLabel(status) {
+  return ({ pending: 'Pending', approved: 'Enrolled', rejected: 'Rejected', pending_drop: 'Drop requested', dropped: 'Dropped' })[status] || String(status || 'Pending');
+}
+
+// Enrolled (approved or drop pending) students of the class/section keyed by Student ID. Pending, rejected and dropped never count.
 function approvedRosterMap(enrollList, section) {
   const map = new Map();
   enrollList.forEach((en) => {
-    if (en.status !== 'approved' || !en.studentId) return;
+    if (!isEnrolledStatus(en.status) || !en.studentId) return;
     if (section && section !== 'ALL' && en.section !== section) return;
     const id = String(en.studentId).trim();
     if (!map.has(id)) map.set(id, { studentUid: en.studentUid || '', fullName: en.fullName || '', section: en.section || '' });
@@ -847,35 +846,66 @@ function approvedRosterMap(enrollList, section) {
   return map;
 }
 
-// Student side: a released grade is shown only if it is linked to MY account, or (older records without
-// an account link) I have an approved enrollment in that subject. Prevents grades released to a name/ID
-// before the student was registered or enrolled from appearing later.
-function filterVisibleGrades(grades, uid, enrollments) {
-  const approvedCodes = new Set(enrollments
-    .filter((e) => e.status === 'approved' && e.subjectCode)
-    .map((e) => String(e.subjectCode).trim().toUpperCase()));
-  return grades.filter((g) => (g.studentUid
-    ? g.studentUid === uid
-    : approvedCodes.has(String(g.classId || g.subjectCode || '').trim().toUpperCase())));
+// Student side: a released grade is shown only if it is linked to MY account (studentUid). Records that were
+// never linked stay invisible until an admin runs Data Health > "Link grades to accounts".
+function gradeUpdatedMs(g) {
+  const u = g && g.updatedAt;
+  if (u && typeof u.toMillis === 'function') return u.toMillis();
+  return typeof u === 'number' ? u : 0;
+}
+
+// One record per subject / semester / school year. Older duplicate documents (left by renamed ids or earlier imports)
+// are ignored here; Data Health can remove them for good. The newest update wins.
+function dedupeStudentGrades(grades) {
+  const best = new Map();
+  grades.forEach((g) => {
+    const key = `${String(g.classId || g.subjectCode || '').trim().toUpperCase()}|${normalizeSemester(g.semester)}|${String(g.schoolYear || '').trim()}`;
+    const cur = best.get(key);
+    if (!cur || gradeUpdatedMs(g) > gradeUpdatedMs(cur)) best.set(key, g);
+  });
+  return Array.from(best.values());
+}
+
+function filterVisibleGrades(grades, uid, enrollments = []) {
+  // A subject the student dropped (and is not enrolled in through another record) no longer counts.
+  const norm = (c) => String(c || '').trim().toUpperCase();
+  const stillIn = new Set(enrollments.filter((e) => e.status !== 'dropped' && e.status !== 'rejected').map((e) => norm(e.subjectCode)));
+  const dropped = new Set(enrollments.filter((e) => e.status === 'dropped').map((e) => norm(e.subjectCode)).filter((c) => !stillIn.has(c)));
+  return dedupeStudentGrades(grades.filter((g) => !!uid && g.studentUid === uid && !dropped.has(norm(g.classId || g.subjectCode))));
 }
 
 // Admin data health: split saved grades into OK / needs account link / orphan
 function classifyGradeHealth(grades, enrollList) {
   const byId = new Map();
   const byName = new Map();
+  const droppedById = new Set();
+  const droppedByName = new Set();
   enrollList.forEach((en) => {
-    if (en.status !== 'approved' || !en.subjectCode || !en.studentId) return;
+    if (!en.subjectCode || !en.studentId) return;
     const code = String(en.subjectCode).trim().toUpperCase();
+    if (en.status === 'dropped') {
+      droppedById.add(`${code}|${String(en.studentId).trim()}`);
+      droppedByName.add(`${code}|${normalizeNameKey(en.fullName)}`);
+      return;
+    }
+    if (!isEnrolledStatus(en.status)) return;
     byId.set(`${code}|${String(en.studentId).trim()}`, en);
     const nk = `${code}|${normalizeNameKey(en.fullName)}`;
     byName.set(nk, byName.has(nk) ? null : en); // ambiguous names are never auto-linked
   });
-  const result = { ok: 0, toLink: [], orphans: [] };
+  const result = { ok: 0, noAccount: 0, dropped: 0, toLink: [], orphans: [] };
   grades.forEach(({ id, data: g }) => {
     const code = String(g.classId || '').trim().toUpperCase();
-    const en = byId.get(`${code}|${String(g.studentId || '').trim()}`) || byName.get(`${code}|${normalizeNameKey(g.fullName)}`);
-    if (!en) { result.orphans.push({ id, g }); return; }
-    if (en.studentUid && g.studentUid !== en.studentUid) result.toLink.push({ id, uid: en.studentUid, studentId: en.studentId, g });
+    const idKey = `${code}|${String(g.studentId || '').trim()}`;
+    const nameKey = `${code}|${normalizeNameKey(g.fullName)}`;
+    const en = byId.get(idKey) || byName.get(nameKey);
+    if (!en) {
+      if (droppedById.has(idKey) || droppedByName.has(nameKey)) { result.dropped++; return; } // history of a dropped student: not an orphan
+      result.orphans.push({ id, g });
+      return;
+    }
+    if (!en.studentUid) result.noAccount++; // enrolled, but no student account to link to: invisible to the student
+    else if (g.studentUid !== en.studentUid) result.toLink.push({ id, uid: en.studentUid, studentId: en.studentId, g });
     else result.ok++;
   });
   return result;
@@ -899,9 +929,14 @@ function renderDataHealth() {
   const card = (label, value, tone) => `<div class="p-3 rounded-xl border border-slate-800 bg-slate-950"><div class="text-[10px] font-extrabold uppercase tracking-widest text-slate-500">${label}</div><div class="mt-1 text-xl font-black ${tone}">${value}</div></div>`;
   sum.innerHTML = card('Grades checked', healthScan.total, 'text-white') + card('Linked / OK', healthScan.ok, 'text-emerald-400') +
     card('Need account link', healthScan.toLink.length, healthScan.toLink.length ? 'text-amber-400' : 'text-white') +
+    (healthScan.noAccount ? card('Enrollment has no account', healthScan.noAccount, 'text-amber-400') : '') +
+    (healthScan.dropped ? card('Dropped (history kept)', healthScan.dropped, 'text-slate-300') : '') +
+    card('Duplicate records', healthScan.duplicates.removable.length, healthScan.duplicates.removable.length ? 'text-amber-400' : 'text-white') +
+    (healthScan.duplicates.review.length ? card('Duplicates to review', healthScan.duplicates.review.length, 'text-amber-400') : '') +
     card('Orphan grades', healthScan.orphans.length, healthScan.orphans.length ? 'text-rose-400' : 'text-white');
   const btn = (fn, label, tone) => `<button type="button" onclick="${fn}" class="px-3.5 py-2 rounded-xl border text-xs font-bold ${tone}">${label}</button>`;
   actions.innerHTML = (healthScan.toLink.length ? btn('linkGradeAccounts()', `Link ${healthScan.toLink.length} grade(s) to accounts`, 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400') : '') +
+    (healthScan.duplicates.removable.length ? btn('removeDuplicateGrades()', `Remove ${healthScan.duplicates.removable.length} older duplicate(s)`, 'border-amber-500/30 bg-amber-500/10 text-amber-400') : '') +
     (healthScan.orphans.some((o) => o.g.isReleased) ? btn('holdOrphanGrades()', 'Hold released orphans (hide from students)', 'border-amber-500/30 bg-amber-500/10 text-amber-400') : '') +
     (healthScan.orphans.length ? btn('deleteOrphanGrades()', `Delete ${healthScan.orphans.length} orphan(s)`, 'border-rose-500/30 bg-rose-500/10 text-rose-400') : '');
   actions.classList.toggle('hidden', !actions.innerHTML);
@@ -910,6 +945,79 @@ function renderDataHealth() {
       healthScan.orphans.slice(0, 100).map(({ g }) => `<tr><td class="py-1.5 pr-3 font-mono text-slate-300">${escapeHtml(g.classId)}</td><td class="py-1.5 pr-3 font-mono text-slate-400">${escapeHtml(g.studentId)}</td><td class="py-1.5 pr-3 text-white">${escapeHtml(g.fullName)}</td><td class="py-1.5 pr-3 text-slate-400">${escapeHtml(g.section || '')}</td><td class="py-1.5 ${g.isReleased ? 'text-rose-400' : 'text-slate-500'}">${g.isReleased ? 'Yes' : 'No'}</td></tr>`).join('') +
       `</tbody></table>${healthScan.orphans.length > 100 ? `<div class="text-[11px] text-slate-500 pt-2">Showing 100 of ${healthScan.orphans.length}.</div>` : ''}`
     : '<div class="text-xs text-slate-500">No orphan grades found.</div>';
+}
+
+// Duplicate grade documents: same student, subject, semester and school year stored twice (e.g. a name-keyed legacy
+// id next to the real Student ID). Keeps the NEWEST; a released older copy is never deleted in favour of an unreleased
+// newer one (that case is left for manual review so a student never loses a visible grade).
+function findDuplicateGrades(grades) {
+  const code = (g) => String(g.classId || '').trim().toUpperCase();
+  const baseOf = (g) => `${code(g)}|${normalizeSemester(g.semester)}|${String(g.schoolYear || '').trim()}`;
+  const isLegacyKey = (g) => !String(g.studentId || '').trim() || String(g.studentId).trim() === normalizeNameKey(g.fullName);
+
+  const idToUid = new Map();   // base|studentId -> uid, learnt from linked documents
+  const nameToIdent = new Map(); // base|nameKey -> Set(identity) from real-ID documents
+  grades.forEach(({ data: g }) => {
+    if (g.studentUid && g.studentId) idToUid.set(`${baseOf(g)}|${String(g.studentId).trim()}`, g.studentUid);
+  });
+  const identityOf = (g) => {
+    if (g.studentUid) return `u:${g.studentUid}`;
+    const sid = String(g.studentId || '').trim();
+    const uid = sid && idToUid.get(`${baseOf(g)}|${sid}`);
+    return uid ? `u:${uid}` : `i:${sid}`;
+  };
+  grades.forEach(({ data: g }) => {
+    if (isLegacyKey(g)) return;
+    const k = `${baseOf(g)}|${normalizeNameKey(g.fullName)}`;
+    if (!nameToIdent.has(k)) nameToIdent.set(k, new Set());
+    nameToIdent.get(k).add(identityOf(g));
+  });
+
+  const groups = new Map();
+  grades.forEach((item) => {
+    const g = item.data;
+    let ident;
+    if (isLegacyKey(g)) {
+      const set = nameToIdent.get(`${baseOf(g)}|${normalizeNameKey(g.fullName)}`);
+      ident = set && set.size === 1 ? Array.from(set)[0] : `n:${normalizeNameKey(g.fullName)}`; // merged only when the name is unambiguous
+    } else {
+      ident = identityOf(g);
+    }
+    const key = `${baseOf(g)}|${ident}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  });
+
+  const removable = [];
+  const review = [];
+  groups.forEach((items) => {
+    if (items.length < 2) return;
+    const score = (it) => [gradeUpdatedMs(it.data), it.data.studentUid ? 1 : 0, it.data.isReleased ? 1 : 0, it.id === `${code(it.data)}_${String(it.data.studentId || '').trim()}` ? 1 : 0];
+    const sorted = items.slice().sort((a, b) => {
+      const sa = score(a), sb = score(b);
+      for (let i = 0; i < sa.length; i++) if (sa[i] !== sb[i]) return sb[i] - sa[i];
+      return a.id.localeCompare(b.id);
+    });
+    const keep = sorted[0];
+    sorted.slice(1).forEach((old) => {
+      if (old.data.isReleased && !keep.data.isReleased) review.push({ keep, old });
+      else removable.push({ keep, old });
+    });
+  });
+  return { removable, review };
+}
+
+async function removeDuplicateGrades() {
+  const items = healthScan ? healthScan.duplicates.removable.slice() : [];
+  if (!items.length || !confirm(`Permanently delete ${items.length} older duplicate grade record(s)? The newest record of each student/subject/semester is kept. This cannot be undone.`)) return;
+  try {
+    await commitInChunks(items, (b, it) => b.delete(db.collection('grades').doc(it.old.id)));
+    await logActivity(currentUserEmail, `Data health: removed ${items.length} older duplicate grade record(s)`);
+    healthScan.total -= items.length;
+    healthScan.duplicates.removable = [];
+    renderDataHealth();
+    alert(`${items.length} older duplicate grade record(s) removed.`);
+  } catch (err) { alert('Could not remove duplicates: ' + (err.message || err)); }
 }
 
 async function scanDataHealth() {
@@ -922,7 +1030,7 @@ async function scanDataHealth() {
     const enrolls = [];
     enrollSnap.forEach((d) => enrolls.push(d.data()));
     const res = classifyGradeHealth(grades, enrolls);
-    healthScan = { total: grades.length, ...res };
+    healthScan = { total: grades.length, ...res, duplicates: findDuplicateGrades(grades) };
     if (status) status.textContent = `Scanned ${grades.length} grades and ${enrolls.length} enrollments at ${new Date().toLocaleTimeString()}`;
     renderDataHealth();
   } catch (err) {
@@ -970,16 +1078,319 @@ async function deleteOrphanGrades() {
   } catch (err) { alert("Could not delete grades: " + (err.message || err)); }
 }
 
+// ------------------------------------------------------------------
+// STUDENT SELF-SERVICE: a student with no Student ID (cleared by an admin after a duplicate) enters the right one
+// ------------------------------------------------------------------
+function promptStudentIdClaim() {
+  const modal = document.getElementById('studentIdClaimModal');
+  if (!modal) return;
+  const err = document.getElementById('claimStudentIdError');
+  if (err) err.textContent = '';
+  modal.classList.remove('hidden');
+  const panel = document.getElementById('studentIdClaimPanel');
+  if (panel) requestAnimationFrame(() => panel.classList.remove('opacity-0', 'scale-95'));
+}
+
+function closeStudentIdClaim() {
+  const modal = document.getElementById('studentIdClaimModal');
+  const panel = document.getElementById('studentIdClaimPanel');
+  if (panel) panel.classList.add('opacity-0', 'scale-95');
+  if (modal) modal.classList.add('hidden');
+}
+
+async function claimMyStudentId() {
+  const input = document.getElementById('claimStudentIdInput');
+  const err = document.getElementById('claimStudentIdError');
+  const raw = String((input && input.value) || '').trim();
+  if (err) err.textContent = '';
+  if (!isValidStudentId(raw)) { if (err) err.textContent = `Please enter a valid Student ID. ${STUDENT_ID_FORMAT_HINT}`; return; }
+  const uid = currentUserId;
+  if (!uid) return;
+
+  const claimRef = db.collection('studentIds').doc(studentIdKey(raw));
+  const userRef = db.collection('users').doc(uid);
+  try {
+    const enrollSnap = await db.collection('enrollments').where('studentUid', '==', uid).get();
+    await db.runTransaction(async (tx) => {
+      const claim = await tx.get(claimRef);
+      if (claim.exists) throw makeStudentIdTakenError(raw);
+      tx.set(claimRef, { uid, studentId: raw, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      tx.update(userRef, { studentId: raw });
+      // Enrollments that lost their ID when it was cleared get the new one, so rosters match again
+      enrollSnap.forEach((d) => { if (!String(d.data().studentId || '').trim()) tx.update(d.ref, { studentId: raw }); });
+    });
+    currentStudentSchoolId = raw;
+    swrClear();
+    studentDataCache = null;
+    closeStudentIdClaim();
+    alert('Student ID saved successfully.');
+    await logActivity(currentUserEmail, `Set Student ID ${raw}`);
+    refreshStudentViews();
+  } catch (e) {
+    if (e && e.code === 'app/student-id-taken') {
+      if (err) err.textContent = `The Student ID "${raw}" is already registered to another account. Check the number or contact the ITE Department.`;
+    } else {
+      console.error('Student ID claim error:', e);
+      if (err) err.textContent = 'Could not save your Student ID. Please try again.';
+    }
+  }
+}
+
+// ------------------------------------------------------------------
+// STUDENT ID TOOLS (admin): protect existing IDs, resolve duplicates, release an ID
+// ------------------------------------------------------------------
+let studentIdScan = null;
+
+// students: [{uid, studentId, fullName, email, status}]   claims: Map(UPPER-CASE ID -> {uid, studentId})
+function analyzeStudentIds(students, claims) {
+  const out = { total: students.length, protectedOk: 0, toClaim: [], conflicts: [], missing: [], invalid: [] };
+  const uids = new Set(students.map((s) => s.uid));
+  const groups = new Map();
+  students.forEach((s) => {
+    const id = String(s.studentId || '').trim();
+    if (!id) { out.missing.push(s); return; }
+    if (!isValidStudentId(id)) { out.invalid.push(s); return; }
+    const key = studentIdKey(id);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s);
+  });
+  groups.forEach((accounts, key) => {
+    const claim = claims.get(key);
+    const ownerUid = claim ? claim.uid : null;
+    if (accounts.length > 1) {
+      out.conflicts.push({ key, accounts, ownerUid, reason: 'duplicate' });
+    } else if (ownerUid === accounts[0].uid) {
+      out.protectedOk++;
+    } else if (!ownerUid || !uids.has(ownerUid)) {
+      out.toClaim.push({ key, account: accounts[0] }); // free, or held by an account that no longer exists
+    } else {
+      out.conflicts.push({ key, accounts, ownerUid, reason: 'claimedByOther' });
+    }
+  });
+  return out;
+}
+
+async function scanStudentIds() {
+  const status = document.getElementById('studentIdStatus');
+  if (status) status.textContent = 'Scanning...';
+  try {
+    const [usersSnap, claimsSnap] = await Promise.all([
+      db.collection('users').where('role', '==', 'student').get(),
+      db.collection('studentIds').get()
+    ]);
+    const students = [];
+    usersSnap.forEach((d) => {
+      const u = d.data();
+      students.push({ uid: d.id, studentId: u.studentId || '', fullName: u.fullName || '', email: u.email || '', status: u.status || 'active', credited: normalizeCreditedList(u.creditedSubjects) });
+    });
+    const claims = new Map();
+    claimsSnap.forEach((d) => claims.set(d.id, d.data()));
+    studentIdScan = { students, claims, analysis: analyzeStudentIds(students, claims) };
+    if (status) status.textContent = `Scanned ${students.length} student account(s) and ${claims.size} ID claim(s) at ${new Date().toLocaleTimeString()}`;
+    renderStudentIdTools();
+  } catch (err) {
+    console.error('Student ID scan error:', err);
+    if (status) status.textContent = '';
+    alert('Could not scan: ' + (err.message || err));
+  }
+}
+
+function renderStudentIdTools() {
+  const sum = document.getElementById('studentIdSummary');
+  const actions = document.getElementById('studentIdActions');
+  const list = document.getElementById('studentIdConflicts');
+  if (!studentIdScan || !sum) return;
+  const a = studentIdScan.analysis;
+  const card = (label, value, tone) => `<div class="p-3 rounded-xl border border-slate-800 bg-slate-950"><div class="text-[10px] font-extrabold uppercase tracking-widest text-slate-500">${label}</div><div class="mt-1 text-xl font-black ${tone}">${value}</div></div>`;
+  sum.innerHTML = card('Student accounts', a.total, 'text-white') +
+    card('Protected', a.protectedOk, 'text-emerald-400') +
+    card('Not yet protected', a.toClaim.length, a.toClaim.length ? 'text-amber-400' : 'text-white') +
+    card('Duplicates / conflicts', a.conflicts.length, a.conflicts.length ? 'text-rose-400' : 'text-white') +
+    card('No valid ID', a.missing.length + a.invalid.length, (a.missing.length + a.invalid.length) ? 'text-amber-400' : 'text-white');
+  actions.innerHTML = a.toClaim.length
+    ? `<button type="button" onclick="protectStudentIds()" class="px-3.5 py-2 rounded-xl border text-xs font-bold border-emerald-500/30 bg-emerald-500/10 text-emerald-400">Protect ${a.toClaim.length} existing Student ID(s)</button>`
+    : '';
+  actions.classList.toggle('hidden', !actions.innerHTML);
+
+  const btn = (fn, label, tone) => `<button type="button" onclick="${fn}" class="px-2.5 py-1 rounded-lg border text-[11px] font-bold ${tone}">${label}</button>`;
+  const rowFor = (acc, key, ownerUid) => `<div class="flex flex-wrap items-center justify-between gap-2 py-2">` +
+    `<div class="min-w-0"><div class="text-xs font-bold text-white">${escapeHtml(acc.fullName || '(no name)')}${ownerUid === acc.uid ? ' <span class="ml-1 text-[10px] font-extrabold uppercase text-emerald-400">current holder</span>' : ''}</div>` +
+    `<div class="text-[11px] text-slate-500">${escapeHtml(acc.email)} - ${escapeHtml(acc.status)}</div></div>` +
+    `<div class="flex gap-2">${btn(`keepStudentIdOn('${escapeHtml(key)}','${escapeHtml(acc.uid)}')`, 'Keep ID on this account', 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400')}` +
+    `${btn(`clearStudentIdFor('${escapeHtml(acc.uid)}')`, 'Clear ID', 'border-rose-500/30 bg-rose-500/10 text-rose-400')}</div></div>`;
+  const blocks = a.conflicts.map((c) => `<div class="p-3 rounded-xl border border-rose-500/20 bg-slate-950">` +
+    `<div class="text-[11px] font-extrabold uppercase tracking-wider text-rose-400">${c.reason === 'duplicate' ? `${c.accounts.length} accounts share Student ID` : 'Student ID held by a different account'} <span class="font-mono text-white">${escapeHtml(c.key)}</span></div>` +
+    `<div class="divide-y divide-slate-800/60">${c.accounts.map((acc) => rowFor(acc, c.key, c.ownerUid)).join('')}</div></div>`);
+  if (a.invalid.length) {
+    blocks.push(`<div class="p-3 rounded-xl border border-amber-500/20 bg-slate-950"><div class="text-[11px] font-extrabold uppercase tracking-wider text-amber-400">Student ID in an unsupported format</div>` +
+      `<div class="divide-y divide-slate-800/60">${a.invalid.map((acc) => `<div class="flex flex-wrap items-center justify-between gap-2 py-2"><div class="text-xs text-white">${escapeHtml(acc.fullName)} <span class="font-mono text-slate-400">${escapeHtml(acc.studentId)}</span></div>${btn(`clearStudentIdFor('${escapeHtml(acc.uid)}')`, 'Clear ID (student will be asked for it)', 'border-amber-500/30 bg-amber-500/10 text-amber-400')}</div>`).join('')}</div></div>`);
+  }
+  list.innerHTML = blocks.length ? blocks.join('') : '<div class="text-xs text-slate-500">No duplicate or conflicting Student IDs found.</div>';
+  renderStudentIdSearch();
+}
+
+function renderStudentIdSearch() {
+  const out = document.getElementById('studentIdSearchResults');
+  const input = document.getElementById('studentIdSearch');
+  if (!out || !input) return;
+  const q = input.value.trim().toLowerCase();
+  if (!studentIdScan) { out.innerHTML = '<div class="text-xs text-slate-500">Run a scan first.</div>'; return; }
+  if (q.length < 2) { out.innerHTML = ''; return; }
+  const hits = studentIdScan.students.filter((s) => [s.fullName, s.studentId, s.email].some((v) => String(v || '').toLowerCase().includes(q))).slice(0, 8);
+  const btn = (fn, label, tone) => `<button type="button" onclick="${fn}" class="px-2.5 py-1 rounded-lg border text-[11px] font-bold ${tone}">${label}</button>`;
+  out.innerHTML = hits.length ? hits.map((s) => `<div class="flex flex-wrap items-center justify-between gap-2 py-2 border-b border-slate-800/60">` +
+    `<div class="min-w-0"><div class="text-xs font-bold text-white">${escapeHtml(s.fullName)} <span class="font-mono text-slate-400">${escapeHtml(s.studentId || 'no ID')}</span></div><div class="text-[11px] text-slate-500">${escapeHtml(s.email)} - ${escapeHtml(s.status)}</div></div>` +
+    `<div class="flex flex-wrap gap-2">${btn(`openCreditsModal('${escapeHtml(s.uid)}')`, `Credited subjects${s.credited && s.credited.length ? ' (' + s.credited.length + ')' : ''}`, 'border-sky-500/30 bg-sky-500/10 text-sky-400')}${s.studentId ? btn(`clearStudentIdFor('${escapeHtml(s.uid)}')`, 'Release Student ID', 'border-rose-500/30 bg-rose-500/10 text-rose-400') : ''}` +
+    `${btn(`setStudentAccountStatus('${escapeHtml(s.uid)}','${s.status === 'disabled' ? 'active' : 'disabled'}')`, s.status === 'disabled' ? 'Enable account' : 'Disable account', 'border-slate-600 bg-slate-800/60 text-slate-200')}</div></div>`).join('')
+    : '<div class="text-xs text-slate-500">No matching student accounts.</div>';
+}
+
+async function protectStudentIds() {
+  const items = studentIdScan ? studentIdScan.analysis.toClaim : [];
+  if (!items.length || !confirm(`Protect ${items.length} Student ID(s)? Each one is reserved for its current account so nobody else can register it.`)) return;
+  try {
+    await commitInChunks(items, (b, it) => b.set(db.collection('studentIds').doc(it.key), {
+      uid: it.account.uid,
+      studentId: String(it.account.studentId).trim(),
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    }));
+    await logActivity(currentUserEmail, `Student IDs: protected ${items.length} existing Student ID(s)`);
+    alert(`${items.length} Student ID(s) protected.`);
+    await scanStudentIds();
+  } catch (err) { alert('Could not protect Student IDs: ' + (err.message || err)); }
+}
+
+// Operations that remove an ID from one account: user doc, and its enrollments (so rosters never show the wrong ID)
+async function buildClearIdOps(account) {
+  const ops = [(b) => b.update(db.collection('users').doc(account.uid), {
+    studentId: '',
+    previousStudentId: String(account.studentId || ''),
+    studentIdClearedAt: firebase.firestore.FieldValue.serverTimestamp()
+  })];
+  const snap = await db.collection('enrollments').where('studentUid', '==', account.uid).get();
+  snap.forEach((d) => ops.push((b) => b.update(d.ref, { studentId: '' })));
+  return ops;
+}
+
+async function keepStudentIdOn(key, winnerUid) {
+  if (!studentIdScan) return;
+  const group = studentIdScan.students.filter((s) => isValidStudentId(String(s.studentId || '').trim()) && studentIdKey(s.studentId) === key);
+  const winner = group.find((s) => s.uid === winnerUid);
+  if (!winner) return;
+  const losers = group.filter((s) => s.uid !== winnerUid);
+  const names = losers.map((s) => s.fullName || s.email).join(', ');
+  if (!confirm(`Keep Student ID ${key} on ${winner.fullName || winner.email}?` + (losers.length ? `\n\nThe ID is removed from: ${names}. Those students are asked to enter their correct Student ID at next sign-in.` : ''))) return;
+  try {
+    const ops = [(b) => b.set(db.collection('studentIds').doc(key), {
+      uid: winner.uid,
+      studentId: String(winner.studentId).trim(),
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    })];
+    for (const l of losers) ops.push(...await buildClearIdOps(l));
+    await commitInChunks(ops, (b, op) => op(b));
+    await logActivity(currentUserEmail, `Student IDs: kept ${key} on ${winner.email}` + (losers.length ? `; cleared from ${losers.map((s) => s.email).join(', ')}` : ''));
+    alert('Student ID resolved.');
+    await scanStudentIds();
+  } catch (err) { alert('Could not resolve: ' + (err.message || err)); }
+}
+
+async function clearStudentIdFor(uid) {
+  if (!studentIdScan) return;
+  const acc = studentIdScan.students.find((s) => s.uid === uid);
+  if (!acc) return;
+  if (!confirm(`Remove Student ID ${acc.studentId || ''} from ${acc.fullName || acc.email}?\n\nThe ID becomes free to register again, and this student is asked to enter a Student ID at next sign-in.`)) return;
+  try {
+    const key = studentIdKey(acc.studentId);
+    const claim = studentIdScan.claims.get(key);
+    const ops = await buildClearIdOps(acc);
+    if (claim && claim.uid === acc.uid) ops.push((b) => b.delete(db.collection('studentIds').doc(key)));
+    await commitInChunks(ops, (b, op) => op(b));
+    await logActivity(currentUserEmail, `Student IDs: released ${acc.studentId} from ${acc.email}`);
+    alert('Student ID released.');
+    await scanStudentIds();
+  } catch (err) { alert('Could not release the Student ID: ' + (err.message || err)); }
+}
+
+// Transferee credits: subject codes that count as already passed. Admin only; saved on the student's user document.
+let creditsTargetUid = null;
+
+function parseCreditCodes(text) {
+  return normalizeCreditedList(String(text || '').split(/[\n,;]+/));
+}
+
+function openCreditsModal(uid) {
+  const acc = studentIdScan && studentIdScan.students.find((s) => s.uid === uid);
+  const modal = document.getElementById('creditsModal');
+  if (!acc || !modal) return;
+  creditsTargetUid = uid;
+  document.getElementById('creditsStudentLabel').textContent = `${acc.fullName || acc.email} (${acc.studentId || 'no ID'})`;
+  document.getElementById('creditsInput').value = (acc.credited || []).join(', ');
+  document.getElementById('creditsError').textContent = '';
+  modal.classList.remove('hidden');
+  const panel = document.getElementById('creditsPanel');
+  if (panel) requestAnimationFrame(() => panel.classList.remove('opacity-0', 'scale-95'));
+}
+
+function closeCreditsModal() {
+  const modal = document.getElementById('creditsModal');
+  const panel = document.getElementById('creditsPanel');
+  if (panel) panel.classList.add('opacity-0', 'scale-95');
+  if (modal) modal.classList.add('hidden');
+  creditsTargetUid = null;
+}
+
+async function saveCredits() {
+  const err = document.getElementById('creditsError');
+  const acc = studentIdScan && studentIdScan.students.find((s) => s.uid === creditsTargetUid);
+  if (!acc) return;
+  const codes = parseCreditCodes(document.getElementById('creditsInput').value);
+  if (err) err.textContent = '';
+  try {
+    // Every code must exist in the subject catalogue, so a typo never silently credits nothing
+    const snap = await db.collection('subjects').get();
+    const known = new Set();
+    snap.forEach((d) => { const c = String((d.data() || {}).subjectCode || d.id).toUpperCase().trim().replace(/\s+/g, ' '); if (c) known.add(c); });
+    const unknown = codes.filter((c) => !known.has(c));
+    if (unknown.length) { if (err) err.textContent = `These codes are not in the subject catalogue: ${unknown.join(', ')}`; return; }
+    await db.collection('users').doc(acc.uid).update({
+      creditedSubjects: codes,
+      creditsUpdatedBy: currentUserEmail,
+      creditsUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    acc.credited = codes;
+    await logActivity(currentUserEmail, `Credited subjects for ${acc.email}: ${codes.length ? codes.join(', ') : '(none)'}`);
+    closeCreditsModal();
+    renderStudentIdSearch();
+    alert(`Credited subjects saved. The student sees the change the next time they sign in.`);
+  } catch (e) {
+    console.error('Save credits error:', e);
+    if (err) err.textContent = 'Could not save: ' + (e.message || e);
+  }
+}
+
+async function setStudentAccountStatus(uid, status) {
+  if (status !== 'active' && status !== 'disabled') return;
+  const acc = studentIdScan && studentIdScan.students.find((s) => s.uid === uid);
+  if (!acc || !confirm(`${status === 'disabled' ? 'Disable' : 'Enable'} the account of ${acc.fullName || acc.email}?`)) return;
+  try {
+    await db.collection('users').doc(uid).update({ status });
+    await logActivity(currentUserEmail, `Student account ${status === 'disabled' ? 'disabled' : 'enabled'}: ${acc.email}`);
+    acc.status = status;
+    renderStudentIdSearch();
+    alert(`Account ${status === 'disabled' ? 'disabled' : 'enabled'}.`);
+  } catch (err) { alert('Could not update the account: ' + (err.message || err)); }
+}
+
 function rosterFromEnrollments(list, section) {
   const seen = new Set();
   const roster = [];
   list.forEach((en) => {
-    if (en.status !== 'approved' || !en.studentId) return;
+    if (!isEnrolledStatus(en.status) || !en.studentId) return;
     if (section && section !== 'ALL' && en.section !== section) return;
     const id = String(en.studentId).trim();
     if (seen.has(id)) return;
     seen.add(id);
-    roster.push({ studentId: id, fullName: en.fullName || '', studentUid: en.studentUid || '', section: en.section || '' });
+    roster.push({ studentId: id, fullName: en.fullName || '', studentUid: en.studentUid || '', section: en.section || '', enrollmentId: en.__id || '', status: en.status });
   });
   return roster.sort(byFullName);
 }
@@ -988,7 +1399,7 @@ async function fetchApprovedRoster(subjectCode, section) {
   try {
     const snap = await db.collection('enrollments').where('subjectCode', '==', subjectCode).get();
     const list = [];
-    snap.forEach((d) => list.push(d.data()));
+    snap.forEach((d) => list.push({ ...d.data(), __id: d.id }));
     return rosterFromEnrollments(list, section);
   } catch (err) {
     console.warn("Could not load roster:", err);
@@ -1037,19 +1448,20 @@ function drawStudentRoster() {
   }
   if (!body) return;
   if (!rosterData.length) {
-    body.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-slate-500">No approved students for this class yet.<br><button type="button" onclick="goToSidebarPage('requests')" class="mt-3 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-[11px] font-bold">Review roster requests</button></td></tr>`;
+    body.innerHTML = `<tr><td colspan="5" class="px-4 py-8 text-center text-slate-500">No approved students for this class yet.<br><button type="button" onclick="goToSidebarPage('requests')" class="mt-3 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-[11px] font-bold">Review roster requests</button></td></tr>`;
     return;
   }
   if (!shown.length) {
-    body.innerHTML = '<tr><td colspan="4" class="px-4 py-6 text-center text-slate-500">No students match your search.</td></tr>';
+    body.innerHTML = '<tr><td colspan="5" class="px-4 py-6 text-center text-slate-500">No students match your search.</td></tr>';
     return;
   }
   body.innerHTML = shown.map((r, i) => `
     <tr>
       <td class="px-4 py-2 text-slate-500 font-mono">${i + 1}</td>
       <td class="px-4 py-2 font-mono text-slate-400">${escapeHtml(r.studentId)}</td>
-      <td class="px-4 py-2 font-bold text-white">${escapeHtml(r.fullName)}</td>
+      <td class="px-4 py-2 font-bold text-white">${escapeHtml(r.fullName)}${r.status === 'pending_drop' ? ' <span class="ml-1 px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-[9px] font-extrabold uppercase text-amber-400">Drop requested</span>' : ''}</td>
       <td class="px-4 py-2 text-slate-400">${escapeHtml(r.section)}</td>
+      <td class="px-4 py-2 text-right">${r.enrollmentId ? `<button type="button" onclick="dropStudentFromRoster('${escapeHtml(r.enrollmentId)}')" class="px-2.5 py-1 rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-400 text-[11px] font-bold">Drop</button>` : ''}</td>
     </tr>`).join('');
 }
 
@@ -1076,7 +1488,7 @@ function setupStudentSubjectsListener(uid) {
     const body = document.getElementById('studentSubjectsBody');
     if (!body) return;
     const rows = [];
-    snap.forEach((d) => rows.push(d.data()));
+    snap.forEach((d) => rows.push({ ...d.data(), __id: d.id }));
     rows.sort((x, y) => String(x.subjectCode || '').localeCompare(String(y.subjectCode || '')));
     renderStudentHomeSubjects(rows);
 
@@ -1090,21 +1502,70 @@ function setupStudentSubjectsListener(uid) {
     }
     lastEnrollmentSignature = signature;
     if (!rows.length) {
-      body.innerHTML = '<tr><td colspan="3" class="px-3 py-4 text-slate-500">No subject requests yet. Choose subjects in the Curriculum Prospectus.</td></tr>';
+      body.innerHTML = '<tr><td colspan="4" class="px-3 py-4 text-slate-500">No subject requests yet. Choose subjects in the Curriculum Prospectus.</td></tr>';
       return;
     }
-    const cls = { approved: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30', pending: 'bg-amber-500/15 text-amber-400 border-amber-500/30', rejected: 'bg-rose-500/15 text-rose-400 border-rose-500/30' };
-    body.innerHTML = rows.map((e) => `
+    const cls = {
+      approved: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+      pending: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+      rejected: 'bg-rose-500/15 text-rose-400 border-rose-500/30',
+      pending_drop: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+      dropped: 'bg-slate-700/40 text-slate-300 border-slate-600'
+    };
+    const actionBtn = (fn, label, tone) => `<button type="button" onclick="${fn}" class="px-2.5 py-1 rounded-lg border text-[11px] font-bold ${tone}">${label}</button>`;
+    body.innerHTML = rows.map((e) => {
+      const id = escapeHtml(e.__id || '');
+      let action = '';
+      if (e.status === 'approved') action = actionBtn(`requestSubjectDrop('${id}')`, 'Request drop', 'border-rose-500/30 bg-rose-500/10 text-rose-400');
+      else if (e.status === 'pending_drop') action = actionBtn(`cancelDropRequest('${id}')`, 'Cancel request', 'border-slate-600 bg-slate-800/60 text-slate-200');
+      return `
       <tr>
         <td class="px-3 py-2 font-bold text-white">${escapeHtml(e.subjectCode || '')}</td>
         <td class="px-3 py-2 text-slate-400">${escapeHtml(e.section || '')}</td>
-        <td class="px-3 py-2"><span class="px-2 py-0.5 rounded-md border text-[10px] font-extrabold uppercase tracking-wider ${cls[e.status] || cls.pending}">${escapeHtml(e.status || 'pending')}</span></td>
-      </tr>`).join('');
+        <td class="px-3 py-2"><span class="px-2 py-0.5 rounded-md border text-[10px] font-extrabold uppercase tracking-wider ${cls[e.status] || cls.pending}">${escapeHtml(enrollmentStatusLabel(e.status))}</span></td>
+        <td class="px-3 py-2 text-right">${action}</td>
+      </tr>`;
+    }).join('');
   }, (err) => console.error("My Subjects listener error:", err));
 }
 
 function buildGradeDocId(subjectCode, studentId) {
   return `${subjectCode}_${String(studentId).trim()}`;
+}
+
+// RETAKES: the first attempt keeps the classic id (subject_studentId). A record from an EARLIER school year is history,
+// so a save in a later year goes to its own document (subject_studentId__2026-2027) instead of overwriting it.
+// Records without a school year (saved before years were stamped) and records of the same year update in place.
+function gradeDocIdForYear(subjectCode, studentId, existingById, schoolYear) {
+  const baseId = buildGradeDocId(subjectCode, studentId);
+  const base = existingById.get(baseId);
+  if (!base || !base.schoolYear || base.schoolYear === schoolYear) return baseId;
+  return `${baseId}__${schoolYear}`;
+}
+
+function schoolYearSortKey(g) { return String((g && g.schoolYear) || ''); } // 'YYYY-YYYY' sorts correctly as text
+
+// Newest attempt wins: later school year, then 2nd semester over 1st, then the latest update.
+function isNewerAttempt(a, b) {
+  const ya = schoolYearSortKey(a), yb = schoolYearSortKey(b);
+  if (ya !== yb) return ya > yb;
+  const sa = normalizeSemester(a.semester) === '2nd Semester' ? 2 : 1;
+  const sb = normalizeSemester(b.semester) === '2nd Semester' ? 2 : 1;
+  if (sa !== sb) return sa > sb;
+  return gradeUpdatedMs(a) > gradeUpdatedMs(b);
+}
+
+// One counted record per subject (per student when studentKey is given). Earlier attempts stay stored and visible
+// as history; only the newest attempt counts toward GWA, completed units and the admin risk lists.
+function latestAttemptPerSubject(grades, studentKey = null) {
+  const best = new Map();
+  grades.forEach((g) => {
+    const code = String(g.classId || g.subjectCode || '').trim().toUpperCase();
+    const key = `${studentKey ? studentKey(g) : ''}|${code}`;
+    const cur = best.get(key);
+    if (!cur || isNewerAttempt(g, cur)) best.set(key, g);
+  });
+  return Array.from(best.values());
 }
 
 function buildAssignmentDocId(facultyUid, subjectCode, section = 'ALL') {
@@ -1348,6 +1809,7 @@ function setupLiveRecordInteractions() {
       if (field === 'studentId' && row.__docId && row.__originalStudentId === undefined) {
         row.__originalStudentId = row.studentId;
       }
+      if (field === 'studentId') row.__matchedByName = false; // the instructor took over the ID
       row[field] = input.value;
     } else {
       const clamped = Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : null;
@@ -1584,7 +2046,7 @@ async function handleSelfPasswordReset() {
     await userCred.user.updatePassword(newPassword);
 
     await logActivity(email, 'Self-service password reset completed successfully');
-    await auth.signOut();
+    await signOutThisTab();
 
     closeSelfResetModal();
     alert('Password reset successfully! Please log in with your new password.');
@@ -1626,8 +2088,69 @@ async function sendResetLink(email) {
 }
 
 // ------------------------------------------------------------------
-// SINGLE SESSION CONCURRENT LOGIN GUARD
+// SINGLE SESSION PER ACCOUNT, SCOPED TO THE BROWSER
 // ------------------------------------------------------------------
+// One session id per account is kept in Firestore (users/{uid}.activeSessionId). The matching id lives in
+// localStorage, so EVERY TAB of the same browser shares it: opening a second tab or reloading never signs anyone out.
+// A fresh login claims the account with a new id; a different browser, private window or device that logs in later
+// replaces the id in Firestore, and the older browser's guard (below) signs it out. There is no "allow multiple
+// sessions" switch by design.
+const BROWSER_SESSION_KEY = 'iteBrowserSession';
+let routedUid = ''; // the account this tab is currently showing
+
+function readBrowserSession() {
+  try {
+    const raw = localStorage.getItem(BROWSER_SESSION_KEY);
+    const v = raw ? JSON.parse(raw) : null;
+    return v && v.uid && v.sid ? v : null;
+  } catch (e) { return null; } // storage blocked: behaves like one session per tab
+}
+
+function writeBrowserSession(uid, sid) {
+  try { localStorage.setItem(BROWSER_SESSION_KEY, JSON.stringify({ uid, sid, ts: Date.now() })); } catch (e) { /* storage blocked */ }
+}
+
+function clearBrowserSession() {
+  try { localStorage.removeItem(BROWSER_SESSION_KEY); } catch (e) { /* storage blocked */ }
+}
+
+function newSessionId() {
+  return 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+}
+
+// Reuses this browser's session for the same account (reload, extra tab); a fresh login claims the account.
+// Resolves once the claim is written, so the guard is attached only after it lands.
+function establishBrowserSession(uid, freshLogin) {
+  const stored = readBrowserSession();
+  if (!freshLogin && stored && stored.uid === uid) {
+    currentSessionId = stored.sid; // no Firestore write needed
+    return Promise.resolve();
+  }
+  currentSessionId = newSessionId();
+  writeBrowserSession(uid, currentSessionId);
+  return db.collection('users').doc(uid).update({
+    activeSessionId: currentSessionId,
+    lastLoginAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch((sessionErr) => {
+    console.warn("Session tracking update skipped due to permissions:", sessionErr);
+  });
+}
+
+function signOutThisTab() {
+  routedUid = '';
+  clearBrowserSession();
+  return auth.signOut();
+}
+
+function reloadPage() { window.location.reload(); }
+
+// Another tab of this browser signed in as a DIFFERENT account: reload so this tab shows the right one
+window.addEventListener('storage', (e) => {
+  if (e.key !== BROWSER_SESSION_KEY || !e.newValue || !routedUid) return;
+  let v = null;
+  try { v = JSON.parse(e.newValue); } catch (err) { return; }
+  if (v && v.uid && v.uid !== routedUid) reloadPage();
+});
 
 function setupSingleSessionGuard(uid) {
   detachSingleSessionGuard();
@@ -1641,7 +2164,7 @@ function setupSingleSessionGuard(uid) {
         detachSingleSessionGuard();
         detachNotificationsListener();
         alert("Your account has been logged in on another device or browser. You have been logged out.");
-        auth.signOut();
+        signOutThisTab();
       }
     },
     (err) => console.error("Single session guard error:", err)
@@ -1680,7 +2203,7 @@ setTimeout(() => {
   if (authContainer) authContainer.classList.remove('hidden');
 }, 8000);
 
-auth.onAuthStateChanged(async (user) => {
+async function handleAuthStateChange(user) {
   authStateResolved = true;
   const authContainer = document.getElementById('authContainer');
   const mainDashboard = document.getElementById('mainDashboard');
@@ -1701,6 +2224,8 @@ auth.onAuthStateChanged(async (user) => {
 
   if (user) {
     showAuthLoadingGate();
+    if (registrationInProgress) return; // handleStudentRegister routes the new account itself once its records exist
+    if (routedUid && routedUid !== user.uid) { reloadPage(); return; } // another tab switched accounts: start clean
     try {
       currentUserId = user.uid;
       currentUserEmail = user.email;
@@ -1717,28 +2242,19 @@ auth.onAuthStateChanged(async (user) => {
               `This account is registered as ${roleDisplayLabel(data.role)}. ` +
               `Please use the appropriate portal to sign in.`
             );
-            auth.signOut();
+            signOutThisTab();
             return;
           }
         }
 
         if (data.status === 'disabled') {
           alert("Your account has been disabled by the administrator.");
-          auth.signOut();
+          signOutThisTab();
           return;
         }
 
         // The session write runs in the background; the single-session guard attaches only AFTER it lands
-        let sessionWrite = Promise.resolve();
-        if (!currentSessionId) {
-          currentSessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
-          sessionWrite = db.collection('users').doc(user.uid).update({
-            activeSessionId: currentSessionId,
-            lastLoginAt: firebase.firestore.FieldValue.serverTimestamp()
-          }).catch((sessionErr) => {
-            console.warn("Session tracking update skipped due to permissions:", sessionErr);
-          });
-        }
+        const sessionWrite = establishBrowserSession(user.uid, wasFreshLogin);
 
         showDashboard();
 
@@ -1750,6 +2266,7 @@ auth.onAuthStateChanged(async (user) => {
         }
 
         routeUserRole(data.role, data);
+        routedUid = user.uid;
         if (wasFreshLogin) logActivity(user.email, 'Signed in');
 
         sessionWrite.then(() => {
@@ -1775,7 +2292,9 @@ auth.onAuthStateChanged(async (user) => {
     showAuthContainer();
     if (userInfo) userInfo.innerHTML = '';
   }
-});
+}
+
+auth.onAuthStateChanged(handleAuthStateChange);
 
 // Turns Firebase auth errors (including raw JSON like INVALID_LOGIN_CREDENTIALS) into short, readable messages.
 // Wrong password and unknown email deliberately share one message so the form never reveals which emails exist.
@@ -1796,6 +2315,7 @@ function friendlyAuthError(err) {
   if (has('email-already-in-use')) return 'An account with this email already exists. Try signing in instead.';
   if (has('weak-password')) return 'Password is too weak. Please use at least 6 characters.';
   if (has('requires-recent-login')) return 'For security, please sign in again and retry.';
+  if (has('permission-denied', 'insufficient permissions')) return 'We could not complete that request because of a permission problem. Please contact the ITE Department.';
   console.error('Unmapped auth error:', err);
   return 'Something went wrong. Please try again.';
 }
@@ -1826,29 +2346,111 @@ async function handleLogin() {
   }
 }
 
+// ------------------------------------------------------------------
+// STUDENT ID PROTECTION: one account per Student ID
+// ------------------------------------------------------------------
+// A claim document studentIds/{ID in UPPER CASE} is written in the SAME transaction as the user document.
+// Firestore refuses the whole write if the claim already exists, so two accounts can never share an ID.
+// The Firestore rules enforce the same ID format and the same key derivation (upper-case of the ID).
+const STUDENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{1,39}$/;
+const STUDENT_ID_FORMAT_HINT = 'Use letters, numbers, dashes, dots or underscores only (2 to 40 characters, no spaces).';
+
+function isValidStudentId(id) { return STUDENT_ID_PATTERN.test(String(id || '')); }
+function studentIdKey(id) { return String(id || '').trim().toUpperCase(); }
+
+function makeStudentIdTakenError(studentId) {
+  const e = new Error(`Student ID ${studentId} is already registered`);
+  e.code = 'app/student-id-taken';
+  return e;
+}
+
+// Small modal used for messages that must not disappear on their own (toasts fade after a few seconds)
+function showInfoDialog(title, message) {
+  const modal = document.getElementById('appDialogModal');
+  if (!modal) { alert(`${title}\n\n${message}`); return; }
+  document.getElementById('appDialogTitle').textContent = title;
+  document.getElementById('appDialogMessage').textContent = message;
+  modal.classList.remove('hidden');
+  const panel = document.getElementById('appDialogPanel');
+  if (panel) requestAnimationFrame(() => panel.classList.remove('opacity-0', 'scale-95'));
+}
+
+function closeInfoDialog() {
+  const modal = document.getElementById('appDialogModal');
+  const panel = document.getElementById('appDialogPanel');
+  if (panel) panel.classList.add('opacity-0', 'scale-95');
+  if (modal) modal.classList.add('hidden');
+}
+
 async function handleStudentRegister() {
+  if (registrationInProgress) return; // double-click guard
   const fullName = document.getElementById('regFullName').value.trim();
   const studentId = document.getElementById('regStudentId').value.trim();
   const email = document.getElementById('regEmail').value.trim();
   const password = document.getElementById('regPassword').value.trim();
   const entryYearLevel = parseInt(document.getElementById('regYearLevel').value) || 1;
   const authError = document.getElementById('authError');
+  if (authError) authError.innerText = '';
 
+  if (fullName.length < 3) { if (authError) authError.innerText = 'Please enter your full name.'; return; }
+  if (!isValidStudentId(studentId)) {
+    if (authError) authError.innerText = `Please enter a valid Student ID. ${STUDENT_ID_FORMAT_HINT}`;
+    return;
+  }
+  if (!email) { if (authError) authError.innerText = 'Please enter your school email.'; return; }
+  if (password.length < 6) { if (authError) authError.innerText = 'Password is too weak. Please use at least 6 characters.'; return; }
+
+  registrationInProgress = true;
+  let createdUser = null;
+  let profileCreated = false;
   try {
     const userCred = await auth.createUserWithEmailAndPassword(email, password);
-    await db.collection('users').doc(userCred.user.uid).set({
-      fullName,
-      studentId,
-      email,
-      role: "student",
-      status: "active",
-      entryYearLevel,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    createdUser = userCred.user;
+    const claimRef = db.collection('studentIds').doc(studentIdKey(studentId));
+    const userRef = db.collection('users').doc(createdUser.uid);
+
+    await db.runTransaction(async (tx) => {
+      const claim = await tx.get(claimRef);
+      if (claim.exists) throw makeStudentIdTakenError(studentId);
+      tx.set(claimRef, {
+        uid: createdUser.uid,
+        studentId,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      tx.set(userRef, {
+        fullName,
+        studentId,
+        email,
+        role: 'student',
+        status: 'active',
+        entryYearLevel,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
     });
+    profileCreated = true;
+
+    // Success: verification email is best-effort and never blocks registration
+    createdUser.sendEmailVerification().catch((mailErr) => console.warn('Verification email not sent:', mailErr));
+    registrationInProgress = false;
+    await handleAuthStateChange(auth.currentUser);
     await logActivity(email, `Registered student account (${studentId} - Year ${entryYearLevel})`);
-    alert("Student registration completed successfully!");
+    alert('Student registration completed successfully! A verification link was sent to your email.');
   } catch (err) {
-    if (authError) authError.innerText = friendlyAuthError(err);
+    registrationInProgress = false;
+    // Never leave a login without a profile behind: remove the half-created account so the person can retry
+    if (createdUser && !profileCreated) {
+      try { await createdUser.delete(); } catch (delErr) { console.warn('Could not remove the unfinished account:', delErr); }
+      try { await signOutThisTab(); } catch (outErr) { /* already signed out */ }
+    }
+    if (err && err.code === 'app/student-id-taken') {
+      showInfoDialog(
+        'Student ID already registered',
+        `The Student ID "${studentId}" already has an account. Each Student ID can be used for only one account.\n\n` +
+        'If this is your ID and you did not register it, please contact your instructor or the ITE Department so the record can be corrected.'
+      );
+    } else if (authError) {
+      authError.innerText = friendlyAuthError(err);
+    }
   }
 }
 
@@ -1889,11 +2491,13 @@ function routeUserRole(role, userData) {
     currentStudentSchoolId = (userData && userData.studentId) || '';
     currentStudentFullName = (userData && userData.fullName) || '';
     currentStudentEntryYear = (userData && userData.entryYearLevel) || 1;
+    currentStudentCredited = normalizeCreditedList(userData && userData.creditedSubjects);
 
     loadStudentDashboard(currentStudentSchoolId, currentStudentFullName, userData);
     loadAvailableSubjectsForStudent();
     setupNotificationsListener(currentUserId);
     setupStudentSubjectsListener(currentUserId);
+    if (!String(currentStudentSchoolId).trim()) promptStudentIdClaim();
   } else {
     setupNotificationsListener(currentUserId); // admin + instructor
   }
@@ -2050,7 +2654,7 @@ async function loadInstructorAssignedSubjects() {
       // Dynamic roster size = approved enrollments for this subject/section
       let studentCount = 0;
       (enrollByCode[code] || []).forEach((e) => {
-        if (e.status === 'approved' && (section === 'ALL' || e.section === section)) studentCount++;
+        if (isEnrolledStatus(e.status) && (section === 'ALL' || e.section === section)) studentCount++;
       });
 
       const card = document.createElement('div');
@@ -2200,7 +2804,7 @@ function renderLiveClassRecord() {
     tr.dataset.rowIndex = String(index);
     tr.innerHTML = `
       <td class="px-2 py-2"><input type="text" data-field="studentId" value="${escapeHtml(row.studentId || '')}" placeholder="Student ID" class="${TEXT_CELL_CLASS} w-32 font-mono" /></td>
-      <td class="px-2 py-2"><input type="text" data-field="fullName" value="${escapeHtml(row.fullName || '')}" placeholder="Student name" class="${TEXT_CELL_CLASS} w-56" /></td>
+      <td class="px-2 py-2"><input type="text" data-field="fullName" value="${escapeHtml(row.fullName || '')}" placeholder="Student name" class="${TEXT_CELL_CLASS} w-56" />${row.__matchedByName ? '<span class="mt-1 inline-block px-1.5 py-0.5 rounded border border-sky-500/30 bg-sky-500/10 text-[9px] font-extrabold uppercase tracking-wider text-sky-400" title="No Student ID in the sheet: matched to the only roster student with this name">Matched by name</span>' : ''}</td>
       <td class="px-2 py-2">${numCell('prelim', stats.prelim)}</td>
       <td class="px-2 py-2">${numCell('midterm', stats.midterm)}</td>
       <td class="px-2 py-2">${numCell('finals', stats.finals)}</td>
@@ -2242,7 +2846,11 @@ async function loadInstructorGradesFromFirestore(subjectCode, section = activeIn
     ]);
 
     const enrollAll = [];
-    enrollAllSnap.forEach((d) => enrollAll.push(d.data()));
+    enrollAllSnap.forEach((d) => enrollAll.push({ ...d.data(), __id: d.id }));
+
+    // Dropped students leave the grid: their grade documents stay stored (history) but are not shown or counted
+    const activeIds = new Set(enrollAll.filter((en) => isEnrolledStatus(en.status) && en.studentId).map((en) => String(en.studentId).trim()));
+    const droppedIds = new Set(enrollAll.filter((en) => en.status === 'dropped' && en.studentId).map((en) => String(en.studentId).trim()).filter((id) => !activeIds.has(id)));
 
     let sectionStudentIds = null;
     if (section && section !== 'ALL') {
@@ -2284,6 +2892,8 @@ async function loadInstructorGradesFromFirestore(subjectCode, section = activeIn
       const g = doc.data();
       const studentId = String(g.studentId || '').trim();
 
+      if (droppedIds.has(studentId)) return;
+      if (g.schoolYear && g.schoolYear !== CURRENT_SCHOOL_YEAR) return; // an earlier year's attempt is history, not this year's record
       if (sectionStudentIds && !sectionStudentIds.has(studentId)) {
         return;
       }
@@ -2566,7 +3176,9 @@ function processMultiTabExcel(workbook) {
   for (let r = headerRowIndex + 1; r < summaryMatrix.length; r++) {
     const row = summaryMatrix[r];
     const rawName = row[nameIdx] ? row[nameIdx].toString().trim() : "";
-    if (!rawName || rawName.toLowerCase().includes("total") || rawName.toLowerCase().includes("average")) continue;
+    const idCell = idIdx !== -1 && row[idIdx] ? row[idIdx].toString().trim() : "";
+    if (!rawName && !idCell) continue; // an ID-only row is kept: the roster supplies the name
+    if (rawName.toLowerCase().includes("total") || rawName.toLowerCase().includes("average")) continue;
 
     const rawId = idIdx !== -1 && row[idIdx] ? row[idIdx].toString().trim() : "";
     const prelim = parseFloat(row[prelimIdx]) || 0;
@@ -2626,7 +3238,9 @@ function processSingleTabExcel(workbook) {
   for (let r = headerRowIndex + 1; r < matrix.length; r++) {
     const row = matrix[r];
     const rawName = row[nameIdx] ? row[nameIdx].toString().trim() : "";
-    if (!rawName || rawName.toLowerCase().includes("total") || rawName.toLowerCase().includes("average")) continue;
+    const idCell = idIdx !== -1 && row[idIdx] ? row[idIdx].toString().trim() : "";
+    if (!rawName && !idCell) continue; // an ID-only row is kept: the roster supplies the name
+    if (rawName.toLowerCase().includes("total") || rawName.toLowerCase().includes("average")) continue;
 
     const rawId = idIdx !== -1 && row[idIdx] ? row[idIdx].toString().trim() : "";
     const prelim = parseFloat(row[prelimIdx]) || 0;
@@ -2649,19 +3263,98 @@ function processSingleTabExcel(workbook) {
   alert(`Imported ${parsedGradeData.length} student record(s).`);
 }
 
-function validateImportedRows() {
+// ------------------------------------------------------------------
+// FLEXIBLE EXCEL MATCHING (Student ID first, then name)
+// ------------------------------------------------------------------
+// Rules: a Student ID that is on the roster always wins. A row with NO ID is bound by name, but only when exactly
+// one roster student fits. A WRONG ID is never corrected automatically: the report only hints at the likely student.
+const NAME_SUFFIXES = new Set(['jr', 'sr', 'ii', 'iii', 'iv']);
+const NAME_PARTICLES = new Set(['de', 'del', 'dela', 'delas', 'delos', 'la', 'las', 'los', 'di', 'da', 'van', 'von', 'der', 'den']);
+
+function nameTokens(fullName) {
+  return String(fullName || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // accents: Pena = Peña
+    .toLowerCase()
+    .replace(/['\u2019`]/g, '')                       // O'Brien = OBrien
+    .replace(/[^a-z0-9]+/g, ' ')                      // commas, periods, hyphens -> spaces
+    .trim().split(' ')
+    .filter((t) => t.length > 1 && !NAME_SUFFIXES.has(t)); // drops initials ("M.") and suffixes (Jr., III)
+}
+
+// Order-insensitive key: "Cruz, Juan M." and "Juan Cruz" give the same key
+function nameMatchKey(fullName, dropParticles = false) {
+  return nameTokens(fullName).filter((t) => !dropParticles || !NAME_PARTICLES.has(t)).sort().join(' ');
+}
+
+// Roster students that fit a name. 0 = none, 1 = a safe match, 2+ = ambiguous (never auto-bound).
+// Exact key first; only when nothing fits is the looser "Dela Cruz = De la Cruz" key tried.
+function findRosterMatchesByName(fullName, roster) {
+  const k1 = nameMatchKey(fullName);
+  if (!k1) return [];
+  const exact = roster.filter((r) => nameMatchKey(r.fullName) === k1);
+  if (exact.length) return exact;
+  const k2 = nameMatchKey(fullName, true);
+  if (!k2) return [];
+  return roster.filter((r) => nameMatchKey(r.fullName, true) === k2);
+}
+
+// Mutates rows (binds IDs / names) and returns report lines: level error | warn | info
+function matchImportedRows(rows, roster) {
   const issues = [];
+  if (!roster || !roster.length) return issues; // roster not loaded: nothing to match against
+  const byId = new Map(roster.map((r) => [String(r.studentId).trim(), r]));
+  rows.forEach((row, i) => {
+    const line = i + 2; // spreadsheet row (header is row 1)
+    delete row.__matchedByName; delete row.__idHint; delete row.__matchError;
+    const sid = String(row.studentId || '').trim();
+    const name = String(row.fullName || '').trim();
+    const onRoster = sid ? byId.get(sid) : null;
+
+    if (onRoster) {
+      if (!name) {
+        row.fullName = onRoster.fullName;
+        issues.push({ line, level: 'info', msg: `Row ${line}: ${sid} had no name; used the roster name "${onRoster.fullName}".` });
+      } else {
+        const same = nameMatchKey(name) === nameMatchKey(onRoster.fullName) || nameMatchKey(name, true) === nameMatchKey(onRoster.fullName, true);
+        if (!same) issues.push({ line, level: 'warn', msg: `Row ${line}: ${sid} is ${onRoster.fullName} on the roster, but the sheet says "${name}". The ID was used. Check the row.` });
+      }
+      return;
+    }
+
+    if (sid) { // wrong or unknown ID: hint only, never change it
+      const hits = name ? findRosterMatchesByName(name, roster) : [];
+      if (hits.length === 1) row.__idHint = ` The name matches ${hits[0].fullName} (${hits[0].studentId}). If that is the same student, correct the ID in the grid. It was not changed.`;
+      return;
+    }
+
+    if (!name) return;
+    const hits = findRosterMatchesByName(name, roster);
+    if (hits.length === 1) {
+      row.studentId = hits[0].studentId;
+      row.fullName = hits[0].fullName;
+      row.__matchedByName = true;
+      issues.push({ line, level: 'info', msg: `Row ${line}: "${name}" matched by name to ${hits[0].fullName} (${hits[0].studentId}). Student ID filled in.` });
+    } else if (hits.length > 1) {
+      row.__matchError = true;
+      issues.push({ line, level: 'error', msg: `Row ${line}: "${name}" fits ${hits.length} students on the roster (${hits.slice(0, 3).map((h) => h.studentId).join(', ')}${hits.length > 3 ? ', ...' : ''}). Add the Student ID.` });
+    }
+  });
+  return issues;
+}
+
+function validateImportedRows(extraIssues = []) {
+  const issues = extraIssues.slice();
   const seen = new Map();
   const rosterIds = new Set(rosterData.map((r) => r.studentId));
   parsedGradeData.forEach((row, i) => {
     const line = i + 2; // spreadsheet row (header is row 1)
     const sid = String(row.studentId || '').trim();
-    if (!sid) issues.push({ line, level: 'error', msg: `Row ${line}: missing Student ID` });
+    if (!sid && !row.__matchError) issues.push({ line, level: 'error', msg: `Row ${line}: missing Student ID` });
     if (!String(row.fullName || '').trim()) issues.push({ line, level: 'error', msg: `Row ${line}: missing student name` });
     if (sid) {
       if (seen.has(sid)) issues.push({ line, level: 'error', msg: `Row ${line}: duplicate of row ${seen.get(sid)} (${sid})` });
       else seen.set(sid, line);
-      if (!rosterIds.has(sid)) issues.push({ line, level: 'error', msg: `Row ${line}: ${sid} is not an approved student of this class and will be skipped when saving` });
+      if (!rosterIds.has(sid)) issues.push({ line, level: 'error', msg: `Row ${line}: ${sid} is not an enrolled student of this class and will be skipped when saving.${row.__idHint || ''}` });
     }
     ['prelim', 'midterm', 'finals', ...GRID_SCORE_FIELDS].forEach((f) => {
       const v = toFiniteOrNull(row[f]);
@@ -2685,20 +3378,26 @@ function renderImportReport(issues) {
   const el = document.getElementById('importReport');
   if (!el) return;
   if (!issues.length) { dismissImportReport(); return; }
+  const rank = { error: 0, warn: 1, info: 2 };
+  issues = issues.slice().sort((a, b) => (rank[a.level] - rank[b.level]) || (a.line - b.line));
   const errors = issues.filter((x) => x.level === 'error').length;
+  const warns = issues.filter((x) => x.level === 'warn').length;
+  const infos = issues.length - errors - warns;
+  const tone = errors ? 'text-rose-400' : warns ? 'text-amber-400' : 'text-sky-400';
   el.classList.remove('hidden');
   el.innerHTML = `
     <div class="flex items-center justify-between gap-3">
-      <div class="font-bold ${errors ? 'text-rose-400' : 'text-amber-400'}">Import check: ${errors} error(s), ${issues.length - errors} warning(s). Review and fix in the grid before saving.</div>
+      <div class="font-bold ${tone}">Import check: ${errors} error(s), ${warns} warning(s), ${infos} note(s).${errors || warns ? ' Review and fix in the grid before saving.' : ''}</div>
       <button type="button" onclick="dismissImportReport()" class="px-2 py-1 rounded-md bg-slate-800 text-slate-300 text-[11px] font-bold">Dismiss</button>
     </div>
-    <ul class="list-disc pl-5 space-y-0.5 text-slate-300">${issues.slice(0, 12).map((x) => `<li class="${x.level === 'error' ? 'text-rose-300' : ''}">${escapeHtml(x.msg)}</li>`).join('')}</ul>
+    <ul class="list-disc pl-5 space-y-0.5 text-slate-300">${issues.slice(0, 12).map((x) => `<li class="${x.level === 'error' ? 'text-rose-300' : x.level === 'info' ? 'text-sky-300' : ''}">${escapeHtml(x.msg)}</li>`).join('')}</ul>
     ${issues.length > 12 ? `<div class="text-slate-500">+ ${issues.length - 12} more</div>` : ''}`;
 }
 
 function renderParsedGradesToTable() {
   parsedGradeData.forEach((row) => { row.__staged = true; });
-  validateImportedRows();
+  const matchIssues = matchImportedRows(parsedGradeData, rosterData);
+  validateImportedRows(matchIssues);
   liveRecordEmptyHtml = emptyLiveRow('No grade sheet parsed yet. Select an assigned class and import an Excel file to view grades.');
 
   if (parsedGradeData.length) {
@@ -2792,7 +3491,31 @@ async function gatherGradeWriteContext() {
   return { approved, registeredIndex, existingById };
 }
 
+// One save/release at a time: a double click (or a second click while the first is still writing) is ignored,
+// so nothing is written or announced twice. Records are written in place (id = subject + student), never duplicated.
+let gradeCommitInFlight = false;
+
+function setGradeButtonsBusy(busy) {
+  document.querySelectorAll('button[onclick="releaseGrades()"], button[onclick="saveDraftGrades()"]').forEach((b) => {
+    b.disabled = busy;
+    b.classList.toggle('opacity-60', busy);
+    b.classList.toggle('pointer-events-none', busy);
+  });
+}
+
 async function commitGrades(mode) {
+  if (gradeCommitInFlight) { showToast('A save is already in progress. Please wait a moment.', 'info'); return; }
+  gradeCommitInFlight = true;
+  setGradeButtonsBusy(true);
+  try {
+    return await commitGradesInner(mode);
+  } finally {
+    gradeCommitInFlight = false;
+    setGradeButtonsBusy(false);
+  }
+}
+
+async function commitGradesInner(mode) {
   const release = mode === 'release';
   if (!activeSubjectCode) return alert("Select an active subject first.");
   if (!parsedGradeData.length) return alert("Upload an Excel sheet to parse grades first.");
@@ -2814,14 +3537,25 @@ async function commitGrades(mode) {
       const cleanStudentId = String(effectiveStudentId).trim();
       const member = ctx.approved.get(cleanStudentId);
       if (!member) { skipped.push(`${cleanStudentId} (${row.fullName})`); return; }
-      plan.push({ row, cleanStudentId, member, cleanups });
+      const docId = gradeDocIdForYear(activeSubjectCode, cleanStudentId, ctx.existingById, CURRENT_SCHOOL_YEAR);
+      const prevDoc = ctx.existingById.get(docId);
+      const isNewAttempt = docId !== buildGradeDocId(activeSubjectCode, cleanStudentId) && !prevDoc;
+      plan.push({ row, cleanStudentId, member, cleanups, docId, isNewAttempt, alreadyReleased: !!(prevDoc && prevDoc.isReleased) });
     });
 
     if (!plan.length) {
       return alert(`Nothing to ${release ? 'release' : 'save'}: ${skipped.length} row(s) are not approved students of this class (${skipped.slice(0, 4).join(', ')}${skipped.length > 4 ? ', ...' : ''}).`);
     }
     const skippedNote = skipped.length ? `\n\n${skipped.length} row(s) will be SKIPPED because they are not approved students of this class.` : '';
-    if (release && !confirm(`Release official grades for ${plan.length} student(s) in ${activeSubjectCode} [${activeInstructorSectionFilter}]?\n\nStudents will be able to see these grades and will be notified.${skippedNote}`)) return;
+    const alreadyCount = plan.filter((p) => p.alreadyReleased).length;
+    const retakeCount = plan.filter((p) => p.isNewAttempt).length;
+    const retakeNote = retakeCount
+      ? `\n\n${retakeCount} student(s) already have a record from an EARLIER school year (a retake). Their earlier record is kept as history and a new attempt for ${CURRENT_SCHOOL_YEAR} is created.`
+      : '';
+    const updateNote = alreadyCount
+      ? `\n\n${alreadyCount} of these ${alreadyCount === 1 ? 'record is' : 'records are'} ALREADY RELEASED. ${alreadyCount === 1 ? 'It is' : 'They are'} updated in place (no duplicates), and a student is notified only if a value actually changed.`
+      : '';
+    if (release && !confirm(`Release official grades for ${plan.length} student(s) in ${activeSubjectCode} [${activeInstructorSectionFilter}]?\n\nStudents will be able to see these grades and will be notified.${updateNote}${retakeNote}${skippedNote}`)) return;
 
     const batch = db.batch();
     const notifyItems = [];
@@ -2829,11 +3563,10 @@ async function commitGrades(mode) {
     let savedCount = 0;
     let updatedReleased = 0;
 
-    plan.forEach(({ row, cleanStudentId, member, cleanups }) => {
+    plan.forEach(({ row, cleanStudentId, member, cleanups, docId }) => {
       cleanups.forEach((ref) => batch.delete(ref));
       queueRenamedDocCleanup(row, batch);
 
-      const docId = buildGradeDocId(activeSubjectCode, cleanStudentId);
       const gradeRef = db.collection('grades').doc(docId);
       const finalsVal = row.finals !== undefined ? row.finals : row.final;
       const stats = computeGradeStats(row.prelim, row.midterm, finalsVal);
@@ -2895,6 +3628,7 @@ async function commitGrades(mode) {
       ? `Official grades successfully released for ${savedCount} student(s) in Section ${activeInstructorSectionFilter}!`
       : `Draft grades successfully saved for ${savedCount} student(s) in Section ${activeInstructorSectionFilter}!`) +
       (updatedReleased ? `\n${updatedReleased} already-released record(s) were updated and the student(s) were notified.` : '') +
+      (retakeCount ? `\n${retakeCount} retake record(s) created. Earlier school-year records were kept.` : '') +
       (skipped.length ? `\n\n${skipped.length} row(s) were NOT saved because the student is not enrolled (approved) in this class:\n${skipped.slice(0, 5).join('\n')}${skipped.length > 5 ? '\n...' : ''}` : ''));
     loadInstructorGradesFromFirestore(activeSubjectCode, activeInstructorSectionFilter);
   } catch (err) {
@@ -3080,6 +3814,130 @@ function renderAtRiskTracker(releasedGrades) {
   });
 }
 
+// ------------------------------------------------------------------
+// ADMIN EXPORT (CSV). Built in the browser: no Cloud Functions, no paid tools. Each export reads its collection once.
+// ------------------------------------------------------------------
+function csvEscape(value) {
+  if (value === null || value === undefined) return '';
+  let s = typeof value === 'number' ? String(value) : String(value);
+  // A text cell that starts with = + - @ would run as a formula when opened in Excel: neutralise it
+  if (typeof value === 'string' && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function buildCsv(columns, rows) {
+  const head = columns.map((c) => csvEscape(c.label)).join(',');
+  const body = rows.map((r) => columns.map((c) => csvEscape(c.get ? c.get(r) : r[c.key])).join(','));
+  return '\ufeff' + [head, ...body].join('\r\n') + '\r\n'; // BOM so Excel reads UTF-8 names correctly
+}
+
+function downloadCsv(filename, text) {
+  const blob = new Blob([text], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function isoOf(ts) {
+  if (ts && typeof ts.toDate === 'function') return ts.toDate().toISOString();
+  return '';
+}
+
+function exportStamp() { return new Date().toISOString().slice(0, 10); }
+
+async function exportGradesCsv() {
+  const yearFilter = String((document.getElementById('exportSchoolYear') || {}).value || '').trim();
+  try {
+    const snap = await db.collection('grades').get();
+    let rows = [];
+    snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
+    if (yearFilter) rows = rows.filter((g) => String(g.schoolYear || '') === yearFilter);
+    rows.sort((a, b) => String(a.schoolYear || '').localeCompare(String(b.schoolYear || '')) || String(a.classId || '').localeCompare(String(b.classId || '')) || String(a.fullName || '').localeCompare(String(b.fullName || '')));
+    const statsOf = (g) => computeGradeStats(g.prelim, g.midterm, g.finals !== undefined ? g.finals : g.final);
+    const notGraded = (g) => !(Number(g.prelim) || Number(g.midterm) || Number(g.finals !== undefined ? g.finals : g.final));
+    const csv = buildCsv([
+      { label: 'School year', get: (g) => g.schoolYear || '' },
+      { label: 'Semester', get: (g) => normalizeSemester(g.semester) },
+      { label: 'Subject', key: 'classId' },
+      { label: 'Section', key: 'section' },
+      { label: 'Student ID', key: 'studentId' },
+      { label: 'Student name', key: 'fullName' },
+      { label: 'Prelim', get: (g) => (Number(g.prelim) || 0) },
+      { label: 'Midterm', get: (g) => (Number(g.midterm) || 0) },
+      { label: 'Finals', get: (g) => (Number(g.finals !== undefined ? g.finals : g.final) || 0) },
+      { label: 'Average', get: (g) => (notGraded(g) ? '' : statsOf(g).averageDisplay) },
+      { label: 'Result', get: (g) => (notGraded(g) ? 'NOT ENTERED' : statsOf(g).isPassing ? 'PASSED' : 'FAILED') },
+      { label: 'Released', get: (g) => (g.isReleased ? 'Yes' : 'No') },
+      { label: 'Last updated', get: (g) => isoOf(g.updatedAt) }
+    ], rows);
+    downloadCsv(`grades${yearFilter ? '_' + yearFilter : ''}_${exportStamp()}.csv`, csv);
+    await logActivity(currentUserEmail, `Exported grades CSV (${rows.length} rows${yearFilter ? ', S.Y. ' + yearFilter : ''})`);
+    setExportStatus(`Grades: ${rows.length} row(s) exported.`);
+  } catch (err) { setExportStatus('Could not export grades: ' + (err.message || err)); }
+}
+
+async function exportEnrollmentsCsv() {
+  try {
+    const snap = await db.collection('enrollments').get();
+    const rows = [];
+    snap.forEach((d) => rows.push(d.data()));
+    rows.sort((a, b) => String(a.subjectCode || '').localeCompare(String(b.subjectCode || '')) || String(a.section || '').localeCompare(String(b.section || '')) || String(a.fullName || '').localeCompare(String(b.fullName || '')));
+    const csv = buildCsv([
+      { label: 'Subject', key: 'subjectCode' }, { label: 'Section', key: 'section' },
+      { label: 'Student ID', key: 'studentId' }, { label: 'Student name', key: 'fullName' },
+      { label: 'Status', key: 'status' }, { label: 'Enrolled by', key: 'enrolledBy' },
+      { label: 'Last updated', get: (e) => isoOf(e.updatedAt) }
+    ], rows);
+    downloadCsv(`enrollments_${exportStamp()}.csv`, csv);
+    await logActivity(currentUserEmail, `Exported enrollments CSV (${rows.length} rows)`);
+    setExportStatus(`Enrollments: ${rows.length} row(s) exported.`);
+  } catch (err) { setExportStatus('Could not export enrollments: ' + (err.message || err)); }
+}
+
+async function exportStudentsCsv() {
+  try {
+    const snap = await db.collection('users').where('role', '==', 'student').get();
+    const rows = [];
+    snap.forEach((d) => rows.push(d.data()));
+    rows.sort((a, b) => String(a.fullName || '').localeCompare(String(b.fullName || '')));
+    // Only school record fields: no session ids, no uids, nothing about sign-in
+    const csv = buildCsv([
+      { label: 'Student ID', key: 'studentId' }, { label: 'Student name', key: 'fullName' },
+      { label: 'Email', key: 'email' }, { label: 'Status', get: (u) => u.status || 'active' },
+      { label: 'Entry year level', key: 'entryYearLevel' },
+      { label: 'Credited subjects', get: (u) => normalizeCreditedList(u.creditedSubjects).join('; ') }
+    ], rows);
+    downloadCsv(`students_${exportStamp()}.csv`, csv);
+    await logActivity(currentUserEmail, `Exported students CSV (${rows.length} rows)`);
+    setExportStatus(`Students: ${rows.length} row(s) exported.`);
+  } catch (err) { setExportStatus('Could not export students: ' + (err.message || err)); }
+}
+
+function setExportStatus(text) {
+  const el = document.getElementById('exportStatus');
+  if (el) el.textContent = text;
+}
+
+// Grades of students who dropped the subject stay stored but do not count in at-risk lists or analytics
+function excludeDroppedGrades(grades, enrollments) {
+  const norm = (c) => String(c || '').trim().toUpperCase();
+  const dropped = new Set();
+  enrollments.filter((e) => e.status === 'dropped').forEach((e) => {
+    const code = norm(e.subjectCode);
+    if (e.studentUid) dropped.add(`${code}|uid:${e.studentUid}`);
+    if (e.studentId) dropped.add(`${code}|id:${String(e.studentId).trim()}`);
+  });
+  if (!dropped.size) return grades;
+  return grades.filter((g) => {
+    const code = norm(g.classId || g.subjectCode);
+    if (g.studentUid && dropped.has(`${code}|uid:${g.studentUid}`)) return false;
+    if (!g.studentUid && dropped.has(`${code}|id:${String(g.studentId || '').trim()}`)) return false;
+    return true;
+  });
+}
+
 async function loadAdminDashboardData() {
   try {
     const startOfToday = new Date();
@@ -3091,7 +3949,8 @@ async function loadAdminDashboardData() {
       assignmentsSnapshot,
       gradesSnapshot,
       todayLogsSnapshot,
-      recentLogsSnapshot
+      recentLogsSnapshot,
+      dropEnrollSnapshot
     ] = await Promise.all([
       db.collection('users').where('role', '==', 'instructor').get(),
       db.collection('subjects').get(),
@@ -3101,7 +3960,9 @@ async function loadAdminDashboardData() {
         .where('timestamp', '>=', firebase.firestore.Timestamp.fromDate(startOfToday))
         .get()
         .catch((e) => { console.warn("Today's activity count unavailable:", e); return null; }),
-      db.collection('logs').orderBy('timestamp', 'desc').limit(10).get()
+      db.collection('logs').orderBy('timestamp', 'desc').limit(10).get(),
+      db.collection('enrollments').where('status', 'in', ['pending_drop', 'dropped']).get()
+        .catch((e) => { console.warn('Drop enrollments unavailable:', e); return null; })
     ]);
 
     // Subject catalogue (units + assign dropdown)
@@ -3143,10 +4004,15 @@ async function loadAdminDashboardData() {
     });
 
     // At-risk tracker + analytics
+    const dropEnrollments = [];
+    if (dropEnrollSnapshot) dropEnrollSnapshot.forEach((d) => dropEnrollments.push({ id: d.id, ...d.data() }));
+    renderAdminDropRequests(dropEnrollments.filter((e) => e.status === 'pending_drop'));
+
     const allReleasedGrades = [];
     gradesSnapshot.forEach((doc) => allReleasedGrades.push(doc.data()));
-    renderAtRiskTracker(allReleasedGrades);
-    renderAdminAnalytics(allReleasedGrades);
+    const countedGrades = latestAttemptPerSubject(excludeDroppedGrades(allReleasedGrades, dropEnrollments), (g) => g.studentUid || String(g.studentId || '').trim());
+    renderAtRiskTracker(countedGrades);
+    renderAdminAnalytics(countedGrades);
 
     // Audit log table (latest 10)
     const logsTable = document.getElementById('logsTableBody');
@@ -3385,6 +4251,7 @@ async function addNewSubjectCode() {
   const yearLevel = val('adminSubYear') || '1';
   const semester = val('adminSubSem') || '1S';
   const units = Math.min(12, Math.max(1, parseInt(val('adminSubUnits'), 10) || 3));
+  const subType = val('adminSubType') || 'auto'; // auto = decide by code prefix
 
   if (!subjectCode || !subjectName) return alert("Complete both Code and Subject Name.");
   if (/[\/]/.test(subjectCode)) return alert("Subject code cannot contain a slash.");
@@ -3396,10 +4263,11 @@ async function addNewSubjectCode() {
       units,
       yearLevel,
       semester,
+      isItMajor: subType === 'major' ? true : subType === 'general' ? false : firebase.firestore.FieldValue.delete(),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
 
-    await logActivity(currentUserEmail, `Added subject code ${subjectCode}`);
+    await logActivity(currentUserEmail, `Added subject code ${subjectCode} (${subType === 'major' ? 'IT major' : subType === 'general' ? 'non-IT' : 'type by code'})`);
     alert(`Subject ${subjectCode} saved successfully!`);
     ['adminSubCode', 'adminSubTitle'].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
     loadAdminDashboardData();
@@ -3678,115 +4546,104 @@ function selectSubjectFromAdminProspectus(subjectCode) {
 // PROGRESSION & STUDENT DASHBOARD ENGINE
 // ------------------------------------------------------------------
 
-/**
- * Pure evaluator (no DOM access). Returns ONE consistent status model that the
- * banner renders into three non-overlapping slots:
- *   badgeText -> regularity + academic year   (pill)
- *   headline  -> where the student now stands (main heading)
- *   subtext   -> semester / standing detail   (line under heading)
- * Units completed are intentionally NOT repeated here; the progress card shows them.
- */
-function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap = {}) {
-  const baseYear = Math.min(4, Math.max(1, parseInt(entryYearLevel) || 1));
-  const yearNames = { 1: '1st Year', 2: '2nd Year', 3: '3rd Year', 4: '4th Year' };
-  const academicYearText = `Academic year ${CURRENT_SCHOOL_YEAR.replace('-', '–')}`;
+const PROGRESSION_YEAR_NAMES = { 1: '1st Year', 2: '2nd Year', 3: '3rd Year', 4: '4th Year' };
 
+// IT (major) subject codes of every year/semester block of the prospectus: Map('2|1S' -> ['IT 201', ...])
+function buildItBlocks(catalog) {
+  const blocks = new Map();
+  (catalog || []).forEach((s) => {
+    if (!s || !s.subjectCode || !isItSubject(s)) return;
+    const year = parseInt(s.yearLevel, 10);
+    const sem = normalizeSemester(s.semester);
+    if (!(year >= 1 && year <= 4) || (sem !== '1st Semester' && sem !== '2nd Semester')) return; // cannot be placed in a block
+    const key = `${year}|${sem === '1st Semester' ? '1S' : '2S'}`;
+    if (!blocks.has(key)) blocks.set(key, []);
+    const code = String(s.subjectCode).toUpperCase().trim();
+    if (!blocks.get(key).includes(code)) blocks.get(key).push(code);
+  });
+  return blocks;
+}
+
+/**
+ * Walks the prospectus from the student's entry year, first semester:
+ *   all IT subjects of a 1st semester passed  -> eligible for that year's 2nd semester
+ *   all IT subjects of both semesters passed  -> eligible for the next year
+ * Credited subjects are already part of passedSet. A block with no IT subjects in the catalogue stops the walk
+ * (it is never treated as "nothing to pass"), so an unfinished prospectus cannot promote anybody by accident.
+ */
+function walkItProgression(blocks, passedSet, entryYear) {
+  let year = Math.min(4, Math.max(1, parseInt(entryYear, 10) || 1));
+  let sem = '1S';
+  let transition = null;
+  for (let step = 0; step < 9; step++) {
+    const list = blocks.get(`${year}|${sem}`) || [];
+    if (!list.length) return { year, sem, blockMissing: true, done: false, remaining: [], transition };
+    const remaining = list.filter((code) => !passedSet.has(code));
+    if (remaining.length) return { year, sem, blockMissing: false, done: false, remaining, transition };
+    if (sem === '1S') { transition = { type: 'semester', year }; sem = '2S'; continue; }
+    if (year >= 4) return { year: 4, sem: '2S', blockMissing: false, done: true, remaining: [], transition: { type: 'done' } };
+    transition = { type: 'year', from: year };
+    year += 1; sem = '1S';
+  }
+  return { year, sem, blockMissing: false, done: false, remaining: [], transition };
+}
+
+/**
+ * Pure evaluator (no DOM access). Returns ONE consistent status model that the banner renders into three
+ * non-overlapping slots:  badgeText (regularity + academic year), headline (where the student stands), subtext.
+ * Standing comes from the IT subjects (see walkItProgression); units are informational only.
+ */
+function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap = {}, creditedCodes = currentStudentCredited) {
+  const yearNames = PROGRESSION_YEAR_NAMES;
+  const academicYearText = `Academic year ${CURRENT_SCHOOL_YEAR.replace('-', '–')}`;
   const REGULAR_CLASS = 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
   const IRREGULAR_CLASS = 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+  const build = (fields) => ({ statusLabel: fields.headline, badgeLabel: fields.badgeText, standingText: fields.subtext, ...fields });
+  const codeOf = (g) => String(g.classId || g.subjectCode || '').toUpperCase().trim();
 
-  const build = (fields) => ({
-    statusLabel: fields.headline,
-    badgeLabel: fields.badgeText,
-    standingText: fields.subtext,
-    ...fields
-  });
-
-  if (!allGrades || !allGrades.length) {
-    return build({
-      yearLevel: baseYear,
-      unitsCompleted: 0,
-      headline: yearNames[baseYear],
-      subtext: '1st Semester • Good academic standing',
-      badgeText: `Regular • ${academicYearText}`,
-      badgeClass: REGULAR_CLASS,
-      subtextClass: 'text-emerald-400'
-    });
-  }
-
-  const uniquePassedSubjects = new Map();
-  const passedSemesters = new Set();
-  const secondSemSubjects = new Set(['IS 2', 'MS 1', 'PROG 2', 'IS2', 'MS1', 'PROG2']);
-  let totalUnitsEarned = 0;
-
-  allGrades.forEach(g => {
-    const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
+  // Passed = any passing record of the subject, plus subjects credited by the admin (transferees)
+  const passedSet = new Set();
+  const failedCodes = new Set();
+  (allGrades || []).forEach((g) => {
+    const code = codeOf(g);
     if (!code) return;
-
     const finalsVal = g.finals !== undefined ? g.finals : g.final;
     const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
-
-    if (stats.isPassing && !uniquePassedSubjects.has(code)) {
-      uniquePassedSubjects.set(code, true);
-
-      const subjectUnits = subjectMap[code] ? Number(subjectMap[code].units) || 0 : 3;
-      totalUnitsEarned += subjectUnits;
-
-      let sem = normalizeSemester(g.semester);
-      if (subjectMap[code] && subjectMap[code].semester) {
-        sem = normalizeSemester(subjectMap[code].semester);
-      } else if (secondSemSubjects.has(code)) {
-        sem = '2nd Semester';
-      }
-
-      if (sem) passedSemesters.add(sem);
-    }
+    if (stats.isPassing) passedSet.add(code); else failedCodes.add(code);
   });
+  (creditedCodes || []).forEach((c) => { const code = String(c || '').toUpperCase().trim(); if (code) passedSet.add(code); });
 
-  const hasPassed2ndSem = passedSemesters.has('2nd Semester');
+  let unitsCompleted = 0;
+  passedSet.forEach((code) => { unitsCompleted += subjectMap[code] ? Number(subjectMap[code].units) || 3 : 3; });
 
-  const failedITSubjects = allGrades.filter(g => {
-    const code = (g.classId || g.subjectCode || '').toUpperCase().trim();
-    if (!isItSubjectCode(code)) return false;
-    const finalsVal = g.finals !== undefined ? g.finals : g.final;
-    const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
-    return !stats.isPassing;
-  });
+  const blocks = buildItBlocks(Object.values(subjectMap));
+  const walk = walkItProgression(blocks, passedSet, entryYearLevel);
+  const semLabel = walk.sem === '2S' ? '2nd Semester' : '1st Semester';
 
-  if (failedITSubjects.length > 0) {
-    return build({
-      yearLevel: baseYear,
-      unitsCompleted: totalUnitsEarned,
-      headline: yearNames[baseYear],
-      subtext: `${failedITSubjects.length} IT deficiency subject${failedITSubjects.length === 1 ? '' : 's'} to resolve`,
-      badgeText: `Irregular • ${academicYearText}`,
-      badgeClass: IRREGULAR_CLASS,
-      subtextClass: 'text-amber-400'
-    });
-  }
-
-  let calculatedYearLevel = baseYear;
-  let subtext = '1st Semester • Good academic standing';
   let promotionNote = '';
-
-  if (hasPassed2ndSem && totalUnitsEarned >= FIRST_YEAR_UNITS_FOR_PROMOTION) {
-    calculatedYearLevel = Math.max(baseYear, 2);
-    promotionNote = `Promoted to ${yearNames[calculatedYearLevel]}`;
-  } else if (totalUnitsEarned >= FIRST_SEM_UNITS_FOR_PROMOTION && !hasPassed2ndSem) {
-    subtext = '2nd Semester • Good academic standing';
-    promotionNote = 'Promoted to 2nd Semester';
+  if (walk.transition) {
+    const t = walk.transition;
+    if (t.type === 'semester') promotionNote = `Eligible for 2nd Semester: all 1st-semester IT subjects of ${yearNames[t.year]} passed`;
+    else if (t.type === 'year') promotionNote = `Eligible for ${yearNames[t.from + 1]}: all IT subjects of ${yearNames[t.from]} passed`;
+    else if (t.type === 'done') promotionNote = 'Completed every IT subject of the prospectus';
   }
+  const remainingNote = walk.remaining.length
+    ? `To advance, pass: ${walk.remaining.slice(0, 5).join(', ')}${walk.remaining.length > 5 ? ` and ${walk.remaining.length - 5} more` : ''}`
+    : '';
 
-  // Headline always states the student's CURRENT year level; promotion progress lives in Notifications
-  return build({
-    yearLevel: calculatedYearLevel,
-    unitsCompleted: totalUnitsEarned,
-    headline: yearNames[calculatedYearLevel],
-    promotionNote,
-    subtext,
-    badgeText: `Regular • ${academicYearText}`,
-    badgeClass: REGULAR_CLASS,
-    subtextClass: 'text-emerald-400'
-  });
+  // Deficiency = an IT subject that was failed and has not been passed (or credited) since
+  const deficiencies = Array.from(failedCodes).filter((code) => !passedSet.has(code) && isItSubject(subjectMap[code] || { subjectCode: code }));
+
+  const common = { yearLevel: walk.year, semester: walk.sem, unitsCompleted, headline: yearNames[walk.year], promotionNote, remainingNote, remainingCodes: walk.remaining, deficiencyCodes: deficiencies };
+
+  if (deficiencies.length > 0) {
+    return build({ ...common, subtext: `${deficiencies.length} IT deficiency subject${deficiencies.length === 1 ? '' : 's'} to resolve`,
+      badgeText: `Irregular • ${academicYearText}`, badgeClass: IRREGULAR_CLASS, subtextClass: 'text-amber-400' });
+  }
+  const subtext = walk.done ? 'All IT subjects completed'
+    : walk.blockMissing ? `${semLabel} • Prospectus for this semester is not set up yet`
+    : `${semLabel} • Good academic standing`;
+  return build({ ...common, subtext, badgeText: `Regular • ${academicYearText}`, badgeClass: REGULAR_CLASS, subtextClass: 'text-emerald-400' });
 }
 
 function renderYearLevelProgressionBanner(allGrades, subjectMap = {}) {
@@ -3884,20 +4741,18 @@ async function fetchStudentDataRaw() {
     }
   }
 
-  const [subjectsSnapshot, gradeSnaps, enrollmentsSnapshot] = await Promise.all([
+  // Grades are read ONLY through the account link (studentUid). Matching by Student ID or name is no longer
+  // possible: the Firestore rules refuse it, so an impostor who registers someone else's ID sees nothing.
+  const [subjectsSnapshot, gradesSnapshot, enrollmentsSnapshot] = await Promise.all([
     db.collection('subjects').get(),
-    Promise.all([
-      studentId ? db.collection('grades').where('isReleased', '==', true).where('studentId', '==', studentId).get() : null,
-      fullName ? db.collection('grades').where('isReleased', '==', true).where('fullName', '==', fullName).get() : null,
-      uid ? db.collection('grades').where('isReleased', '==', true).where('studentUid', '==', uid).get().catch(() => null) : null // needs the updated rules; harmless until then
-    ]),
+    uid ? db.collection('grades').where('isReleased', '==', true).where('studentUid', '==', uid).get() : null,
     uid ? db.collection('enrollments').where('studentUid', '==', uid).get() : null
   ]);
 
   const subjects = [];
   subjectsSnapshot.forEach((d) => subjects.push({ id: d.id, data: d.data() }));
   const gradeDocsMap = new Map();
-  gradeSnaps.forEach((snap) => { if (snap) snap.forEach((doc) => gradeDocsMap.set(doc.id, doc.data())); });
+  if (gradesSnapshot) gradesSnapshot.forEach((doc) => gradeDocsMap.set(doc.id, doc.data()));
   const enrollments = [];
   if (enrollmentsSnapshot) enrollmentsSnapshot.forEach((doc) => enrollments.push(doc.data()));
 
@@ -3944,7 +4799,7 @@ function computeStatusByCode(enrollments) {
     if (e.subjectCode) {
       const codeKey = e.subjectCode.trim().toUpperCase();
       const existingStatus = statusByCode[codeKey];
-      if (!existingStatus || existingStatus === 'rejected' || e.status === 'pending' || e.status === 'approved') {
+      if (!existingStatus || existingStatus === 'rejected' || e.status === 'pending' || isEnrolledStatus(e.status)) {
         statusByCode[codeKey] = e.status;
       }
     }
@@ -4005,7 +4860,7 @@ async function loadStudentDashboard(studentId, fullName, userData = null) {
     const matchedGrades = sd.grades.slice();
 
     const studentRecordsList = [];
-    matchedGrades.forEach(g => {
+    latestAttemptPerSubject(matchedGrades).forEach(g => { // earlier attempts stay listed below as history but do not count twice
       const finalsValue = g.finals !== undefined ? g.finals : g.final;
       const stats = computeGradeStats(g.prelim, g.midterm, finalsValue);
       const codeKey = (g.classId || g.subjectCode || '').toUpperCase().trim();
@@ -4018,11 +4873,17 @@ async function loadStudentDashboard(studentId, fullName, userData = null) {
       });
     });
 
+    const gradedPassed = new Set(matchedGrades.filter((g) => computeGradeStats(g.prelim, g.midterm, g.finals !== undefined ? g.finals : g.final).isPassing).map((g) => String(g.classId || g.subjectCode || '').toUpperCase().trim()));
+    currentStudentCredited.forEach((code) => {
+      if (gradedPassed.has(code)) return; // never count a subject twice
+      studentRecordsList.push({ units: subjectMap[code] ? Number(subjectMap[code].units) || 3 : 3, status: 'passed' });
+    });
+
     if (sd.enrollments.length) {
       sd.enrollments.forEach((e) => {
         const codeKey = (e.subjectCode || '').toUpperCase().trim();
         const units = subjectMap[codeKey] ? Number(subjectMap[codeKey].units) || 3 : 3;
-        if (e.status === 'approved' || e.status === 'pending') {
+        if (e.status === 'approved' || e.status === 'pending' || e.status === 'pending_drop') {
           studentRecordsList.push({ units, status: 'enrolled' });
         }
       });
@@ -4337,6 +5198,23 @@ const PROSPECTUS_GROUPS = [
 
 const IT_SUBJECT_PREFIXES = ['COMP', 'PROG', 'IT', 'SIA', 'DBMS', 'CAPSTONE', 'NET', 'MS', 'IS', 'APPSDEV', 'IPT', 'MUL'];
 
+// A subject document may carry an explicit isItMajor flag (set in Add Subject). Without it the code prefix decides,
+// exactly as before, so existing subjects keep their current classification.
+// Credited subjects are stored as an array of subject codes on the student's user document
+function normalizeCreditedList(list) {
+  const out = [];
+  (Array.isArray(list) ? list : []).forEach((c) => {
+    const code = String(c || '').toUpperCase().trim().replace(/\s+/g, ' ');
+    if (code && !out.includes(code)) out.push(code);
+  });
+  return out;
+}
+
+function isItSubject(subject) {
+  if (subject && typeof subject.isItMajor === 'boolean') return subject.isItMajor;
+  return isItSubjectCode(subject && subject.subjectCode);
+}
+
 function isItSubjectCode(subjectCode) {
   const code = normalizeCodeKey(subjectCode);
   return IT_SUBJECT_PREFIXES.some((prefix) => code.startsWith(prefix));
@@ -4350,7 +5228,7 @@ function groupSubjectsForProspectus(subjectsSnapshot, itOnly = false) {
   const buckets = new Map();
   subjectsSnapshot.forEach((doc) => {
     const s = doc.data();
-    if (itOnly && !isItSubjectCode(s.subjectCode)) return;
+    if (itOnly && !isItSubject(s)) return;
     const key = (s.yearLevel && s.semester) ? prospectusGroupKey(s.yearLevel, s.semester) : 'unassigned';
     if (!buckets.has(key)) buckets.set(key, []);
     buckets.get(key).push(s);
@@ -4421,6 +5299,8 @@ async function loadAvailableSubjectsForStudent() {
       const codeKey = String(g.classId || g.subjectCode || '').trim().toUpperCase();
       if (stats.isPassing && codeKey) passedSubjects.add(codeKey);
     });
+    const creditedSet = new Set(currentStudentCredited);
+    creditedSet.forEach((c) => passedSubjects.add(c));
 
     container.innerHTML = '';
 
@@ -4444,7 +5324,7 @@ async function loadAvailableSubjectsForStudent() {
       subjects.forEach((s) => {
         const cleanCode = (s.subjectCode || '').trim().toUpperCase();
         const status = statusByCode[cleanCode];
-        const isIT = isItSubjectCode(s.subjectCode);
+        const isIT = isItSubject(s);
 
         let hasUnmetPrerequisite = false;
         let prereqMessage = '';
@@ -4462,7 +5342,8 @@ async function loadAvailableSubjectsForStudent() {
         const left = document.createElement('div');
         left.className = "flex items-center gap-3 min-w-0";
 
-        const isEligibleToApply = (!status || status === 'rejected') && !hasUnmetPrerequisite;
+        const isCredited = creditedSet.has(cleanCode);
+        const isEligibleToApply = (!status || status === 'rejected') && !hasUnmetPrerequisite && !isCredited;
 
         if (isEligibleToApply) {
           const checkbox = document.createElement('input');
@@ -4494,12 +5375,16 @@ async function loadAvailableSubjectsForStudent() {
         left.appendChild(label2);
         row.appendChild(left);
 
-        if (status) {
+        const shownStatus = status || (isCredited ? 'credited' : '');
+        if (shownStatus) {
           const badgeConfig = {
+            credited: { label: 'CREDITED', cls: 'bg-sky-500/20 text-sky-400 border border-sky-500/30' },
             pending: { label: 'PENDING APPROVAL', cls: 'bg-amber-500/20 text-amber-400 border border-amber-500/30' },
             approved: { label: 'ENROLLED', cls: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' },
+            pending_drop: { label: 'DROP REQUESTED', cls: 'bg-amber-500/20 text-amber-400 border border-amber-500/30' },
+            dropped: { label: 'DROPPED', cls: 'bg-slate-700/40 text-slate-300 border border-slate-600' },
             rejected: { label: 'NOT APPROVED (RE-APPLY)', cls: 'bg-rose-500/20 text-rose-400 border border-rose-500/30' }
-          }[status] || { label: String(status).toUpperCase(), cls: 'bg-slate-700/40 text-slate-300 border border-slate-700' };
+          }[shownStatus] || { label: String(shownStatus).toUpperCase(), cls: 'bg-slate-700/40 text-slate-300 border border-slate-700' };
 
           const badge = document.createElement('span');
           badge.className = `shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase ${badgeConfig.cls}`;
@@ -4596,6 +5481,220 @@ async function applySelectedSubjects() {
   }
 }
 
+// ------------------------------------------------------------------
+// DROP WORKFLOW: approved -> pending_drop (student asks) -> dropped (instructor/admin approves) or back to approved
+// ------------------------------------------------------------------
+const dropInFlight = new Set(); // enrollment ids with a write in progress (double-click guard)
+
+async function requestSubjectDrop(enrollmentId) {
+  if (!enrollmentId || dropInFlight.has(enrollmentId)) return;
+  if (!confirm('Request to drop this subject?\n\nYour instructor must approve it. Until then you stay enrolled. If the drop is approved, your grades for this subject stop counting.')) return;
+  dropInFlight.add(enrollmentId);
+  try {
+    const ref = db.collection('enrollments').doc(enrollmentId);
+    const snap = await ref.get();
+    if (!snap.exists || snap.data().studentUid !== currentUserId || snap.data().status !== 'approved') {
+      alert('This subject can no longer be dropped from here. Refresh the page and try again.');
+      return;
+    }
+    await ref.update({
+      status: 'pending_drop',
+      dropRequestedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await logActivity(currentUserEmail, `Requested drop of ${snap.data().subjectCode} (Section ${snap.data().section || ''})`);
+    invalidateStudentData();
+    alert('Drop request sent to your instructor.');
+  } catch (err) {
+    console.error('Drop request error:', err);
+    alert('Could not send the drop request: ' + (err.message || err));
+  } finally {
+    dropInFlight.delete(enrollmentId);
+  }
+}
+
+async function cancelDropRequest(enrollmentId) {
+  if (!enrollmentId || dropInFlight.has(enrollmentId)) return;
+  dropInFlight.add(enrollmentId);
+  try {
+    const ref = db.collection('enrollments').doc(enrollmentId);
+    const snap = await ref.get();
+    if (!snap.exists || snap.data().studentUid !== currentUserId || snap.data().status !== 'pending_drop') {
+      alert('This drop request was already decided.');
+      return;
+    }
+    await ref.update({ status: 'approved', updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    await logActivity(currentUserEmail, `Cancelled drop request for ${snap.data().subjectCode}`);
+    invalidateStudentData();
+    alert('Drop request cancelled. You remain enrolled.');
+  } catch (err) {
+    console.error('Cancel drop error:', err);
+    alert('Could not cancel the request: ' + (err.message || err));
+  } finally {
+    dropInFlight.delete(enrollmentId);
+  }
+}
+
+// Instructor or admin decides a student's drop request: approve (-> dropped) or keep the student enrolled (-> approved)
+async function decideDropRequest(enrollmentId, approve) {
+  if (!enrollmentId || dropInFlight.has(enrollmentId)) return;
+  dropInFlight.add(enrollmentId);
+  try {
+    const ref = db.collection('enrollments').doc(enrollmentId);
+    const snap = await ref.get();
+    if (!snap.exists) { alert('That request no longer exists.'); return; }
+    const e = snap.data();
+    if (e.status !== 'pending_drop') { alert('This request was already decided.'); return; }
+    const ts = firebase.firestore.FieldValue.serverTimestamp();
+    await ref.update(approve
+      ? { status: 'dropped', updatedAt: ts, droppedAt: ts, droppedBy: currentUserId }
+      : { status: 'approved', updatedAt: ts });
+    await logActivity(currentUserEmail, `${approve ? 'Approved drop' : 'Kept enrolled'}: ${e.studentId || ''} in ${e.subjectCode} (Section ${e.section || ''})`);
+    if (e.studentUid) {
+      await sendNotifications([{
+        recipientUid: e.studentUid,
+        type: approve ? 'drop_approved' : 'drop_rejected',
+        title: approve ? 'Drop approved' : 'Drop request declined',
+        message: approve
+          ? `Your request to drop ${e.subjectCode} was approved. You are no longer enrolled in it.`
+          : `Your request to drop ${e.subjectCode} was declined. You remain enrolled.`,
+        subjectCode: e.subjectCode || ''
+      }]);
+    }
+    await refreshAfterDropDecision(e.subjectCode);
+  } catch (err) {
+    console.error('Drop decision error:', err);
+    alert('Could not save the decision: ' + (err.message || err));
+  } finally {
+    dropInFlight.delete(enrollmentId);
+  }
+}
+
+// Instructor removes a student from the roster directly (no request needed)
+async function dropStudentFromRoster(enrollmentId) {
+  if (!enrollmentId || dropInFlight.has(enrollmentId)) return;
+  const entry = rosterData.find((r) => r.enrollmentId === enrollmentId);
+  const label = entry ? `${entry.fullName} (${entry.studentId})` : 'this student';
+  if (!confirm(`Drop ${label} from this class?\n\nThey leave the roster and their grades stop counting. Saved grades are kept as history.`)) return;
+  dropInFlight.add(enrollmentId);
+  try {
+    const ref = db.collection('enrollments').doc(enrollmentId);
+    const snap = await ref.get();
+    if (!snap.exists) { alert('That enrollment no longer exists.'); return; }
+    const e = snap.data();
+    if (e.status !== 'approved' && e.status !== 'pending_drop') { alert('This student is not currently enrolled.'); return; }
+    const ts = firebase.firestore.FieldValue.serverTimestamp();
+    await ref.update({ status: 'dropped', updatedAt: ts, droppedAt: ts, droppedBy: currentUserId });
+    await logActivity(currentUserEmail, `Dropped ${e.studentId || ''} from ${e.subjectCode} (Section ${e.section || ''})`);
+    if (e.studentUid) {
+      await sendNotifications([{
+        recipientUid: e.studentUid,
+        type: 'drop_approved',
+        title: 'Dropped from a subject',
+        message: `Your instructor dropped you from ${e.subjectCode}. You are no longer enrolled in it.`,
+        subjectCode: e.subjectCode || ''
+      }]);
+    }
+    await refreshAfterDropDecision(e.subjectCode);
+  } catch (err) {
+    console.error('Drop student error:', err);
+    alert('Could not drop the student: ' + (err.message || err));
+  } finally {
+    dropInFlight.delete(enrollmentId);
+  }
+}
+
+async function refreshAfterDropDecision(subjectCode) {
+  if (currentUserRole === 'admin' && typeof loadAdminDropRequests === 'function' && document.getElementById('adminDropRequestsList')) {
+    // an admin deciding from the admin screen
+    await loadAdminDropRequests();
+  }
+  if (activeSubjectCode && document.getElementById('dropRequestsList')) {
+    loadPendingEnrollments(subjectCode || activeSubjectCode);
+    loadInstructorGradesFromFirestore(activeSubjectCode, activeInstructorSectionFilter);
+  }
+}
+
+function buildDropRequestRow(e, docId, showSubject) {
+  const row = document.createElement('div');
+  row.className = 'flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950';
+  const info = document.createElement('div');
+  info.className = 'min-w-0';
+  info.innerHTML = `
+    <div class="flex items-center gap-2">
+      <span class="text-sm font-semibold text-white truncate">${escapeHtml(e.fullName || 'Student')}</span>
+      ${showSubject ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-emerald-400 border border-slate-700">${escapeHtml(e.subjectCode || '')}</span>` : ''}
+      <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">${escapeHtml(e.section || 'N/A')}</span>
+    </div>
+    <div class="text-xs text-slate-400 font-mono">${escapeHtml(e.studentId || 'N/A')}</div>`;
+  const right = document.createElement('div');
+  right.className = 'flex items-center gap-2 shrink-0';
+  const approveBtn = document.createElement('button');
+  approveBtn.type = 'button';
+  approveBtn.className = 'px-3 py-1 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white font-bold text-xs rounded-lg transition-all border border-rose-500/30';
+  approveBtn.textContent = 'Approve drop';
+  approveBtn.onclick = () => decideDropRequest(docId, true);
+  const keepBtn = document.createElement('button');
+  keepBtn.type = 'button';
+  keepBtn.className = 'px-3 py-1 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 font-bold text-xs rounded-lg transition-all border border-emerald-500/30';
+  keepBtn.textContent = 'Keep enrolled';
+  keepBtn.onclick = () => decideDropRequest(docId, false);
+  right.appendChild(approveBtn);
+  right.appendChild(keepBtn);
+  row.appendChild(info);
+  row.appendChild(right);
+  return row;
+}
+
+async function loadDropRequests(subjectCode) {
+  const container = document.getElementById('dropRequestsList');
+  if (!container) return;
+  try {
+    const snapshot = await db.collection('enrollments')
+      .where('subjectCode', '==', subjectCode)
+      .where('status', '==', 'pending_drop')
+      .get();
+    container.innerHTML = '';
+    const docs = [];
+    snapshot.forEach((d) => {
+      const data = d.data();
+      if (activeInstructorSectionFilter === 'ALL' || data.section === activeInstructorSectionFilter) docs.push({ id: d.id, ...data });
+    });
+    if (!docs.length) {
+      container.innerHTML = `<div class="p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">No drop requests for Section [${escapeHtml(activeInstructorSectionFilter)}].</div>`;
+      return;
+    }
+    docs.forEach((e) => container.appendChild(buildDropRequestRow(e, e.id, false)));
+  } catch (err) {
+    console.error('Error loading drop requests:', err);
+  }
+}
+
+// Admin: every pending drop request across all subjects
+function renderAdminDropRequests(docs) {
+  const box = document.getElementById('adminDropRequestsList');
+  const badge = document.getElementById('adminDropCount');
+  if (badge) badge.textContent = String(docs.length);
+  if (!box) return;
+  box.innerHTML = '';
+  if (!docs.length) {
+    box.innerHTML = '<div class="p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">No pending drop requests.</div>';
+    return;
+  }
+  docs.forEach((e) => box.appendChild(buildDropRequestRow(e, e.id, true)));
+}
+
+async function loadAdminDropRequests() {
+  try {
+    const snap = await db.collection('enrollments').where('status', '==', 'pending_drop').get();
+    const docs = [];
+    snap.forEach((d) => docs.push({ id: d.id, ...d.data() }));
+    renderAdminDropRequests(docs);
+  } catch (err) {
+    console.warn('Drop requests unavailable:', err);
+  }
+}
+
 async function loadPendingEnrollments(subjectCode) {
   const container = document.getElementById('pendingEnrollmentsList');
   if (!container) return;
@@ -4615,6 +5714,8 @@ async function loadPendingEnrollments(subjectCode) {
         pendingDocs.push({ id: doc.id, ...data });
       }
     });
+
+    loadDropRequests(subjectCode); // second list on the same page, fetched independently
 
     if (pendingDocs.length === 0) {
       container.innerHTML = `<div class="p-3 rounded-lg border border-slate-800 bg-slate-950 text-center text-xs text-slate-500">No pending roster requests for Section [${escapeHtml(activeInstructorSectionFilter)}].</div>`;
@@ -4768,6 +5869,7 @@ function renderNotificationPanel() {
       <div class="text-xs font-bold text-emerald-400">Promotion progress</div>
       <div class="text-xs text-slate-300">${escapeHtml(p.promotionNote || 'No promotion yet')} • Current standing: ${escapeHtml(p.headline)}</div>
       <div class="text-[11px] text-slate-500">${escapeHtml(String(p.unitsCompleted))} units completed</div>
+      ${p.remainingNote ? `<div class="text-[11px] text-slate-400">${escapeHtml(p.remainingNote)}</div>` : ''}
     `;
     panel.appendChild(card);
   }
@@ -4849,5 +5951,5 @@ async function logActivity(user, action) {
 async function handleLogout() {
   await logActivity(currentUserEmail, 'Signed out');
   swrClear();
-  auth.signOut();
+  signOutThisTab();
 }
