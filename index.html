@@ -145,7 +145,7 @@
       <!-- Top Branding Bar -->
       <div class="flex items-center gap-3 relative z-10">
         <img
-          src="ITELogo.jpg"
+          src="ITELogo.png"
           alt="CDK Logo"
           class="w-10 h-10 object-contain"
           onError="this.style.display='none'"
@@ -198,39 +198,6 @@
               <p class="text-xs text-slate-400">
                 Sign in with your school credentials or register as a student.
               </p>
-            </div>
-
-            <!-- Select Your Portal Buttons -->
-            <div class="space-y-1.5">
-              <label
-                class="block text-[10px] font-bold uppercase tracking-wider text-slate-400"
-                >SELECT YOUR PORTAL</label
-              >
-              <div
-                class="p-1 rounded-xl bg-slate-950 border border-slate-800/80 flex items-center gap-1 text-xs font-semibold"
-              >
-                <button
-                  id="portalTabStudent"
-                  onclick="selectPortal('student')"
-                  class="flex-1 py-2 rounded-lg bg-emerald-500 text-slate-950 font-bold transition-all"
-                >
-                  Student Portal
-                </button>
-                <button
-                  id="portalTabFaculty"
-                  onclick="selectPortal('instructor')"
-                  class="flex-1 py-2 rounded-lg text-slate-400 hover:text-white transition-all"
-                >
-                  Faculty Workspace
-                </button>
-                <button
-                  id="portalTabAdmin"
-                  onclick="selectPortal('admin')"
-                  class="flex-1 py-2 rounded-lg text-slate-400 hover:text-white transition-all"
-                >
-                  Admin Console
-                </button>
-              </div>
             </div>
 
             <!-- Sign In / Register Switcher -->
@@ -459,7 +426,7 @@
         <div class="w-full flex items-center justify-between gap-4">
           <div class="flex items-center gap-3">
             <img
-              src="ITELogo.jpg"
+              src="ITELogo.png"
               alt="CDK Logo"
               class="w-8 h-8 object-contain"
               onError="this.style.display='none'"
@@ -1093,6 +1060,9 @@
                     <span>Release official grades</span>
                   </button>
                 </div>
+                <p class="mt-3 text-[11px] text-slate-500">
+                  Releasing is permanent: once released, grades are locked and can no longer be edited, overwritten, deleted or released again. Unreleased (draft) grades stay editable.
+                </p>
               </div>
 
               <!-- Official student roster (approved enrollments, alphabetical) -->
@@ -1543,7 +1513,7 @@
               </div>
             </div>
 
-            <!-- Right: Subject Assignment Quick Allocation (4 cols) -->
+            <!-- Right: Subject Assignment (multi-select, 4 cols) -->
             <div
               class="lg:col-span-4 glass-panel p-6 rounded-2xl border border-slate-800 space-y-4 hover-card-glow flex flex-col justify-between"
             >
@@ -1555,7 +1525,9 @@
                     <h3 class="text-sm font-bold text-white">
                       Subject assignment
                     </h3>
-                    <p class="text-[11px] text-slate-400">Quick allocation</p>
+                    <p class="text-[11px] text-slate-400">
+                      Select one or more subjects, then give each its year &amp; section
+                    </p>
                   </div>
                   <div
                     class="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400"
@@ -1579,16 +1551,46 @@
                   </div>
 
                   <div>
-                    <label
-                      class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5"
-                      >Subject & section</label
-                    >
-                    <select
-                      id="assignSubjectSelect"
-                      class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
-                    >
-                      <option value="">Select Subject...</option>
-                    </select>
+                    <div class="flex items-center justify-between mb-1.5 gap-2">
+                      <label
+                        for="assignSubjectSearch"
+                        class="block text-[10px] font-bold text-slate-400 uppercase"
+                        >Subjects</label
+                      >
+                      <div class="flex items-center gap-2">
+                        <span id="assignSelectionCount" class="text-[10px] font-mono text-emerald-400">0 selected</span>
+                        <button type="button" onclick="clearAssignSelection()" class="text-[10px] text-slate-400 hover:text-white underline">Clear</button>
+                      </div>
+                    </div>
+
+                    <!-- Same All / IT Only idea as the Curriculum Prospectus filter -->
+                    <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 w-fit mb-2">
+                      <button
+                        type="button"
+                        id="assignBtnFilterAll"
+                        onclick="setAssignItFilter('all')"
+                        class="px-3 py-1 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[11px] font-bold transition-all"
+                      >
+                        All
+                      </button>
+                      <button
+                        type="button"
+                        id="assignBtnFilterIT"
+                        onclick="setAssignItFilter('it')"
+                        class="px-3 py-1 rounded-lg text-slate-400 hover:text-white text-[11px] font-bold transition-all"
+                      >
+                        IT Only
+                      </button>
+                    </div>
+
+                    <input
+                      id="assignSubjectSearch"
+                      type="text"
+                      oninput="renderAssignSubjectList()"
+                      placeholder="Search subjects..."
+                      class="w-full mb-2 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500"
+                    />
+                    <div id="assignSubjectList" class="max-h-72 overflow-y-auto space-y-2 pr-1"></div>
                   </div>
 
                   <button
@@ -1602,11 +1604,12 @@
               </div>
 
               <button
+                id="assignSubjectsBtn"
                 onclick="assignSubjectToFaculty()"
                 type="button"
                 class="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider transition-all glow-accent flex items-center justify-center gap-2 mt-4"
               >
-                <span>Assign subject</span>
+                <span>Assign selected subjects</span>
                 <i data-lucide="chevron-right" class="w-4 h-4"></i>
               </button>
             </div>
@@ -1755,7 +1758,7 @@
           <div data-page="health" class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-4">
             <div>
               <h3 class="text-sm font-black text-white uppercase tracking-wider">Data health</h3>
-              <p class="text-xs text-slate-500">Checks every saved grade against approved enrollments. Grades for students who are not enrolled in that subject are "orphans". The scan reads all grades and enrollments once, so run it occasionally.</p>
+              <p class="text-xs text-slate-500">Checks every saved grade against approved enrollments. Grades for students who are not enrolled in that subject are "orphans". The scan reads all grades and enrollments once, so run it occasionally. Released grades are locked and are never changed or deleted by these tools.</p>
             </div>
             <div class="flex flex-wrap items-center gap-3">
               <button type="button" onclick="scanDataHealth()" class="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider transition-all">Scan grades</button>
@@ -2068,14 +2071,25 @@
           <div>
             <label
               class="block text-[10px] font-bold text-slate-400 uppercase mb-1"
-              >Initial Password</label
+              >Password</label
             >
-            <input
-              type="password"
-              id="adminFacultyPass"
-              placeholder="••••••••"
-              class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
-            />
+            <div class="relative">
+              <input
+                type="password"
+                id="adminFacultyPass"
+                placeholder="••••••••"
+                autocomplete="new-password"
+                class="w-full px-3 py-2.5 pr-10 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
+              />
+              <button
+                type="button"
+                onclick="togglePasswordVisibility('adminFacultyPass', 'adminFacultyPassIcon')"
+                aria-label="Show or hide password"
+                class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+              >
+                <i data-lucide="eye" id="adminFacultyPassIcon" class="w-4 h-4"></i>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -2090,10 +2104,7 @@
             Cancel
           </button>
           <button
-            onclick="
-              createFacultyAccount();
-              closeCreateFacultyModal();
-            "
+            onclick="createFacultyAccount()"
             type="button"
             class="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider transition-all"
           >
