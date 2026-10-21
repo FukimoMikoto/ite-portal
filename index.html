@@ -1172,29 +1172,25 @@
                   </div>
                 </div>
 
+                <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-slate-800">
+                  <div id="periodTabsBar" class="flex items-center gap-1 p-1 rounded-xl bg-slate-950 border border-slate-800" role="tablist" aria-label="Grading period">
+                    <button id="periodTab-prelim" type="button" role="tab" onclick="setPeriod('prelim')" class="px-3.5 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-[11px] font-extrabold transition-all">Prelim</button>
+                    <button id="periodTab-midterm" type="button" role="tab" onclick="setPeriod('midterm')" class="px-3.5 py-1.5 rounded-lg text-slate-400 hover:text-white text-[11px] font-bold transition-all">Midterm</button>
+                    <button id="periodTab-finals" type="button" role="tab" onclick="setPeriod('finals')" class="px-3.5 py-1.5 rounded-lg text-slate-400 hover:text-white text-[11px] font-bold transition-all">Finals</button>
+                    <button id="periodTab-all" type="button" role="tab" onclick="setPeriod('all')" class="px-3.5 py-1.5 rounded-lg text-slate-400 hover:text-white text-[11px] font-bold transition-all" title="Prelim, Midterm, Finals and the overall average, like the class record sheet">Summary</button>
+                  </div>
+                  <button id="manageColumnsBtn" type="button" onclick="toggleColumnManager()" class="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-bold text-slate-200 transition-all">Manage columns</button>
+                </div>
+
+                <div id="columnManagerBox" class="hidden px-5 py-3 border-b border-slate-800 bg-slate-950/40 space-y-2"></div>
+
                 <div id="importReport" class="hidden px-5 py-3 border-b border-slate-800 bg-amber-500/5 text-xs space-y-1" role="status"></div>
 
                 <div id="gridSummaryStrip" class="flex flex-wrap gap-x-6 gap-y-1 px-5 py-2.5 border-b border-slate-800 text-[11px] font-bold text-slate-400"></div>
 
                 <div class="overflow-x-auto">
                   <table class="w-full text-left border-collapse">
-                    <thead>
-                      <tr
-                        class="bg-slate-950/50 border-b border-slate-800 text-[10px] font-extrabold uppercase tracking-widest text-slate-500"
-                      >
-                        <th class="py-3 px-4 whitespace-nowrap">STUDENT ID</th>
-                        <th class="py-3 px-4 whitespace-nowrap">STUDENT NAME</th>
-                        <th class="py-3 px-4 whitespace-nowrap">PRELIM</th>
-                        <th class="py-3 px-4 whitespace-nowrap">MIDTERM</th>
-                        <th class="py-3 px-4 whitespace-nowrap">FINALS</th>
-                        <th class="py-3 px-4 whitespace-nowrap">LABORATORY</th>
-                        <th class="py-3 px-4 whitespace-nowrap">QUIZZES</th>
-                        <th class="py-3 px-4 whitespace-nowrap">ORAL RECITATION</th>
-                        <th class="py-3 px-4 whitespace-nowrap">ATTENDANCE</th>
-                        <th class="py-3 px-4 whitespace-nowrap">AVERAGE</th>
-                        <th class="py-3 px-4 whitespace-nowrap">STANDING</th>
-                      </tr>
-                    </thead>
+                    <thead id="previewHead"></thead>
                     <tbody
                       id="previewBody"
                       class="divide-y divide-slate-800/50 text-xs font-medium"
@@ -1203,72 +1199,36 @@
                 </div>
               </div>
 
-              <!-- Evaluation weights -->
+              <!-- Evaluation weights (term grade formula) -->
               <div id="facSecWeights" data-page="weights" style="scroll-margin-top:6rem"
-                class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3"
+                class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-4"
               >
-                <div class="flex items-center justify-between">
-                  <span
-                    class="text-[10px] font-bold text-slate-400 uppercase tracking-wider"
-                    >COURSE EVALUATION & ASSESSMENT WEIGHTS</span
-                  >
-                  <span
-                    id="weightTotalIndicator"
-                    class="text-[10px] font-mono text-emerald-400"
-                    >Total: 100%</span
-                  >
+                <div class="flex items-center justify-between gap-3">
+                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">TERM GRADE WEIGHTS (PER SUBJECT)</span>
+                  <span id="weightTotalIndicator" class="text-[10px] font-mono text-emerald-400">All weights add up to 100%</span>
                 </div>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                  <div>
-                    <label class="block text-[9px] text-slate-500 mb-1"
-                      >Laboratory (Formative)</label
-                    >
-                    <input
-                      type="number"
-                      id="weightLab"
-                      value="30"
-                      class="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-emerald-400 text-center font-mono font-bold"
-                    />
+                <p class="text-[11px] text-slate-500">Each term (Prelim, Midterm, Finals) grade = Lecture &times; lecture % + Laboratory &times; lab %. A category's score is (points &divide; maximum points) &times; 50 + 50, then multiplied by its weight. Categories without columns are skipped. Defaults come from the department class-record sheet.</p>
+                <div class="grid grid-cols-2 gap-3 text-xs max-w-md">
+                  <div><label class="block text-[9px] text-slate-500 mb-1" for="tfLectureW">Lecture %</label><input type="number" min="0" max="100" step="0.5" id="tfLectureW" value="60" class="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-emerald-400 text-center font-mono font-bold" /></div>
+                  <div><label class="block text-[9px] text-slate-500 mb-1" for="tfLabW">Laboratory %</label><input type="number" min="0" max="100" step="0.5" id="tfLabW" value="40" class="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-emerald-400 text-center font-mono font-bold" /></div>
+                </div>
+                <div>
+                  <div class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 mb-2">Lecture categories (total 100%)</div>
+                  <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
+                    <div><label class="block text-[9px] text-slate-500 mb-1" for="tf_att">Attendance</label><input type="number" min="0" max="100" step="0.5" id="tf_att" value="5" class="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-emerald-400 text-center font-mono font-bold" /></div><div><label class="block text-[9px] text-slate-500 mb-1" for="tf_ass">Assignment / Seatwork</label><input type="number" min="0" max="100" step="0.5" id="tf_ass" value="15" class="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-emerald-400 text-center font-mono font-bold" /></div><div><label class="block text-[9px] text-slate-500 mb-1" for="tf_q">Quizzes</label><input type="number" min="0" max="100" step="0.5" id="tf_q" value="30" class="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-emerald-400 text-center font-mono font-bold" /></div><div><label class="block text-[9px] text-slate-500 mb-1" for="tf_out">Oral Recitation</label><input type="number" min="0" max="100" step="0.5" id="tf_out" value="0" class="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-emerald-400 text-center font-mono font-bold" /></div><div><label class="block text-[9px] text-slate-500 mb-1" for="tf_exam">Exam</label><input type="number" min="0" max="100" step="0.5" id="tf_exam" value="50" class="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-emerald-400 text-center font-mono font-bold" /></div>
                   </div>
-                  <div>
-                    <label class="block text-[9px] text-slate-500 mb-1"
-                      >Quizzes (Formative)</label
-                    >
-                    <input
-                      type="number"
-                      id="weightQuizzes"
-                      value="30"
-                      class="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-emerald-400 text-center font-mono font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label class="block text-[9px] text-slate-500 mb-1"
-                      >Oral Recitation</label
-                    >
-                    <input
-                      type="number"
-                      id="weightOutput"
-                      value="20"
-                      class="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-emerald-400 text-center font-mono font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label class="block text-[9px] text-slate-500 mb-1"
-                      >Major Exam (Summative)</label
-                    >
-                    <input
-                      type="number"
-                      id="weightExam"
-                      value="20"
-                      class="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-emerald-400 text-center font-mono font-bold"
-                    />
+                </div>
+                <div>
+                  <div class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 mb-2">Laboratory categories (total 100%)</div>
+                  <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs max-w-xl">
+                    <div><label class="block text-[9px] text-slate-500 mb-1" for="tf_latt">Lab Attendance</label><input type="number" min="0" max="100" step="0.5" id="tf_latt" value="10" class="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-emerald-400 text-center font-mono font-bold" /></div><div><label class="block text-[9px] text-slate-500 mb-1" for="tf_lab">Laboratory Exercises</label><input type="number" min="0" max="100" step="0.5" id="tf_lab" value="40" class="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-emerald-400 text-center font-mono font-bold" /></div><div><label class="block text-[9px] text-slate-500 mb-1" for="tf_lasm">Lab Assessment</label><input type="number" min="0" max="100" step="0.5" id="tf_lasm" value="50" class="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-emerald-400 text-center font-mono font-bold" /></div>
                   </div>
                 </div>
                 <button
                   onclick="saveInstructorGradingFormula()"
                   class="w-full py-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs font-bold"
                 >
-                  Save Course Evaluation Weights
+                  Save Term Grade Weights
                 </button>
               </div>
 
@@ -2179,7 +2139,7 @@
             onclick="closeAdminProspectusModal()"
             class="px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-bold text-slate-300 hover:text-white transition-all"
           >
-            Cancel
+            Done
           </button>
         </div>
       </div>

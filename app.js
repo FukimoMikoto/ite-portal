@@ -194,18 +194,20 @@ function computeGradeStats(prelim, midterm, finals) {
 
 const GRID_SCORE_FIELDS = ['labScore', 'quizzesScore', 'oralRecitationScore', 'attendanceScore']; // attendance is recorded but not weighted
 
-function getActiveWeights() {
-  const read = (id, fallback) => {
-    const el = document.getElementById(id);
-    const v = el ? parseFloat(el.value) : NaN;
-    return Number.isFinite(v) ? v : fallback;
-  };
-  return {
-    lab: read('weightLab', 30),
-    quizzes: read('weightQuizzes', 30),
-    oral: read('weightOutput', 20), // id kept for compatibility; now "Oral Recitation"
-    exam: read('weightExam', 20)
-  };
+function getActiveWeights() { return readTermFormulaFromForm(); }
+
+function readTermFormulaFromForm() {
+  const read = (id, fb) => { const el = document.getElementById(id); const v = el ? parseFloat(el.value) : NaN; return Number.isFinite(v) ? v : fb; };
+  const weights = {};
+  COLUMN_CATEGORIES.forEach(({ key }) => { weights[key] = read('tf_' + key, 0); });
+  return { lectureWeight: read('tfLectureW', 0), labWeight: read('tfLabW', 0), weights };
+}
+
+function renderTermFormulaForm(f) {
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  set('tfLectureW', f.lectureWeight); set('tfLabW', f.labWeight);
+  COLUMN_CATEGORIES.forEach(({ key }) => set('tf_' + key, f.weights[key]));
+  refreshWeightIndicator();
 }
 
 // Official grade = plain average of Prelim, Midterm and Finals (same as saved grades and the student view).
@@ -216,16 +218,16 @@ function computeFacultyRowStats(row) {
 }
 
 function refreshWeightIndicator() {
-  const w = getActiveWeights();
-  const total = w.lab + w.quizzes + w.oral + w.exam;
+  const f = readTermFormulaFromForm();
   const el = document.getElementById('weightTotalIndicator');
   if (!el) return;
-  el.textContent = `Total: ${total}%`;
-  el.className = total === 100 ? "text-[10px] font-mono text-emerald-400" : "text-[10px] font-mono text-rose-400 font-bold";
+  const err = validateTermFormula(f);
+  el.textContent = err ? err : 'All weights add up to 100%';
+  el.className = err ? "text-[10px] font-mono text-rose-400 font-bold" : "text-[10px] font-mono text-emerald-400";
 }
 
 function setupWeightLiveRecalc() {
-  ['weightLab', 'weightQuizzes', 'weightOutput', 'weightExam'].forEach((id) => {
+  ['tfLectureW', 'tfLabW'].concat(COLUMN_CATEGORIES.map((c) => 'tf_' + c.key)).forEach((id) => {
     const el = document.getElementById(id);
     if (!el) return;
     el.addEventListener('input', refreshWeightIndicator);
@@ -264,6 +266,12 @@ function refreshGridComputedCells() {
 }
 
 function updateRowComputedCells(tr, row) {
+  recomputeRowTerms(row);
+  if (PERIODS[activePeriod]) {
+    refreshPeriodComputedCells(tr, row, activePeriod);
+    updateGridSummary();
+    return;
+  }
   const stats = computeFacultyRowStats(row);
   const avgCell = tr.querySelector('[data-cell="average"]');
   const standingCell = tr.querySelector('[data-cell="standing"]');
@@ -276,6 +284,28 @@ function updateRowComputedCells(tr, row) {
   }
   if (standingCell) standingCell.innerHTML = liveStandingHtml(row, stats);
   updateGridSummary();
+}
+
+// Computed cells of a term tab (category grades, lecture / lab grade, term grade, remarks)
+function refreshPeriodComputedCells(tr, row, periodName) {
+  const field = PERIODS[periodName].field;
+  const b = computeTermBreakdown(row, periodName);
+  const fmt = (v) => (v === null || v === undefined ? '—' : Number(v).toFixed(2));
+  const notGraded = isNotGradedRow(row);
+  const term = Number(row[field]) || 0;
+  tr.querySelectorAll('[data-cell]').forEach((cell) => {
+    const k = cell.dataset.cell;
+    if (k.startsWith('cat:')) cell.textContent = b.cats[k.slice(4)] ? fmt(b.cats[k.slice(4)].transmuted) : '—';
+    else if (k === 'grp:lecture') cell.textContent = fmt(b.lecture);
+    else if (k === 'grp:lab') cell.textContent = fmt(b.lab);
+    else if (k === 'term') {
+      cell.textContent = notGraded ? '—' : term.toFixed(2);
+      cell.className = `px-4 py-3 font-black font-mono border-l border-slate-800/50 ${notGraded ? 'text-slate-500' : term >= PASSING_THRESHOLD ? 'text-white' : 'text-rose-400'}`;
+    } else if (k === 'remarks') {
+      cell.innerHTML = notGraded ? '<span class="text-slate-500">—</span>'
+        : `<span class="inline-flex px-2.5 py-1 rounded-md text-[10px] font-extrabold uppercase tracking-wider leading-none ${term >= PASSING_THRESHOLD ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'}">${term >= PASSING_THRESHOLD ? 'PASSED' : 'FAILED'}</span><div class="text-[10px] text-slate-500 mt-1">${liveRowStateLabel(row)}${row.__computed && row.__computed[field] ? '' : ' · no scores yet'}</div>`;
+    }
+  });
 }
 
 // Pulls Lab / Quizzes / Oral Recitation overall scores from optional Excel columns
@@ -1554,10 +1584,10 @@ function normalizeCodeKey(code) {
 // ASSESSMENT COMPONENT HELPERS (shared by Excel parser, saves, modal)
 // Header convention: <period>_<category><n>  e.g. P_Q1, M_Lab1, F_Exam, P_Att
 //   period   : p = Prelim, m = Midterm, f = Finals
-//   category : q, lab, ass, out, exam, att
+//   category : lecture: att, ass, q, out, exam   |   laboratory: latt (lab attendance), lab (lab exercises), lasm (lab assessment)
 // ------------------------------------------------------------------
 
-const COMPONENT_KEY_RE = /^([pmf])_(q|lab|ass|out|exam|att)(\d*)$/i;
+const COMPONENT_KEY_RE = /^([pmf])_(q|lab|ass|out|exam|att|latt|lasm)(\d*)$/i;
 
 function toFiniteOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -1771,6 +1801,7 @@ function setupLiveRecordInteractions() {
     if (row.isReleased) return; // released grades are locked (inputs are disabled; this is a second guard)
 
     const field = input.dataset.field;
+    if (row.__computed && row.__computed[field]) return; // computed term grades are read-only
     const parsed = parseFloat(input.value);
     if (field === 'studentId' || field === 'fullName') {
       if (field === 'studentId' && row.__docId && row.__originalStudentId === undefined) {
@@ -2475,47 +2506,26 @@ function routeUserRole(role, userData) {
 
 async function saveInstructorGradingFormula() {
   if (!activeSubjectCode) return alert("Select an active subject first.");
-
-  const weightLab = parseFloat(document.getElementById('weightLab').value) || 0;
-  const weightQuizzes = parseFloat(document.getElementById('weightQuizzes').value) || 0;
-  const weightOutput = parseFloat(document.getElementById('weightOutput').value) || 0;
-  const weightExam = parseFloat(document.getElementById('weightExam').value) || 0;
-
-  const total = weightLab + weightQuizzes + weightOutput + weightExam;
-  const totalIndicator = document.getElementById('weightTotalIndicator');
-
-  if (totalIndicator) {
-    totalIndicator.textContent = `Total: ${total}%`;
-    totalIndicator.className = total === 100 ? "text-[10px] font-mono text-emerald-400" : "text-[10px] font-mono text-rose-400 font-bold";
-  }
-
-  if (total !== 100) {
-    return alert(`Total evaluation weight must equal 100%. Current total is ${total}%.`);
-  }
-
-  const formulaData = {
-    subjectCode: activeSubjectCode,
-    facultyUid: currentUserId,
-    gradingFormula: { weightLab, weightQuizzes, weightOutput, weightExam },
-    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-  };
-
+  const f = readTermFormulaFromForm();
+  refreshWeightIndicator();
+  const problem = validateTermFormula(f);
+  if (problem) return alert(problem);
   try {
-    await db.collection('instructorFormulas')
-      .doc(`${currentUserId}_${activeSubjectCode}`)
-      .set(formulaData, { merge: true });
-
-    const assignmentDocId = buildAssignmentDocId(currentUserId, activeSubjectCode, activeInstructorSectionFilter);
-    await db.collection('assignments')
-      .doc(assignmentDocId)
-      .set({ gradingFormula: { weightLab, weightQuizzes, weightOutput, weightExam } }, { merge: true })
-      .catch(() => {});
-
-    await logActivity(currentUserEmail, `Updated course evaluation weights for ${activeSubjectCode}`);
-    alert(`Course evaluation formula saved successfully for ${activeSubjectCode}!`);
+    await db.collection('instructorFormulas').doc(`${currentUserId}_${activeSubjectCode}`).set({
+      subjectCode: activeSubjectCode,
+      facultyUid: currentUserId,
+      termFormula: f,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    activeTermFormula = f;
+    assessmentWeightsCache.delete(activeSubjectCode);
+    await logActivity(currentUserEmail, `Updated term grade weights for ${activeSubjectCode}`);
+    renderLiveClassRecord();
+    renderInstructorAnalytics(parsedGradeData);
+    alert(`Grade weights saved for ${activeSubjectCode}. Unreleased term grades were recalculated; released grades stay locked.`);
   } catch (err) {
     console.error("Formula Save Error:", err);
-    alert("Error saving formula: " + err.message);
+    alert("Error saving weights: " + err.message);
   }
 }
 
@@ -2656,6 +2666,8 @@ async function selectSubject(code, title, section = 'ALL', cardElement = null) {
 
   assessmentColumnsStore = {}; // column definitions belong to ONE class (subject + section); reloaded below
   columnsDirty = false;
+  activeTermFormula = normalizeTermFormula(null);
+  renderTermFormulaForm(activeTermFormula);
 
   liveRecordSearchTerm = '';
   const searchInput = document.getElementById('searchStudentInput');
@@ -2669,40 +2681,18 @@ async function selectSubject(code, title, section = 'ALL', cardElement = null) {
 
   updateClassHeader();
 
-  // Start the grid + requests loads right away; weights are applied (and the grid refreshed) when they arrive
+  // Start the grid + requests loads right away; formula and columns are applied (and the grid refreshed) when they arrive
   loadInstructorGradesFromFirestore(code, section);
   loadPendingEnrollments(code);
 
   try {
-    let gf = null;
-    const [formulaDoc, subDoc] = await Promise.all([
-      db.collection('instructorFormulas').doc(`${currentUserId}_${code}`).get(),
-      db.collection('subjects').doc(code).get().catch(() => null)
-    ]);
-
-    // Custom assessment columns (saved on the same instructorFormulas document as the weights)
-    if (code === activeSubjectCode && formulaDoc.exists && formulaDoc.data().assessmentColumns && typeof formulaDoc.data().assessmentColumns === 'object') {
-      assessmentColumnsStore = formulaDoc.data().assessmentColumns;
-      renderLiveClassRecord();
-    }
-
-    if (formulaDoc.exists && formulaDoc.data().gradingFormula) {
-      gf = formulaDoc.data().gradingFormula;
-    } else if (subDoc && subDoc.exists && subDoc.data().gradingFormula) {
-      gf = subDoc.data().gradingFormula;
-    }
-
-    if (gf) {
-      if (document.getElementById('weightLab')) document.getElementById('weightLab').value = gf.weightLab ?? 30;
-      if (document.getElementById('weightQuizzes')) document.getElementById('weightQuizzes').value = gf.weightQuizzes ?? 30;
-      if (document.getElementById('weightOutput')) document.getElementById('weightOutput').value = gf.weightOutput ?? 20;
-      if (document.getElementById('weightExam')) document.getElementById('weightExam').value = gf.weightExam ?? 20;
-
-      const total = (gf.weightLab || 0) + (gf.weightQuizzes || 0) + (gf.weightOutput || 0) + (gf.weightExam || 0);
-      const totalIndicator = document.getElementById('weightTotalIndicator');
-      if (totalIndicator) totalIndicator.textContent = `Total: ${total}%`;
-      refreshWeightIndicator();
-    }
+    const formulaDoc = await db.collection('instructorFormulas').doc(`${currentUserId}_${code}`).get();
+    if (code !== activeSubjectCode) return; // the instructor already switched to another class
+    const fd = formulaDoc.exists ? formulaDoc.data() : {};
+    if (fd.assessmentColumns && typeof fd.assessmentColumns === 'object') assessmentColumnsStore = fd.assessmentColumns;
+    activeTermFormula = normalizeTermFormula(fd.termFormula);
+    renderTermFormulaForm(activeTermFormula);
+    renderLiveClassRecord();
   } catch (e) {
     console.warn("Could not load formula config:", e);
   }
@@ -2721,16 +2711,109 @@ const PERIODS = {
   midterm: { code: 'm', field: 'midterm', label: 'Midterm' },
   finals: { code: 'f', field: 'finals', label: 'Finals' }
 };
-const COLUMN_CATEGORIES = [
-  { key: 'q', label: 'Quiz' },
-  { key: 'lab', label: 'Laboratory' },
-  { key: 'ass', label: 'Assignment / Seatwork' },
-  { key: 'out', label: 'Oral Recitation' },
-  { key: 'exam', label: 'Major Exam' },
-  { key: 'att', label: 'Attendance' }
-];
+// ------------------------------------------------------------------
+// TERM GRADE ENGINE (follows the department class-record workbook)
+//   category score  = (sum of scores / sum of maximum points) x 50 + 50          (the workbook's "x 50 + 50" step)
+//   group grade     = sum(category score x category weight) / sum(weights of the categories that have columns)
+//   term grade      = Lecture x lecture% + Laboratory x lab%   (a group with no columns is skipped, the other counts 100%)
+//   overall grade   = average of the Prelim, Midterm and Finals term grades (unchanged)
+// The stored fields prelim / midterm / finals hold the computed term grades, so students, GWA, at-risk lists and
+// the database rules keep working exactly as before. Rows with no category scores keep their typed / imported term grade.
+// ------------------------------------------------------------------
+const GRADE_GROUPS = {
+  lecture: { label: 'LECTURE', categories: [
+    { key: 'att', label: 'Attendance' },
+    { key: 'ass', label: 'Assignment / Seatwork' },
+    { key: 'q', label: 'Quizzes' },
+    { key: 'out', label: 'Oral Recitation' },
+    { key: 'exam', label: 'Exam' }
+  ] },
+  lab: { label: 'LABORATORY', categories: [
+    { key: 'latt', label: 'Lab Attendance' },
+    { key: 'lab', label: 'Laboratory Exercises' },
+    { key: 'lasm', label: 'Lab Assessment' }
+  ] }
+};
+const COLUMN_CATEGORIES = [].concat(GRADE_GROUPS.lecture.categories, GRADE_GROUPS.lab.categories);
+// Defaults = the weights printed in the workbook (Lecture 60 / Lab 40; 5-15-30-50 and 10-40-50). Oral Recitation starts at 0%.
+const DEFAULT_TERM_FORMULA = { lectureWeight: 60, labWeight: 40, weights: { att: 5, ass: 15, q: 30, out: 0, exam: 50, latt: 10, lab: 40, lasm: 50 } };
+let activeTermFormula = JSON.parse(JSON.stringify(DEFAULT_TERM_FORMULA));
+let collapsedCategories = new Set(); // categories whose item columns are folded away (view state only)
 
-let activePeriod = 'prelim';       // 'prelim' | 'midterm' | 'finals' | 'all'
+function categoryOfKey(key) { const m = COMPONENT_KEY_RE.exec(String(key || '')); return m ? m[2].toLowerCase() : null; }
+function categoryLabelOf(key) { const c = COLUMN_CATEGORIES.find((x) => x.key === categoryOfKey(key)); return c ? c.label : String(key); }
+
+function normalizeTermFormula(raw) {
+  const d = DEFAULT_TERM_FORMULA;
+  const r = raw && typeof raw === 'object' ? raw : {};
+  const num = (v, fb) => { const n = Number(v); return Number.isFinite(n) && n >= 0 && n <= 100 ? n : fb; };
+  const weights = {};
+  COLUMN_CATEGORIES.forEach(({ key }) => { weights[key] = num(r.weights && r.weights[key], d.weights[key]); });
+  return { lectureWeight: num(r.lectureWeight, d.lectureWeight), labWeight: num(r.labWeight, d.labWeight), weights };
+}
+
+function validateTermFormula(f) {
+  if (Math.abs(f.lectureWeight + f.labWeight - 100) > 0.001) return `Lecture + Laboratory must total 100% (now ${f.lectureWeight + f.labWeight}%).`;
+  for (const g of Object.keys(GRADE_GROUPS)) {
+    const total = GRADE_GROUPS[g].categories.reduce((s, c) => s + (Number(f.weights[c.key]) || 0), 0);
+    if (Math.abs(total - 100) > 0.001) return `${GRADE_GROUPS[g].label} categories must total 100% (now ${total}%).`;
+  }
+  return null;
+}
+
+// Computes one student's term grade from the SAVED columns of that period (columns that only exist because of an
+// Excel import have no defined maximum, so they are shown but never counted).
+function computeTermBreakdown(row, periodName, formula = activeTermFormula) {
+  const cols = getPeriodColumns(periodName).filter((c) => !c.auto);
+  const byCat = {};
+  cols.forEach((c) => { const cat = categoryOfKey(c.key); (byCat[cat] = byCat[cat] || []).push(c); });
+  let hasScores = false;
+  const cats = {};
+  const groupGrade = (groupName) => {
+    let weighted = 0, active = 0;
+    GRADE_GROUPS[groupName].categories.forEach(({ key }) => {
+      const items = byCat[key];
+      if (!items || !items.length) return; // no columns: this category is not used in this term
+      let sum = 0, max = 0;
+      items.forEach((c) => { const v = toFiniteOrNull(row[c.key]); if (v !== null) { hasScores = true; sum += v; } max += c.max; });
+      const transmuted = max > 0 ? (sum / max) * 50 + 50 : null;
+      const weight = Number(formula.weights[key]) || 0;
+      cats[key] = { sum, max, transmuted, weight };
+      if (weight > 0 && transmuted !== null) { weighted += transmuted * weight; active += weight; }
+    });
+    return active > 0 ? weighted / active : null;
+  };
+  const lecture = groupGrade('lecture');
+  const lab = groupGrade('lab');
+  let grade = null;
+  if (hasScores) {
+    if (lecture !== null && lab !== null) grade = (lecture * formula.lectureWeight + lab * formula.labWeight) / ((formula.lectureWeight + formula.labWeight) || 1);
+    else grade = lecture !== null ? lecture : lab;
+  }
+  return { cats, lecture, lab, grade, hasScores };
+}
+
+// Writes the computed term grades into the row. Released rows are never touched (they are locked).
+function recomputeRowTerms(row) {
+  if (!row || row.isReleased) return;
+  if (!row.__base) row.__base = {};
+  if (!row.__computed) row.__computed = {};
+  Object.keys(PERIODS).forEach((p) => {
+    const field = PERIODS[p].field;
+    const b = computeTermBreakdown(row, p);
+    if (b.grade !== null) {
+      if (!row.__computed[field]) row.__base[field] = row[field]; // remember the typed / imported value
+      row.__computed[field] = true;
+      row[field] = Math.round(b.grade * 100) / 100;
+    } else if (row.__computed[field]) {
+      row[field] = row.__base[field] ?? 0;
+      row.__computed[field] = false;
+    }
+  });
+}
+function recomputeAllRows() { parsedGradeData.forEach(recomputeRowTerms); }
+
+let activePeriod = 'prelim';       // 'prelim' | 'midterm' | 'finals' | 'all' (= Summary)
 let assessmentColumnsStore = {};   // storeKey -> [{ key, label, max }]
 let columnsDirty = false;
 let columnManagerOpen = false;
@@ -2907,14 +2990,14 @@ function renderColumnManager() {
       <div class="text-xs font-bold text-white">${escapeHtml(period.label)} assessment columns <span class="font-normal text-slate-500">· ${escapeHtml(CURRENT_SCHOOL_YEAR)} · ${escapeHtml(activeInstructorSectionFilter)} · ${escapeHtml(semesterDisplayLabel(activeSemester))}</span></div>
       <button type="button" onclick="saveColumnsClick()" class="px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-[11px] font-bold">${columnsDirty ? 'Save columns *' : 'Save columns'}</button>
     </div>
-    ${locked ? '<div class="text-[11px] text-amber-400">All grades of this class are released: columns are locked.</div>' : '<div class="text-[11px] text-slate-500">Columns that already contain scores cannot be removed. Scores are limited to 0 up to the maximum points. These columns do not change the Prelim / Midterm / Finals grades or the official average.</div>'}
+    ${locked ? '<div class="text-[11px] text-amber-400">All grades of this class are released: columns are locked.</div>' : '<div class="text-[11px] text-slate-500">Columns that already contain scores cannot be removed. Scores are limited to 0 up to the maximum points. The term grade is computed from these columns with the weights set under Evaluation Weights; the overall grade is the average of the three term grades.</div>'}
     <div class="space-y-1.5">
       ${cols.length ? cols.map((c, i) => `
         <div class="flex flex-wrap items-center gap-2">
           <button type="button" onclick="moveColumn('${c.key}',-1)" class="${small}"${dis}${i === 0 ? ' disabled' : ''} aria-label="Move up">&uarr;</button>
           <button type="button" onclick="moveColumn('${c.key}',1)" class="${small}"${dis}${i === cols.length - 1 ? ' disabled' : ''} aria-label="Move down">&darr;</button>
           <input type="text" value="${escapeHtml(c.label)}" maxlength="40" onchange="renameColumn('${c.key}', this.value)" aria-label="Column name" class="${input} w-44"${dis} />
-          <span class="text-[10px] font-mono text-slate-500 w-12">${escapeHtml(c.key)}</span>
+          <span class="text-[10px] text-slate-500 w-36 truncate" title="${escapeHtml(c.key)}">${escapeHtml(categoryLabelOf(c.key))}</span>
           <label class="text-[10px] text-slate-500">max</label>
           <input type="number" min="1" max="1000" step="0.5" value="${c.max}" onchange="setColumnMax('${c.key}', this.value)" aria-label="Maximum points" class="${input} w-20 font-mono"${dis} />
           <button type="button" onclick="removeColumn('${c.key}')" class="px-2 py-1 rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-400 text-[11px] font-bold disabled:opacity-40"${dis}>Remove</button>
@@ -2922,7 +3005,7 @@ function renderColumnManager() {
         </div>`).join('') : '<div class="text-[11px] text-slate-500">No columns yet for this period. Add one below.</div>'}
     </div>
     <div class="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
-      <select id="colAddCategory" class="${input}"${dis}>${COLUMN_CATEGORIES.map((c) => `<option value="${c.key}">${escapeHtml(c.label)}</option>`).join('')}</select>
+      <select id="colAddCategory" class="${input}"${dis}>${Object.keys(GRADE_GROUPS).map((g) => `<optgroup label="${GRADE_GROUPS[g].label}">${GRADE_GROUPS[g].categories.map((c) => `<option value="${c.key}">${escapeHtml(c.label)}</option>`).join('')}</optgroup>`).join('')}</select>
       <input id="colAddLabel" type="text" maxlength="40" placeholder="Name (optional)" class="${input} w-40"${dis} />
       <label class="text-[10px] text-slate-500">max</label>
       <input id="colAddMax" type="number" min="1" max="1000" step="0.5" value="100" class="${input} w-20 font-mono"${dis} />
@@ -2985,21 +3068,66 @@ function liveStandingHtml(row, stats) {
   `;
 }
 
+// Groups the active period's columns as LECTURE / LABORATORY > category > item columns
+function periodLayout(periodName) {
+  const cols = getPeriodColumns(periodName);
+  const groups = [];
+  Object.keys(GRADE_GROUPS).forEach((g) => {
+    const cats = [];
+    GRADE_GROUPS[g].categories.forEach((cat) => {
+      const items = cols.filter((c) => categoryOfKey(c.key) === cat.key);
+      if (items.length) cats.push({ ...cat, items, collapsed: collapsedCategories.has(cat.key) });
+    });
+    if (cats.length) groups.push({ key: g, label: GRADE_GROUPS[g].label, cats });
+  });
+  return groups;
+}
+
+function toggleCategory(key) {
+  if (collapsedCategories.has(key)) collapsedCategories.delete(key);
+  else collapsedCategories.add(key);
+  renderLiveClassRecord();
+}
+
 function gridHeadHtml(periodName) {
   const th = (t) => `<th class="${GRID_TH}">${t}</th>`;
-  if (PERIODS[periodName]) {
-    const p = PERIODS[periodName];
-    const cols = getPeriodColumns(periodName);
-    return `<tr class="${GRID_HEAD_ROW_CLASS}">${th('STUDENT ID')}${th('STUDENT NAME')}${th(escapeHtml(p.label) + ' GRADE')}` +
-      cols.map((c) => `<th class="${GRID_TH}" title="${escapeHtml(c.key)}">${escapeHtml(c.label)}<div class="font-mono normal-case tracking-normal text-slate-600">/ ${c.max}</div></th>`).join('') +
-      `${th('AVERAGE')}${th('STANDING')}</tr>`;
+  if (!PERIODS[periodName]) {
+    return `<tr class="${GRID_HEAD_ROW_CLASS}">${['STUDENT ID', 'STUDENT NAME', 'PRELIM', 'MIDTERM', 'FINALS', 'LABORATORY', 'QUIZZES', 'ORAL RECITATION', 'ATTENDANCE', 'AVERAGE', 'STANDING'].map(th).join('')}</tr>`;
   }
-  return `<tr class="${GRID_HEAD_ROW_CLASS}">${['STUDENT ID', 'STUDENT NAME', 'PRELIM', 'MIDTERM', 'FINALS', 'LABORATORY', 'QUIZZES', 'ORAL RECITATION', 'ATTENDANCE', 'AVERAGE', 'STANDING'].map(th).join('')}</tr>`;
+  const p = PERIODS[periodName];
+  const f = activeTermFormula;
+  const edge = 'border-l border-slate-800';
+  const row1 = [`<th rowspan="3" class="${GRID_TH}">STUDENT ID</th>`, `<th rowspan="3" class="${GRID_TH}">STUDENT NAME</th>`];
+  const row2 = [];
+  const row3 = [];
+  periodLayout(periodName).forEach((g) => {
+    const span = g.cats.reduce((s, c) => s + (c.collapsed ? 1 : c.items.length + 1), 0) + 1;
+    row1.push(`<th colspan="${span}" class="${GRID_TH} text-center text-emerald-400 ${edge}">${g.label} <span class="text-slate-500">${g.key === 'lecture' ? f.lectureWeight : f.labWeight}%</span></th>`);
+    g.cats.forEach((c) => {
+      const w = Number(f.weights[c.key]) || 0;
+      const arrow = c.collapsed ? '\u25B8' : '\u25BE';
+      const title = `${c.label} (${w}%): click to ${c.collapsed ? 'show' : 'hide'} its items`;
+      const click = `onclick="toggleCategory('${c.key}')" title="${escapeHtml(title)}"`;
+      const clickable = 'cursor-pointer select-none hover:text-emerald-400';
+      if (c.collapsed) {
+        row2.push(`<th rowspan="2" ${click} class="${GRID_TH} ${clickable} ${edge}">${arrow} ${escapeHtml(c.label)} <span class="text-slate-600">${w}%</span></th>`);
+      } else {
+        row2.push(`<th colspan="${c.items.length + 1}" ${click} class="${GRID_TH} text-center ${clickable} ${edge}">${arrow} ${escapeHtml(c.label)} <span class="text-slate-600">${w}%</span></th>`);
+        c.items.forEach((it) => row3.push(`<th class="${GRID_TH}" title="${escapeHtml(it.key)}">${escapeHtml(it.label)}${it.auto ? ' <span class="text-sky-400" title="From an Excel import: shown, but not counted until you set its maximum in Manage columns">*</span>' : ''}<div class="font-mono normal-case tracking-normal text-slate-600">/ ${it.max}</div></th>`));
+        row3.push(`<th class="${GRID_TH} text-emerald-400/80">Grade</th>`);
+      }
+    });
+    row2.push(`<th rowspan="2" class="${GRID_TH} text-emerald-400 ${edge}">${g.key === 'lecture' ? 'Lecture' : 'Lab'} grade</th>`);
+  });
+  row1.push(`<th rowspan="3" class="${GRID_TH} text-emerald-400 ${edge}">${escapeHtml(p.label)} GRADE</th>`, `<th rowspan="3" class="${GRID_TH}">REMARKS</th>`);
+  const tr = (cells) => `<tr class="${GRID_HEAD_ROW_CLASS}">${cells.join('')}</tr>`;
+  return tr(row1) + tr(row2) + tr(row3);
 }
 
 function renderLiveClassRecord() {
   const tbody = document.getElementById('previewBody');
   if (!tbody) return;
+  recomputeAllRows();
   updateGridSummary();
   renderColumnManager();
 
@@ -3027,17 +3155,27 @@ function renderLiveClassRecord() {
     return;
   }
 
-  const periodCols = periodName ? getPeriodColumns(periodName) : [];
+  const layout = periodName ? periodLayout(periodName) : [];
+  if (periodName && !layout.length) {
+    const p = PERIODS[periodName];
+    tbody.innerHTML = emptyLiveRow(`No assessment columns for ${escapeHtml(p.label)} yet. Click <b>Manage columns</b> and add Attendance, Assignment / Seatwork, Quizzes, Exam (and Laboratory columns if the subject has a laboratory).`);
+    return;
+  }
   const fragment = document.createDocumentFragment();
 
   visible.forEach(({ row, index }) => {
     const stats = computeFacultyRowStats(row);
     // Released grades are permanently locked: every input of the row is read-only (the database refuses edits as well)
     const locked = !!row.isReleased;
-    const lockAttr = locked ? ' disabled title="Released grades are locked and cannot be changed"' : '';
     const lockCls = locked ? ' opacity-60 cursor-not-allowed' : '';
-    const numCell = (f, v, ph = '', max = '') => `<input type="number" min="0" max="${max || 100}" step="0.01" data-field="${f}" ${max ? `data-max="${max}" ` : ''}value="${v}" placeholder="${ph}" class="${LIVE_INPUT_CLASS}${lockCls}"${lockAttr} />`;
+    const numCell = (f, v, ph = '', max = '', computed = false) => {
+      const off = locked || computed;
+      const why = locked ? 'Released grades are locked and cannot be changed' : 'Computed from the term tab: edit the category scores there';
+      return `<input type="number" min="0" max="${max || 100}" step="0.01" data-field="${f}" ${max ? `data-max="${max}" ` : ''}value="${v}" placeholder="${ph}" class="${LIVE_INPUT_CLASS}${locked ? lockCls : (computed ? ' opacity-70 cursor-not-allowed text-emerald-300' : '')}"${off ? ` disabled title="${why}"` : ''} />`;
+    };
+    const lockAttr = locked ? ' disabled title="Released grades are locked and cannot be changed"' : '';
     const catVal = (f) => (toFiniteOrNull(row[f]) === null ? '' : toFiniteOrNull(row[f]));
+    const isComputed = (field) => !!(row.__computed && row.__computed[field]);
 
     const tr = document.createElement('tr');
     tr.className = "hover:bg-slate-800/40 transition-colors cursor-pointer divide-x divide-slate-800/50";
@@ -3046,25 +3184,27 @@ function renderLiveClassRecord() {
 
     const idCell = `<td class="px-2 py-2"><input type="text" data-field="studentId" value="${escapeHtml(row.studentId || '')}" placeholder="Student ID" class="${TEXT_CELL_CLASS} w-32 font-mono${lockCls}"${lockAttr} /></td>`;
     const nameCell = `<td class="px-2 py-2"><input type="text" data-field="fullName" value="${escapeHtml(row.fullName || '')}" placeholder="Student name" class="${TEXT_CELL_CLASS} w-56${lockCls}"${lockAttr} />${row.__matchedByName ? '<span class="mt-1 inline-block px-1.5 py-0.5 rounded border border-sky-500/30 bg-sky-500/10 text-[9px] font-extrabold uppercase tracking-wider text-sky-400" title="No Student ID in the sheet: matched to the only roster student with this name">Matched by name</span>' : ''}</td>`;
-    const tailCells = `
-      <td data-cell="average" class="px-4 py-3 font-black font-mono ${isNotGradedRow(row) ? 'text-slate-500' : stats.isPassing ? 'text-white' : 'text-rose-400'}">${isNotGradedRow(row) ? '—' : stats.averageDisplay}</td>
-      <td data-cell="standing" class="px-4 py-3 whitespace-nowrap">${liveStandingHtml(row, stats)}</td>`;
 
     if (periodName) {
-      const field = PERIODS[periodName].field;
       tr.innerHTML = idCell + nameCell +
-        `<td class="px-2 py-2">${numCell(field, stats[field])}</td>` +
-        periodCols.map((c) => `<td class="px-2 py-2">${numCell(c.key, catVal(c.key), '-', c.max)}</td>`).join('') +
-        tailCells;
+        layout.map((g) => g.cats.map((c) =>
+          (c.collapsed ? '' : c.items.map((it) => `<td class="px-2 py-2">${numCell(it.key, catVal(it.key), '-', it.max)}</td>`).join('')) +
+          `<td data-cell="cat:${c.key}" class="px-3 py-3 font-mono text-slate-300 border-l border-slate-800/50"></td>`).join('') +
+          `<td data-cell="grp:${g.key}" class="px-3 py-3 font-mono font-bold text-white border-l border-slate-800/50"></td>`).join('') +
+        `<td data-cell="term" class="px-4 py-3 font-black font-mono border-l border-slate-800/50"></td>` +
+        `<td data-cell="remarks" class="px-4 py-3 whitespace-nowrap"></td>`;
+      refreshPeriodComputedCells(tr, row, periodName);
     } else {
       tr.innerHTML = idCell + nameCell + `
-        <td class="px-2 py-2">${numCell('prelim', stats.prelim)}</td>
-        <td class="px-2 py-2">${numCell('midterm', stats.midterm)}</td>
-        <td class="px-2 py-2">${numCell('finals', stats.finals)}</td>
+        <td class="px-2 py-2">${numCell('prelim', stats.prelim, '', '', isComputed('prelim'))}</td>
+        <td class="px-2 py-2">${numCell('midterm', stats.midterm, '', '', isComputed('midterm'))}</td>
+        <td class="px-2 py-2">${numCell('finals', stats.finals, '', '', isComputed('finals'))}</td>
         <td class="px-2 py-2">${numCell('labScore', catVal('labScore'), '-')}</td>
         <td class="px-2 py-2">${numCell('quizzesScore', catVal('quizzesScore'), '-')}</td>
         <td class="px-2 py-2">${numCell('oralRecitationScore', catVal('oralRecitationScore'), '-')}</td>
-        <td class="px-2 py-2">${numCell('attendanceScore', catVal('attendanceScore'), '-')}</td>` + tailCells;
+        <td class="px-2 py-2">${numCell('attendanceScore', catVal('attendanceScore'), '-')}</td>
+        <td data-cell="average" class="px-4 py-3 font-black font-mono ${isNotGradedRow(row) ? 'text-slate-500' : stats.isPassing ? 'text-white' : 'text-rose-400'}">${isNotGradedRow(row) ? '—' : stats.averageDisplay}</td>
+        <td data-cell="standing" class="px-4 py-3 whitespace-nowrap">${liveStandingHtml(row, stats)}</td>`;
     }
     fragment.appendChild(tr);
   });
@@ -3792,6 +3932,7 @@ async function commitGradesInner(mode) {
   const release = mode === 'release';
   if (!activeSubjectCode) return alert("Select an active subject first.");
   if (!parsedGradeData.length) return alert("Upload an Excel sheet to parse grades first.");
+  recomputeAllRows();
 
   try {
     const ctx = await gatherGradeWriteContext();
@@ -5407,12 +5548,14 @@ const GRADE_PERIODS = [
 ];
 
 const COMPONENT_CATEGORIES = [
-  { key: 'q', heading: 'Quizzes', label: 'Quiz' },
-  { key: 'lab', heading: 'Laboratory Exercises', label: 'Lab Exercise' },
+  { key: 'att', heading: 'Attendance', label: 'Attendance' },
   { key: 'ass', heading: 'Assignments & Seatworks', label: 'Assignment' },
+  { key: 'q', heading: 'Quizzes', label: 'Quiz' },
   { key: 'out', heading: 'Oral Recitation', label: 'Oral Recitation' },
-  { key: 'exam', heading: 'Major Exam', label: 'Major Exam' },
-  { key: 'att', heading: 'Attendance / Participation', label: 'Attendance' }
+  { key: 'exam', heading: 'Exam', label: 'Exam' },
+  { key: 'latt', heading: 'Laboratory Attendance', label: 'Lab Attendance' },
+  { key: 'lab', heading: 'Laboratory Exercises', label: 'Lab Exercise' },
+  { key: 'lasm', heading: 'Laboratory Assessment', label: 'Lab Assessment' }
 ];
 
 // Groups every recorded component score as { period: { category: [{key, num, value}] } }.
@@ -5457,51 +5600,34 @@ const assessmentWeightsCache = new Map();
 async function fetchAssessmentWeights(subjectCode) {
   const key = String(subjectCode || '').trim();
   if (!key) return null;
-  if (currentUserRole === 'instructor' && key === activeSubjectCode) return getActiveWeights();
+  if (currentUserRole === 'instructor' && key === activeSubjectCode) return activeTermFormula;
   if (assessmentWeightsCache.has(key)) return assessmentWeightsCache.get(key);
 
-  let gf = null;
+  let formula = null;
   try {
     const snap = await db.collection('instructorFormulas').where('subjectCode', '==', key).limit(5).get();
-    snap.forEach((d) => { if (!gf && d.data().gradingFormula) gf = d.data().gradingFormula; });
-    if (!gf) {
-      const sd = await db.collection('subjects').doc(key).get();
-      if (sd.exists && sd.data().gradingFormula) gf = sd.data().gradingFormula;
-    }
+    snap.forEach((d) => { if (!formula && d.data().termFormula) formula = normalizeTermFormula(d.data().termFormula); });
   } catch (err) {
     console.warn("Could not load course evaluation weights:", err);
   }
-
-  const weights = gf ? {
-    lab: Number(gf.weightLab) || 0,
-    quizzes: Number(gf.weightQuizzes) || 0,
-    oral: Number(gf.weightOutput) || 0, // stored key kept for compatibility; this is Oral Recitation / Participation
-    exam: Number(gf.weightExam) || 0
-  } : null;
-  assessmentWeightsCache.set(key, weights);
-  return weights;
+  const result = formula || normalizeTermFormula(null); // no saved weights = the department defaults
+  assessmentWeightsCache.set(key, result);
+  return result;
 }
 
-function renderWeightsCard(el, weights, stats) {
-  const formula = `Overall grade = (Prelim ${stats.prelim.toFixed(2)} + Midterm ${stats.midterm.toFixed(2)} + Finals ${stats.finals.toFixed(2)}) \u00F7 3 = ${stats.averageDisplay}`;
-  const head = '<div class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400">Grade structure (descriptive)</div>';
-  if (!weights) {
-    el.innerHTML = `${head}<div class="text-[11px] text-slate-500 italic">Course evaluation weights have not been set for this subject.</div><div class="text-[11px] text-slate-400">${escapeHtml(formula)}</div>`;
-    return;
-  }
-  const rows = [
-    ['Laboratory', weights.lab],
-    ['Quizzes', weights.quizzes],
-    ['Oral Recitation / Participation', weights.oral],
-    ['Major Exam', weights.exam]
-  ];
-  el.innerHTML = head + rows.map(([label, pct]) => `
+function renderWeightsCard(el, f, stats) {
+  const head = '<div class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400">How your grade is computed</div>';
+  const bar = (label, pct) => `
     <div>
       <div class="flex justify-between text-[11px] text-slate-300 mb-1"><span>${escapeHtml(label)}</span><span class="font-mono font-bold text-white">${pct}%</span></div>
       <div class="h-1.5 rounded-full bg-slate-800 overflow-hidden"><div class="h-full bg-emerald-500" style="width:${Math.max(0, Math.min(100, pct))}%"></div></div>
-    </div>`).join('') +
+    </div>`;
+  const group = (g, groupPct) => `<div class="text-[10px] font-bold text-slate-400 uppercase pt-1">${GRADE_GROUPS[g].label} (${groupPct}% of the term grade)</div>` +
+    GRADE_GROUPS[g].categories.filter((c) => f.weights[c.key] > 0).map((c) => bar(c.label, f.weights[c.key])).join('');
+  const formula = `Overall grade = (Prelim ${stats.prelim.toFixed(2)} + Midterm ${stats.midterm.toFixed(2)} + Finals ${stats.finals.toFixed(2)}) \u00F7 3 = ${stats.averageDisplay}`;
+  el.innerHTML = head + group('lecture', f.lectureWeight) + group('lab', f.labWeight) +
     `<div class="text-[11px] text-slate-400 pt-1">${escapeHtml(formula)}</div>
-     <div class="text-[10px] text-slate-500 italic">The percentages describe how the course is evaluated. They do not change the computed grade.</div>`;
+     <div class="text-[10px] text-slate-500 italic">Each term grade comes from the scores your instructor recorded: category score = (points &divide; maximum) &times; 50 + 50, then weighted. Categories with no scores recorded are skipped.</div>`;
 }
 
 async function openStudentGradeBreakdownModal(g) {
