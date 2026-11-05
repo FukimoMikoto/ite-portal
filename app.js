@@ -4781,9 +4781,28 @@ async function addNewSubjectCode() {
   const semester = val('adminSubSem') || '1S';
   const units = Math.min(12, Math.max(1, parseInt(val('adminSubUnits'), 10) || 3));
   const subType = val('adminSubType') || 'auto'; // auto = decide by code prefix
+  const prereqRaw = val('adminSubPrereq').trim();
 
   if (!subjectCode || !subjectName) return alert("Complete both Code and Subject Name.");
   if (/[\/]/.test(subjectCode)) return alert("Subject code cannot contain a slash.");
+
+  // Prerequisite: blank = leave unchanged, NONE = remove, otherwise a clean comma list ("all must be passed")
+  let prerequisiteValue; // undefined = not written
+  if (/^none$/i.test(prereqRaw)) {
+    prerequisiteValue = firebase.firestore.FieldValue.delete();
+  } else if (prereqRaw) {
+    const codes = [];
+    prereqRaw.split(/[,;/\n]+/).forEach((c) => { const code = c.trim().toUpperCase().replace(/\s+/g, ' '); if (code && !codes.includes(code)) codes.push(code); });
+    if (codes.includes(subjectCode)) return alert("A subject cannot be its own prerequisite.");
+    try {
+      const snap = await db.collection('subjects').get();
+      const known = new Set();
+      snap.forEach((d) => known.add(String((d.data() || {}).subjectCode || d.id).toUpperCase().trim().replace(/\s+/g, ' ')));
+      const unknown = codes.filter((c) => !known.has(c));
+      if (unknown.length && !confirm(`These prerequisite codes are not in the subject catalogue yet: ${unknown.join(', ')}.\n\nSave anyway? Add those subjects too, with exactly the same codes, or students will stay locked out of this subject.`)) return;
+    } catch (e) { /* the catalogue check is only a convenience: saving is still allowed */ }
+    prerequisiteValue = codes.join(', ');
+  }
 
   try {
     await db.collection('subjects').doc(subjectCode).set({
@@ -4792,13 +4811,14 @@ async function addNewSubjectCode() {
       units,
       yearLevel,
       semester,
+      ...(prerequisiteValue === undefined ? {} : { prerequisite: prerequisiteValue }),
       isItMajor: subType === 'major' ? true : subType === 'general' ? false : firebase.firestore.FieldValue.delete(),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
 
-    await logActivity(currentUserEmail, `Added subject code ${subjectCode} (${subType === 'major' ? 'IT major' : subType === 'general' ? 'non-IT' : 'type by code'})`);
+    await logActivity(currentUserEmail, `Added subject code ${subjectCode}${prereqRaw ? ' [prerequisite: ' + prereqRaw + ']' : ''} (${subType === 'major' ? 'IT major' : subType === 'general' ? 'non-IT' : 'type by code'})`);
     alert(`Subject ${subjectCode} saved successfully!`);
-    ['adminSubCode', 'adminSubTitle'].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
+    ['adminSubCode', 'adminSubTitle', 'adminSubPrereq'].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
     loadAdminDashboardData();
   } catch (err) {
     alert("Error saving subject: " + err.message);
