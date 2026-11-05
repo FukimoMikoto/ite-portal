@@ -88,7 +88,11 @@ let liveRecordSearchTerm = '';
 let liveRecordEmptyHtml = '';
 let liveRecordDirty = false;
 let releasedStudentIds = new Set(); // Student IDs whose grades (loaded class/semester) are released = permanently locked
-let lockedRowsCache = [];           // the released rows themselves, re-added when an Excel import is staged
+let lockedRowsCache = [];
+const APP_BUILD = '2026-11-07 parse-v2'; // shown after an import so you can confirm which app.js the site is running
+let lastImportContext = null;       // SUBJECT / COURSE text found at the top of the imported sheet
+let importSubjectMismatch = false;  // the imported file names a different subject than the selected class
+           // the released rows themselves, re-added when an Excel import is staged
 
 // Chart Instance Holders
 let instructorGradeChartInstance = null;
@@ -2664,6 +2668,7 @@ async function selectSubject(code, title, section = 'ALL', cardElement = null) {
   activeInstructorSectionFilter = section;
   syncClassSwitcher();
 
+  importSubjectMismatch = false;
   assessmentColumnsStore = {}; // column definitions belong to ONE class (subject + section); reloaded below
   columnsDirty = false;
   activeTermFormula = normalizeTermFormula(null);
@@ -3156,10 +3161,10 @@ function renderLiveClassRecord() {
   }
 
   const layout = periodName ? periodLayout(periodName) : [];
-  if (periodName && !layout.length) {
-    const p = PERIODS[periodName];
-    tbody.innerHTML = emptyLiveRow(`No assessment columns for ${escapeHtml(p.label)} yet. Click <b>Manage columns</b> and add Attendance, Assignment / Seatwork, Quizzes, Exam (and Laboratory columns if the subject has a laboratory).`);
-    return;
+  const strip = document.getElementById('gridSummaryStrip');
+  if (periodName && !layout.length && strip) {
+    // No columns yet: the students and their typed / imported term grade are still listed
+    strip.insertAdjacentHTML('beforeend', `<span class="w-full text-sky-400">No assessment columns in ${escapeHtml(PERIODS[periodName].label)} yet, so the typed or imported term grade is shown. Click <b>Manage columns</b> to compute it from Attendance, Quizzes, Exam and the other categories.</span>`);
   }
   const fragment = document.createDocumentFragment();
 
@@ -3191,7 +3196,9 @@ function renderLiveClassRecord() {
           (c.collapsed ? '' : c.items.map((it) => `<td class="px-2 py-2">${numCell(it.key, catVal(it.key), '-', it.max)}</td>`).join('')) +
           `<td data-cell="cat:${c.key}" class="px-3 py-3 font-mono text-slate-300 border-l border-slate-800/50"></td>`).join('') +
           `<td data-cell="grp:${g.key}" class="px-3 py-3 font-mono font-bold text-white border-l border-slate-800/50"></td>`).join('') +
-        `<td data-cell="term" class="px-4 py-3 font-black font-mono border-l border-slate-800/50"></td>` +
+        (layout.length
+          ? `<td data-cell="term" class="px-4 py-3 font-black font-mono border-l border-slate-800/50"></td>`
+          : `<td class="px-2 py-2 border-l border-slate-800/50">${numCell(PERIODS[periodName].field, stats[PERIODS[periodName].field])}</td>`) +
         `<td data-cell="remarks" class="px-4 py-3 whitespace-nowrap"></td>`;
       refreshPeriodComputedCells(tr, row, periodName);
     } else {
@@ -3534,6 +3541,39 @@ function processExcel() {
   reader.readAsArrayBuffer(file);
 }
 
+// Header detection shared by both parsers. Accepts "Names", "Name", "Student Name", "Full Name" ... and
+// "Student ID", "ID No.", "Student No." ... (the previous, narrower rules still work as a fallback).
+function findNameColumn(headers) {
+  const h = headers.map((x) => String(x || '').toLowerCase().trim());
+  for (const e of ['student name', 'student names', 'full name', 'fullname', 'name', 'names', 'student', 'students']) {
+    const i = h.indexOf(e);
+    if (i !== -1) return i;
+  }
+  return h.findIndex((x) => x.includes('student name') || x.includes('full name'));
+}
+
+function findIdColumn(headers, legacyNo) {
+  const h = headers.map((x) => String(x || '').toLowerCase().trim());
+  for (const e of ['student id', 'student id no', 'student id no.', 'student no', 'student no.', 'student number', 'id', 'id no', 'id no.', 'idno', 'idno.', 'id number']) {
+    const i = h.indexOf(e);
+    if (i !== -1) return i;
+  }
+  const i = h.findIndex((x) => x.includes('student id'));
+  return i !== -1 ? i : h.findIndex((x) => x.includes(legacyNo ? 'no.' : 'idno.'));
+}
+
+// Reads "SUBJECT: COMP 1" and "COURSE/YEAR: BSIT 1A" style lines from the top of the summary sheet
+function detectSheetContext(matrix) {
+  const found = {};
+  (matrix || []).slice(0, 12).forEach((row) => row.forEach((cell) => {
+    const t = String(cell == null ? '' : cell);
+    let x;
+    if (!found.subject && (x = /^\s*subject\s*[:\-]\s*(.+?)\s*$/i.exec(t))) found.subject = x[1];
+    if (!found.course && (x = /^\s*course\s*\/?\s*(?:year|section)?\s*[:\-]\s*(.+?)\s*$/i.exec(t))) found.course = x[1];
+  }));
+  return found;
+}
+
 function processMultiTabExcel(workbook) {
   const summarySheetName = workbook.SheetNames.find(s => s.toUpperCase().includes("FINAL GRADE")) ||
                            workbook.SheetNames.find(s => s.toUpperCase().includes("AVERAGE")) ||
@@ -3560,12 +3600,14 @@ function processMultiTabExcel(workbook) {
   }
 
   const headers = summaryMatrix[headerRowIndex].map(h => h.toString().trim());
-  const nameIdx = headers.findIndex(h => h.toLowerCase().includes("student name") || h.toLowerCase().includes("full name"));
-  const idIdx = headers.findIndex(h => h.toLowerCase().includes("student id") || h.toLowerCase() === "id" || h.toLowerCase().includes("no."));
+  const nameIdx = findNameColumn(headers);
+  const idIdx = findIdColumn(headers, true);
   const prelimIdx = headers.findIndex(h => h.toLowerCase() === "prelim");
   const midtermIdx = headers.findIndex(h => h.toLowerCase() === "midterm");
   const finalIdx = headers.findIndex(h => h.toLowerCase() === "final" || h.toLowerCase().includes("finals"));
 
+  if (nameIdx === -1) return alert('Could not find the student name column. Name it "Student Name" or "Names" in the header row.');
+  lastImportContext = detectSheetContext(summaryMatrix);
   parsedGradeData = [];
 
   for (let r = headerRowIndex + 1; r < summaryMatrix.length; r++) {
@@ -3593,7 +3635,9 @@ function processMultiTabExcel(workbook) {
 
   renderParsedGradesToTable();
   renderInstructorAnalytics(parsedGradeData);
-  alert(`Imported ${parsedGradeData.length} student record(s).`);
+  alert(parsedGradeData.length
+    ? `Imported ${parsedGradeData.length} student record(s). (app build ${APP_BUILD})`
+    : `No student rows were found (app build ${APP_BUILD}). Check that the sheet has a "Names" or "Student Name" column and the Prelim / Midterm / Final headers, with students listed below them.`);
 }
 
 function processSingleTabExcel(workbook) {
@@ -3623,12 +3667,14 @@ function processSingleTabExcel(workbook) {
   }
 
   const headers = matrix[headerRowIndex].map(h => h.toString().trim());
-  const nameIdx = headers.findIndex(h => h.toLowerCase().includes("student name") || h.toLowerCase().includes("full name") || h.toLowerCase() === "name");
-  const idIdx = headers.findIndex(h => h.toLowerCase().includes("student id") || h.toLowerCase() === "id" || h.toLowerCase().includes("idno."));
+  const nameIdx = findNameColumn(headers);
+  const idIdx = findIdColumn(headers, false);
   const prelimIdx = headers.findIndex(h => h.toLowerCase() === "prelim");
   const midtermIdx = headers.findIndex(h => h.toLowerCase() === "midterm");
   const finalIdx = headers.findIndex(h => h.toLowerCase() === "final" || h.toLowerCase().includes("finals"));
 
+  if (nameIdx === -1) return alert('Could not find the student name column. Name it "Student Name" or "Names" in the header row.');
+  lastImportContext = detectSheetContext(matrix);
   parsedGradeData = [];
   for (let r = headerRowIndex + 1; r < matrix.length; r++) {
     const row = matrix[r];
@@ -3655,7 +3701,9 @@ function processSingleTabExcel(workbook) {
 
   renderParsedGradesToTable();
   renderInstructorAnalytics(parsedGradeData);
-  alert(`Imported ${parsedGradeData.length} student record(s).`);
+  alert(parsedGradeData.length
+    ? `Imported ${parsedGradeData.length} student record(s). (app build ${APP_BUILD})`
+    : `No student rows were found (app build ${APP_BUILD}). Check that the sheet has a "Names" or "Student Name" column and the Prelim / Midterm / Final headers, with students listed below them.`);
 }
 
 // ------------------------------------------------------------------
@@ -3690,7 +3738,18 @@ function findRosterMatchesByName(fullName, roster) {
   if (exact.length) return exact;
   const k2 = nameMatchKey(fullName, true);
   if (!k2) return [];
-  return roster.filter((r) => nameMatchKey(r.fullName, true) === k2);
+  const loose = roster.filter((r) => nameMatchKey(r.fullName, true) === k2);
+  if (loose.length) return loose;
+  // Last resort: one name holds every word of the other ("Noel Andiano" vs "ANDIANO. NOEL RABAGO"), at least 2 words.
+  // Still only used when exactly one roster student fits, and the row is flagged "Matched by name" for the instructor.
+  const a = new Set(nameTokens(fullName));
+  if (a.size < 2) return [];
+  return roster.filter((r) => {
+    const b = new Set(nameTokens(r.fullName));
+    if (b.size < 2) return false;
+    const [small, big] = a.size <= b.size ? [a, b] : [b, a];
+    return [...small].every((t) => big.has(t));
+  });
 }
 
 // Mutates rows (binds IDs / names) and returns report lines: level error | warn | info
@@ -3802,7 +3861,22 @@ function renderParsedGradesToTable() {
     }
   });
 
-  validateImportedRows(matchIssues.concat(lockedIssues));
+  // The file must be for the selected class: a COMP 1 sheet must never be saved into PROG 1 by accident
+  const ctxIssues = [];
+  const ctx = lastImportContext; lastImportContext = null;
+  importSubjectMismatch = false;
+  if (ctx) {
+    const norm = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (ctx.subject && norm(ctx.subject) !== norm(activeSubjectCode) && norm(ctx.subject) !== norm(activeSubjectTitle)) {
+      importSubjectMismatch = true;
+      ctxIssues.push({ line: 1, level: 'error', msg: `This file is for the subject "${ctx.subject}" but the selected class is ${activeSubjectCode} (${activeSubjectTitle}). Select the matching class first; otherwise these grades would be saved into the wrong subject.` });
+    }
+    if (ctx.course && activeInstructorSectionFilter !== 'ALL' && norm(ctx.course) !== norm(activeInstructorSectionFilter)) {
+      ctxIssues.push({ line: 1, level: 'warn', msg: `The file says course/year "${ctx.course}" but the selected section is ${activeInstructorSectionFilter}.` });
+    }
+  }
+
+  validateImportedRows(matchIssues.concat(lockedIssues, ctxIssues));
 
   if (releasedStudentIds.size) {
     parsedGradeData = parsedGradeData
@@ -3812,6 +3886,8 @@ function renderParsedGradesToTable() {
   }
 
   liveRecordEmptyHtml = emptyLiveRow('No grade sheet parsed yet. Select an assigned class and import an Excel file to view grades.');
+  activePeriod = 'all'; // an imported sheet carries all three terms: show them side by side
+  updatePeriodTabsUI();
 
   if (parsedGradeData.some((row) => row.__staged)) {
     liveRecordDirty = true;
@@ -3933,6 +4009,7 @@ async function commitGradesInner(mode) {
   if (!activeSubjectCode) return alert("Select an active subject first.");
   if (!parsedGradeData.length) return alert("Upload an Excel sheet to parse grades first.");
   recomputeAllRows();
+  if (importSubjectMismatch && !confirm(`The imported file was made for a different subject than the selected class ${activeSubjectCode} (see the Import check). Save these grades into ${activeSubjectCode} anyway?`)) return;
 
   try {
     const ctx = await gatherGradeWriteContext();
@@ -4058,6 +4135,7 @@ async function commitGradesInner(mode) {
       (lockedSkipped.length ? `\n\n${lockedSkipped.length} row(s) were NOT changed because their grades are already released and permanently locked:\n${lockedSkipped.slice(0, 5).join('\n')}${lockedSkipped.length > 5 ? '\n...' : ''}` : '') +
       (retakeCount ? `\n${retakeCount} retake record(s) created. Earlier school-year records were kept.` : '') +
       (skipped.length ? `\n\n${skipped.length} row(s) were NOT saved because the student is not enrolled (approved) in this class:\n${skipped.slice(0, 5).join('\n')}${skipped.length > 5 ? '\n...' : ''}` : ''));
+    importSubjectMismatch = false;
     loadInstructorGradesFromFirestore(activeSubjectCode, activeInstructorSectionFilter);
   } catch (err) {
     console.error(release ? "Release Error:" : "Save Draft Error:", err);
