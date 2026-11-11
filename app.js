@@ -32,6 +32,9 @@ const LIB_URLS = {
 };
 const libPromises = {};
 
+// DEFENSE NOTE [001] loadLib
+// Purpose: Retrieves and presents lib. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function loadLib(key) {
   const present = key === 'xlsx' ? typeof XLSX !== 'undefined' : typeof Chart !== 'undefined';
   if (present) return Promise.resolve();
@@ -47,6 +50,9 @@ function loadLib(key) {
   return libPromises[key];
 }
 
+// DEFENSE NOTE [002] preloadLibsWhenIdle
+// Purpose: Processes libs when idle. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function preloadLibsWhenIdle(keys) {
   const run = () => keys.forEach((k) => loadLib(k).catch(() => {}));
   if (window.requestIdleCallback) window.requestIdleCallback(run, { timeout: 4000 });
@@ -54,6 +60,9 @@ function preloadLibsWhenIdle(keys) {
 }
 
 // Tells the user when a request is slow instead of looking frozen
+// DEFENSE NOTE [003] notifySlow
+// Purpose: Processes slow. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function notifySlow(promise, label) {
   const timer = setTimeout(() => showToast(`${label} is taking longer than usual. Your connection may be slow; still loading...`, 'info'), 8000);
   const done = () => clearTimeout(timer);
@@ -113,6 +122,9 @@ let CURRENT_SCHOOL_YEAR = ACADEMIC_DEFAULTS.schoolYear;
 // 1. LOGIN PAGE HELPERS & GENERAL HELPERS
 // ------------------------------------------------------------------
 
+// DEFENSE NOTE [004] initPortalView
+// Purpose: Initializes portal view. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function initPortalView() {
   // One login form for everyone. The role is read from the account's Firestore record after sign-in,
   // never from the page, the URL or a button the user can click.
@@ -122,12 +134,18 @@ function initPortalView() {
   if (staffFields) staffFields.classList.add('hidden');
 }
 
+// DEFENSE NOTE [005] roleDisplayLabel
+// Purpose: Processes display label. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function roleDisplayLabel(role) {
   if (role === 'admin') return 'Department Head / Admin Console';
   if (role === 'instructor') return 'Faculty Workspace';
   return 'Student Portal';
 }
 
+// DEFENSE NOTE [006] facultyDisplayLabel
+// Purpose: Processes display label. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function facultyDisplayLabel(f) {
   if (!f) return '';
   if (f.fullName && f.title) return `${f.fullName} (${f.title})`;
@@ -135,12 +153,18 @@ function facultyDisplayLabel(f) {
   return f.email || '';
 }
 
+// DEFENSE NOTE [007] selectPortal
+// Purpose: Selects portal. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function selectPortal() {
   // The portal category buttons were removed; kept as a stub so older calls (e.g. switchAuthTab) stay harmless.
   const authError = document.getElementById('authError');
   if (authError) authError.innerText = '';
 }
 
+// DEFENSE NOTE [008] normalizeSemester
+// Purpose: Normalizes semester. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function normalizeSemester(sem) {
   if (!sem) return '1st Semester';
   const s = String(sem).trim().toUpperCase();
@@ -149,11 +173,17 @@ function normalizeSemester(sem) {
   return sem;
 }
 
+// DEFENSE NOTE [009] semesterDisplayLabel
+// Purpose: Processes display label. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function semesterDisplayLabel(sem) {
   const norm = normalizeSemester(sem);
   return norm === '2nd Semester' ? '2nd Semester' : '1st Semester';
 }
 
+// DEFENSE NOTE [010] buildEnrollmentDocId
+// Purpose: Constructs enrollment doc id. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function buildEnrollmentDocId(subjectCode, section, studentUid) {
   const cleanSection = String(section || 'A').trim().toUpperCase();
   return `${subjectCode}_${cleanSection}_${studentUid}`;
@@ -161,6 +191,9 @@ function buildEnrollmentDocId(subjectCode, section, studentUid) {
 
 let PASSING_THRESHOLD = ACADEMIC_DEFAULTS.passingGrade;
 
+// DEFENSE NOTE [011] escapeHtml
+// Purpose: Processes html. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function escapeHtml(value) {
   const str = (value === null || value === undefined) ? '' : String(value);
   return str.replace(/[&<>"']/g, (ch) => ({
@@ -172,6 +205,9 @@ function escapeHtml(value) {
   }[ch]));
 }
 
+// DEFENSE NOTE [012] computeGradeStats
+// Purpose: Computes the arithmetic mean of Prelim, Midterm, and Finals and compares it with the configured passing threshold.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function computeGradeStats(prelim, midterm, finals) {
   const p = parseFloat(prelim) || 0;
   const m = parseFloat(midterm) || 0;
@@ -198,8 +234,14 @@ function computeGradeStats(prelim, midterm, finals) {
 
 const GRID_SCORE_FIELDS = ['labScore', 'quizzesScore', 'oralRecitationScore', 'attendanceScore']; // attendance is recorded but not weighted
 
+// DEFENSE NOTE [013] getActiveWeights
+// Purpose: Returns active weights. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function getActiveWeights() { return readTermFormulaFromForm(); }
 
+// DEFENSE NOTE [014] readTermFormulaFromForm
+// Purpose: Reads term formula from form. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function readTermFormulaFromForm() {
   const read = (id, fb) => { const el = document.getElementById(id); const v = el ? parseFloat(el.value) : NaN; return Number.isFinite(v) ? v : fb; };
   const weights = {};
@@ -207,6 +249,9 @@ function readTermFormulaFromForm() {
   return { lectureWeight: read('tfLectureW', 0), labWeight: read('tfLabW', 0), weights };
 }
 
+// DEFENSE NOTE [015] renderTermFormulaForm
+// Purpose: Builds or refreshes the visible term formula form. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderTermFormulaForm(f) {
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
   set('tfLectureW', f.lectureWeight); set('tfLabW', f.labWeight);
@@ -216,11 +261,17 @@ function renderTermFormulaForm(f) {
 
 // Official grade = plain average of Prelim, Midterm and Finals (same as saved grades and the student view).
 // The evaluation weights are descriptive only and shown in the Assessment Breakdown.
+// DEFENSE NOTE [016] computeFacultyRowStats
+// Purpose: Produces official row-level grade statistics using the shared grade computation, ensuring consistent student-facing results.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function computeFacultyRowStats(row) {
   const finalsVal = row.finals !== undefined ? row.finals : row.final;
   return computeGradeStats(row.prelim, row.midterm, finalsVal);
 }
 
+// DEFENSE NOTE [017] refreshWeightIndicator
+// Purpose: Refreshes weight indicator. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function refreshWeightIndicator() {
   const f = readTermFormulaFromForm();
   const el = document.getElementById('weightTotalIndicator');
@@ -230,6 +281,9 @@ function refreshWeightIndicator() {
   el.className = err ? "text-[10px] font-mono text-rose-400 font-bold" : "text-[10px] font-mono text-emerald-400";
 }
 
+// DEFENSE NOTE [018] setupWeightLiveRecalc
+// Purpose: Initializes weight live recalc. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setupWeightLiveRecalc() {
   ['tfLectureW', 'tfLabW'].concat(COLUMN_CATEGORIES.map((c) => 'tf_' + c.key)).forEach((id) => {
     const el = document.getElementById(id);
@@ -239,6 +293,9 @@ function setupWeightLiveRecalc() {
 }
 
 // Re-computes Average / Standing for every rendered row without rebuilding inputs
+// DEFENSE NOTE [019] updateGridSummary
+// Purpose: Updates grid summary. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function updateGridSummary() {
   const el = document.getElementById('gridSummaryStrip');
   if (!el) return;
@@ -260,6 +317,9 @@ function updateGridSummary() {
     `<span class="ml-auto text-slate-500">Average = (Prelim + Midterm + Finals) \u00F7 3</span>`;
 }
 
+// DEFENSE NOTE [020] refreshGridComputedCells
+// Purpose: Refreshes grid computed cells. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function refreshGridComputedCells() {
   const tbody = document.getElementById('previewBody');
   if (!tbody) return;
@@ -269,6 +329,9 @@ function refreshGridComputedCells() {
   });
 }
 
+// DEFENSE NOTE [021] updateRowComputedCells
+// Purpose: Updates row computed cells. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function updateRowComputedCells(tr, row) {
   recomputeRowTerms(row);
   if (PERIODS[activePeriod]) {
@@ -291,6 +354,9 @@ function updateRowComputedCells(tr, row) {
 }
 
 // Computed cells of a term tab (category grades, lecture / lab grade, term grade, remarks)
+// DEFENSE NOTE [022] refreshPeriodComputedCells
+// Purpose: Refreshes period computed cells. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function refreshPeriodComputedCells(tr, row, periodName) {
   const field = PERIODS[periodName].field;
   const b = computeTermBreakdown(row, periodName);
@@ -313,6 +379,9 @@ function refreshPeriodComputedCells(tr, row, periodName) {
 }
 
 // Pulls Lab / Quizzes / Oral Recitation overall scores from optional Excel columns
+// DEFENSE NOTE [023] extractCategoryScores
+// Purpose: Extracts category scores. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function extractCategoryScores(headers, row) {
   const fields = {};
   const patterns = [
@@ -328,6 +397,9 @@ function extractCategoryScores(headers, row) {
   return fields;
 }
 
+// DEFENSE NOTE [024] addGridRow
+// Purpose: Processes grid row. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function addGridRow() {
   if (!activeSubjectCode) return alert("Select an active subject first.");
   parsedGradeData.push({ studentId: '', fullName: '', prelim: 0, midterm: 0, finals: 0, __staged: true });
@@ -345,6 +417,9 @@ function addGridRow() {
 }
 
 // If the instructor edited the Student ID of an already-saved row, drop the old grade doc
+// DEFENSE NOTE [025] queueRenamedDocCleanup
+// Purpose: Queues renamed doc cleanup. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function queueRenamedDocCleanup(row, batch) {
   if (row.__docId && row.__originalStudentId !== undefined &&
       String(row.__originalStudentId).trim() !== String(row.studentId || '').trim()) {
@@ -352,6 +427,9 @@ function queueRenamedDocCleanup(row, batch) {
   }
 }
 
+// DEFENSE NOTE [026] pickCategoryScoreFields
+// Purpose: Processes category score fields. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function pickCategoryScoreFields(row) {
   const out = {};
   GRID_SCORE_FIELDS.forEach((f) => { out[f] = toFiniteOrNull(row[f]); });
@@ -361,6 +439,9 @@ function pickCategoryScoreFields(row) {
 // ------------------------------------------------------------------
 // TOASTS: non-blocking replacement for alert() (confirm() is untouched)
 // ------------------------------------------------------------------
+// DEFENSE NOTE [027] showToast
+// Purpose: Displays toast. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function showToast(message, type) {
   let host = document.getElementById('toastHost');
   if (!host) {
@@ -392,6 +473,9 @@ function showToast(message, type) {
 }
 window.alert = (m) => showToast(m);
 
+// DEFENSE NOTE [028] animateNumber
+// Purpose: Processes number. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function animateNumber(id, target) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -406,6 +490,9 @@ function animateNumber(id, target) {
   requestAnimationFrame(tick);
 }
 
+// DEFENSE NOTE [029] goToSidebarPage
+// Purpose: Processes to sidebar page. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function goToSidebarPage(page) {
   const btn = document.querySelector(`#roleSidebar [id^="sidebarNav"]:not(.hidden) button[data-page="${page}"]`);
   if (btn) btn.click();
@@ -416,6 +503,9 @@ function goToSidebarPage(page) {
 // ------------------------------------------------------------------
 let homeAssignments = [];
 
+// DEFENSE NOTE [030] syncClassSwitcher
+// Purpose: Synchronizes class switcher. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function syncClassSwitcher() {
   const sel = document.getElementById('classSwitcher');
   if (!sel) return;
@@ -423,6 +513,9 @@ function syncClassSwitcher() {
   if (idx !== -1) sel.value = String(idx);
 }
 
+// DEFENSE NOTE [031] populateClassSwitcher
+// Purpose: Processes class switcher. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function populateClassSwitcher() {
   const sel = document.getElementById('classSwitcher');
   if (!sel) return;
@@ -432,11 +525,17 @@ function populateClassSwitcher() {
   syncClassSwitcher();
 }
 
+// DEFENSE NOTE [032] switchActiveClass
+// Purpose: Switches active class. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function switchActiveClass(value) {
   const x = homeAssignments[Number(value)];
   if (x) selectSubject(x.code, x.subjectName, x.section, x.card);
 }
 
+// DEFENSE NOTE [033] openHomeClass
+// Purpose: Opens home class. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function openHomeClass(i) {
   const a = homeAssignments[i];
   if (!a) return;
@@ -444,6 +543,9 @@ function openHomeClass(i) {
   goToSidebarPage('record');
 }
 
+// DEFENSE NOTE [034] loadInstructorHome
+// Purpose: Retrieves and presents instructor home. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function loadInstructorHome(prefetchedEnroll) {
   const box = document.getElementById('instructorHomeClasses');
   if (!box) return;
@@ -509,6 +611,9 @@ async function loadInstructorHome(prefetchedEnroll) {
   requestAnimationFrame(() => box.querySelectorAll('[data-w]').forEach((b) => { b.style.width = b.dataset.w + '%'; }));
 }
 
+// DEFENSE NOTE [035] renderAdminHomeActivity
+// Purpose: Builds or refreshes the visible admin home activity. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderAdminHomeActivity(logSnapshot) {
   const box = document.getElementById('adminHomeActivity');
   if (!box) return;
@@ -523,6 +628,9 @@ function renderAdminHomeActivity(logSnapshot) {
   }).join('');
 }
 
+// DEFENSE NOTE [036] renderStudentHomeSubjects
+// Purpose: Builds or refreshes the visible student home subjects. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderStudentHomeSubjects(rows) {
   const box = document.getElementById('studentHomeSubjects');
   if (!box) return;
@@ -535,6 +643,9 @@ function renderStudentHomeSubjects(rows) {
     </div>`).join('') + (rows.length > 5 ? `<div class="text-[10px] text-slate-500 pt-1">+ ${rows.length - 5} more</div>` : '');
 }
 
+// DEFENSE NOTE [037] renderStudentHomeNotifs
+// Purpose: Builds or refreshes the visible student home notifs. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderStudentHomeNotifs() {
   const box = document.getElementById('studentHomeNotifs');
   if (!box) return;
@@ -551,6 +662,9 @@ function renderStudentHomeNotifs() {
 // ------------------------------------------------------------------
 // ACADEMIC SETTINGS (settings/academic): school year, passing grade, promotion thresholds
 // ------------------------------------------------------------------
+// DEFENSE NOTE [038] applyAcademicSettings
+// Purpose: Applies academic settings. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function applyAcademicSettings(s) {
   const d = ACADEMIC_DEFAULTS;
   const src = s || {};
@@ -561,6 +675,9 @@ function applyAcademicSettings(s) {
 
 // Never rejects: if the record is missing or unreadable the built-in defaults keep the system working
 let academicSettingsMeta = null;
+// DEFENSE NOTE [039] loadAcademicSettings
+// Purpose: Retrieves and presents academic settings. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function loadAcademicSettings() {
   try {
     const snap = await db.collection('settings').doc('academic').get();
@@ -573,6 +690,9 @@ async function loadAcademicSettings() {
   }
 }
 
+// DEFENSE NOTE [040] renderAcademicSettingsForm
+// Purpose: Builds or refreshes the visible academic settings form. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderAcademicSettingsForm() {
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
   set('settingSchoolYear', CURRENT_SCHOOL_YEAR);
@@ -587,6 +707,9 @@ function renderAcademicSettingsForm() {
   }
 }
 
+// DEFENSE NOTE [041] saveAcademicSettings
+// Purpose: Persists academic settings. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function saveAcademicSettings() {
   const val = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
   const schoolYear = val('settingSchoolYear');
@@ -620,6 +743,9 @@ async function saveAcademicSettings() {
 // ------------------------------------------------------------------
 // PRINTABLE GRADE SUMMARIES (browser print / "Save as PDF"; no library, no extra database reads)
 // ------------------------------------------------------------------
+// DEFENSE NOTE [042] openPrintJob
+// Purpose: Opens print job. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function openPrintJob(html, pageSize) {
   const root = document.getElementById('printRoot');
   if (!root) return alert("Printing is not available on this page.");
@@ -640,6 +766,9 @@ function openPrintJob(html, pageSize) {
   Promise.race([Promise.all(pending), new Promise((resolve) => setTimeout(resolve, 1500))]).then(() => window.print());
 }
 
+// DEFENSE NOTE [043] printHeader
+// Purpose: Processes header. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function printHeader(title) {
   return `
     <div style="display:flex;align-items:center;gap:12px;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:10px;">
@@ -656,6 +785,9 @@ function printHeader(title) {
 const printStamp = () => new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' });
 const printNum = (v) => (Number.isFinite(Number(v)) ? Number(v).toFixed(2) : '-');
 
+// DEFENSE NOTE [044] printStudentGradeSlip
+// Purpose: Processes student grade slip. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function printStudentGradeSlip() {
   let sd;
   try {
@@ -719,6 +851,9 @@ async function printStudentGradeSlip() {
   `, 'A4 portrait');
 }
 
+// DEFENSE NOTE [045] printClassRecord
+// Purpose: Processes class record. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function printClassRecord() {
   if (!activeSubjectCode) return alert("Select an active class first.");
   if (!parsedGradeData.length) return alert("There are no students in this class record to print.");
@@ -771,6 +906,9 @@ function printClassRecord() {
   `, wide ? 'A4 landscape' : 'A4 portrait');
 }
 
+// DEFENSE NOTE [046] updateSidebarUserCard
+// Purpose: Updates sidebar user card. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function updateSidebarUserCard(role, userData) {
   const name = (userData && (userData.fullName || userData.name)) || currentUserEmail || 'Signed in';
   const initials = String(name).split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '--';
@@ -781,6 +919,9 @@ function updateSidebarUserCard(role, userData) {
   set('sidebarAvatar', initials);
 }
 
+// DEFENSE NOTE [047] setupSidebarCollapse
+// Purpose: Initializes sidebar collapse. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setupSidebarCollapse() {
   const aside = document.getElementById('roleSidebar');
   const btn = document.getElementById('sidebarCollapseBtn');
@@ -794,6 +935,9 @@ function setupSidebarCollapse() {
 
 // Sidebar = one page at a time inside the logged-in role's own view.
 // Only elements tagged data-page inside that view are toggled; headers and the class rail stay put.
+// DEFENSE NOTE [048] setupSectionNav
+// Purpose: Initializes section nav. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setupSectionNav() {
   document.querySelectorAll('[data-subnav]').forEach((nav) => {
     const view = document.getElementById(nav.dataset.view);
@@ -837,12 +981,21 @@ const byFullName = (x, y) => String(x.fullName || '').localeCompare(String(y.ful
 // still be graded until the drop is approved. A dropped student leaves the roster; their grade records stay in the
 // database (history) but stop counting anywhere.
 const ENROLLED_STATUSES = ['approved', 'pending_drop'];
+// DEFENSE NOTE [049] isEnrolledStatus
+// Purpose: Determines whether enrolled status. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function isEnrolledStatus(status) { return ENROLLED_STATUSES.indexOf(status) !== -1; }
+// DEFENSE NOTE [050] enrollmentStatusLabel
+// Purpose: Processes status label. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function enrollmentStatusLabel(status) {
   return ({ pending: 'Pending', approved: 'Enrolled', rejected: 'Rejected', pending_drop: 'Drop requested', dropped: 'Dropped' })[status] || String(status || 'Pending');
 }
 
 // Enrolled (approved or drop pending) students of the class/section keyed by Student ID. Pending, rejected and dropped never count.
+// DEFENSE NOTE [051] approvedRosterMap
+// Purpose: Processes roster map. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function approvedRosterMap(enrollList, section) {
   const map = new Map();
   enrollList.forEach((en) => {
@@ -856,6 +1009,9 @@ function approvedRosterMap(enrollList, section) {
 
 // Student side: a released grade is shown only if it is linked to MY account (studentUid). Records that were
 // never linked stay invisible until an admin runs Data Health > "Link grades to accounts".
+// DEFENSE NOTE [052] gradeUpdatedMs
+// Purpose: Processes updated ms. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function gradeUpdatedMs(g) {
   const u = g && g.updatedAt;
   if (u && typeof u.toMillis === 'function') return u.toMillis();
@@ -864,6 +1020,9 @@ function gradeUpdatedMs(g) {
 
 // One record per subject / semester / school year. Older duplicate documents (left by renamed ids or earlier imports)
 // are ignored here; Data Health can remove them for good. The newest update wins.
+// DEFENSE NOTE [053] dedupeStudentGrades
+// Purpose: Processes student grades. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function dedupeStudentGrades(grades) {
   const best = new Map();
   grades.forEach((g) => {
@@ -874,6 +1033,9 @@ function dedupeStudentGrades(grades) {
   return Array.from(best.values());
 }
 
+// DEFENSE NOTE [054] filterVisibleGrades
+// Purpose: Filters visible grades. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function filterVisibleGrades(grades, uid, enrollments = []) {
   // A subject the student dropped (and is not enrolled in through another record) no longer counts.
   const norm = (c) => String(c || '').trim().toUpperCase();
@@ -883,6 +1045,9 @@ function filterVisibleGrades(grades, uid, enrollments = []) {
 }
 
 // Admin data health: split saved grades into OK / needs account link / orphan
+// DEFENSE NOTE [055] classifyGradeHealth
+// Purpose: Processes grade health. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function classifyGradeHealth(grades, enrollList) {
   const byId = new Map();
   const byName = new Map();
@@ -919,6 +1084,9 @@ function classifyGradeHealth(grades, enrollList) {
   return result;
 }
 
+// DEFENSE NOTE [056] commitInChunks
+// Purpose: Processes in chunks. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function commitInChunks(items, applyFn, size = 400) {
   for (let i = 0; i < items.length; i += size) {
     const batch = db.batch();
@@ -929,6 +1097,9 @@ async function commitInChunks(items, applyFn, size = 400) {
 
 let healthScan = null;
 
+// DEFENSE NOTE [057] renderDataHealth
+// Purpose: Builds or refreshes the visible data health. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderDataHealth() {
   const sum = document.getElementById('healthSummary');
   const actions = document.getElementById('healthActions');
@@ -960,6 +1131,9 @@ function renderDataHealth() {
 // Duplicate grade documents: same student, subject, semester and school year stored twice (e.g. a name-keyed legacy
 // id next to the real Student ID). Keeps the NEWEST; a released older copy is never deleted (released grades are
 // locked), so it is listed for manual review instead.
+// DEFENSE NOTE [058] findDuplicateGrades
+// Purpose: Processes duplicate grades. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function findDuplicateGrades(grades) {
   const code = (g) => String(g.classId || '').trim().toUpperCase();
   const baseOf = (g) => `${code(g)}|${normalizeSemester(g.semester)}|${String(g.schoolYear || '').trim()}`;
@@ -1017,6 +1191,9 @@ function findDuplicateGrades(grades) {
   return { removable, review };
 }
 
+// DEFENSE NOTE [059] removeDuplicateGrades
+// Purpose: Removes duplicate grades. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function removeDuplicateGrades() {
   const items = healthScan ? healthScan.duplicates.removable.slice() : [];
   if (!items.length || !confirm(`Permanently delete ${items.length} older duplicate grade record(s)? The newest record of each student/subject/semester is kept. This cannot be undone.`)) return;
@@ -1030,6 +1207,9 @@ async function removeDuplicateGrades() {
   } catch (err) { alert('Could not remove duplicates: ' + (err.message || err)); }
 }
 
+// DEFENSE NOTE [060] scanDataHealth
+// Purpose: Processes data health. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function scanDataHealth() {
   const status = document.getElementById('healthStatus');
   if (status) status.textContent = 'Scanning...';
@@ -1050,6 +1230,9 @@ async function scanDataHealth() {
   }
 }
 
+// DEFENSE NOTE [061] linkGradeAccounts
+// Purpose: Processes grade accounts. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function linkGradeAccounts() {
   if (!healthScan || !healthScan.toLink.length) return;
   const items = healthScan.toLink.slice();
@@ -1064,6 +1247,9 @@ async function linkGradeAccounts() {
 }
 
 // Released grades are permanently locked, so only UNRELEASED orphans can be deleted
+// DEFENSE NOTE [062] deleteOrphanGrades
+// Purpose: Deletes orphan grades. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function deleteOrphanGrades() {
   const items = healthScan ? healthScan.orphans.filter((o) => !o.g.isReleased) : [];
   if (!items.length || !confirm(`Permanently delete ${items.length} unreleased orphan grade record(s)? This cannot be undone.\n\nReleased grades are locked and are never deleted.`)) return;
@@ -1080,6 +1266,9 @@ async function deleteOrphanGrades() {
 // ------------------------------------------------------------------
 // STUDENT SELF-SERVICE: a student with no Student ID (cleared by an admin after a duplicate) enters the right one
 // ------------------------------------------------------------------
+// DEFENSE NOTE [063] promptStudentIdClaim
+// Purpose: Processes student id claim. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function promptStudentIdClaim() {
   const modal = document.getElementById('studentIdClaimModal');
   if (!modal) return;
@@ -1090,6 +1279,9 @@ function promptStudentIdClaim() {
   if (panel) requestAnimationFrame(() => panel.classList.remove('opacity-0', 'scale-95'));
 }
 
+// DEFENSE NOTE [064] closeStudentIdClaim
+// Purpose: Closes student id claim. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function closeStudentIdClaim() {
   const modal = document.getElementById('studentIdClaimModal');
   const panel = document.getElementById('studentIdClaimPanel');
@@ -1097,6 +1289,9 @@ function closeStudentIdClaim() {
   if (modal) modal.classList.add('hidden');
 }
 
+// DEFENSE NOTE [065] claimMyStudentId
+// Purpose: Processes my student id. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function claimMyStudentId() {
   const input = document.getElementById('claimStudentIdInput');
   const err = document.getElementById('claimStudentIdError');
@@ -1141,6 +1336,9 @@ async function claimMyStudentId() {
 let studentIdScan = null;
 
 // students: [{uid, studentId, fullName, email, status}]   claims: Map(UPPER-CASE ID -> {uid, studentId})
+// DEFENSE NOTE [066] analyzeStudentIds
+// Purpose: Processes student ids. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function analyzeStudentIds(students, claims) {
   const out = { total: students.length, protectedOk: 0, toClaim: [], conflicts: [], missing: [], invalid: [] };
   const uids = new Set(students.map((s) => s.uid));
@@ -1169,6 +1367,9 @@ function analyzeStudentIds(students, claims) {
   return out;
 }
 
+// DEFENSE NOTE [067] scanStudentIds
+// Purpose: Processes student ids. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function scanStudentIds() {
   const status = document.getElementById('studentIdStatus');
   if (status) status.textContent = 'Scanning...';
@@ -1194,6 +1395,9 @@ async function scanStudentIds() {
   }
 }
 
+// DEFENSE NOTE [068] renderStudentIdTools
+// Purpose: Builds or refreshes the visible student id tools. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderStudentIdTools() {
   const sum = document.getElementById('studentIdSummary');
   const actions = document.getElementById('studentIdActions');
@@ -1228,6 +1432,9 @@ function renderStudentIdTools() {
   renderStudentIdSearch();
 }
 
+// DEFENSE NOTE [069] renderStudentIdSearch
+// Purpose: Builds or refreshes the visible student id search. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderStudentIdSearch() {
   const out = document.getElementById('studentIdSearchResults');
   const input = document.getElementById('studentIdSearch');
@@ -1244,6 +1451,9 @@ function renderStudentIdSearch() {
     : '<div class="text-xs text-slate-500">No matching student accounts.</div>';
 }
 
+// DEFENSE NOTE [070] protectStudentIds
+// Purpose: Processes student ids. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function protectStudentIds() {
   const items = studentIdScan ? studentIdScan.analysis.toClaim : [];
   if (!items.length || !confirm(`Protect ${items.length} Student ID(s)? Each one is reserved for its current account so nobody else can register it.`)) return;
@@ -1260,6 +1470,9 @@ async function protectStudentIds() {
 }
 
 // Operations that remove an ID from one account: user doc, and its enrollments (so rosters never show the wrong ID)
+// DEFENSE NOTE [071] buildClearIdOps
+// Purpose: Constructs clear id ops. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function buildClearIdOps(account) {
   const ops = [(b) => b.update(db.collection('users').doc(account.uid), {
     studentId: '',
@@ -1271,6 +1484,9 @@ async function buildClearIdOps(account) {
   return ops;
 }
 
+// DEFENSE NOTE [072] keepStudentIdOn
+// Purpose: Processes student id on. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function keepStudentIdOn(key, winnerUid) {
   if (!studentIdScan) return;
   const group = studentIdScan.students.filter((s) => isValidStudentId(String(s.studentId || '').trim()) && studentIdKey(s.studentId) === key);
@@ -1293,6 +1509,9 @@ async function keepStudentIdOn(key, winnerUid) {
   } catch (err) { alert('Could not resolve: ' + (err.message || err)); }
 }
 
+// DEFENSE NOTE [073] clearStudentIdFor
+// Purpose: Clears student id for. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function clearStudentIdFor(uid) {
   if (!studentIdScan) return;
   const acc = studentIdScan.students.find((s) => s.uid === uid);
@@ -1313,10 +1532,16 @@ async function clearStudentIdFor(uid) {
 // Transferee credits: subject codes that count as already passed. Admin only; saved on the student's user document.
 let creditsTargetUid = null;
 
+// DEFENSE NOTE [074] parseCreditCodes
+// Purpose: Parses credit codes. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function parseCreditCodes(text) {
   return normalizeCreditedList(String(text || '').split(/[\n,;]+/));
 }
 
+// DEFENSE NOTE [075] openCreditsModal
+// Purpose: Opens credits modal. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function openCreditsModal(uid) {
   const acc = studentIdScan && studentIdScan.students.find((s) => s.uid === uid);
   const modal = document.getElementById('creditsModal');
@@ -1330,6 +1555,9 @@ function openCreditsModal(uid) {
   if (panel) requestAnimationFrame(() => panel.classList.remove('opacity-0', 'scale-95'));
 }
 
+// DEFENSE NOTE [076] closeCreditsModal
+// Purpose: Closes credits modal. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function closeCreditsModal() {
   const modal = document.getElementById('creditsModal');
   const panel = document.getElementById('creditsPanel');
@@ -1338,6 +1566,9 @@ function closeCreditsModal() {
   creditsTargetUid = null;
 }
 
+// DEFENSE NOTE [077] saveCredits
+// Purpose: Persists credits. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function saveCredits() {
   const err = document.getElementById('creditsError');
   const acc = studentIdScan && studentIdScan.students.find((s) => s.uid === creditsTargetUid);
@@ -1367,6 +1598,9 @@ async function saveCredits() {
   }
 }
 
+// DEFENSE NOTE [078] setStudentAccountStatus
+// Purpose: Sets student account status. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function setStudentAccountStatus(uid, status) {
   if (status !== 'active' && status !== 'disabled') return;
   const acc = studentIdScan && studentIdScan.students.find((s) => s.uid === uid);
@@ -1380,6 +1614,9 @@ async function setStudentAccountStatus(uid, status) {
   } catch (err) { alert('Could not update the account: ' + (err.message || err)); }
 }
 
+// DEFENSE NOTE [079] rosterFromEnrollments
+// Purpose: Processes from enrollments. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function rosterFromEnrollments(list, section) {
   const seen = new Set();
   const roster = [];
@@ -1394,6 +1631,9 @@ function rosterFromEnrollments(list, section) {
   return roster.sort(byFullName);
 }
 
+// DEFENSE NOTE [080] fetchApprovedRoster
+// Purpose: Retrieves approved roster. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function fetchApprovedRoster(subjectCode, section) {
   try {
     const snap = await db.collection('enrollments').where('subjectCode', '==', subjectCode).get();
@@ -1411,22 +1651,34 @@ let rosterSortKey = 'fullName';
 let rosterSortDir = 1;
 let rosterQuery = '';
 
+// DEFENSE NOTE [081] renderStudentRoster
+// Purpose: Builds or refreshes the visible student roster. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderStudentRoster(roster) {
   rosterData = roster.slice();
   drawStudentRoster();
 }
 
+// DEFENSE NOTE [082] sortRoster
+// Purpose: Processes roster. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function sortRoster(key) {
   if (rosterSortKey === key) rosterSortDir *= -1;
   else { rosterSortKey = key; rosterSortDir = 1; }
   drawStudentRoster();
 }
 
+// DEFENSE NOTE [083] filterRoster
+// Purpose: Filters roster. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function filterRoster(value) {
   rosterQuery = String(value || '').trim().toLowerCase();
   drawStudentRoster();
 }
 
+// DEFENSE NOTE [084] drawStudentRoster
+// Purpose: Processes student roster. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function drawStudentRoster() {
   const body = document.getElementById('studentRosterBody');
   const count = document.getElementById('studentRosterCount');
@@ -1465,6 +1717,9 @@ function drawStudentRoster() {
 }
 
 // Approved students without a grade record yet become blank, un-graded rows in the grid
+// DEFENSE NOTE [085] mergeRosterIntoGrid
+// Purpose: Processes roster into grid. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function mergeRosterIntoGrid(roster, gradeRows) {
   const haveIds = new Set(gradeRows.map((g) => String(g.studentId || '').trim()));
   const haveNames = new Set(gradeRows.map((g) => normalizeNameKey(g.fullName)));
@@ -1478,6 +1733,9 @@ const isNotGradedRow = (row) => !!row.__rosterOnly && !row.__edited;
 
 let studentSubjectsUnsubscribe = null;
 let lastEnrollmentSignature = null;
+// DEFENSE NOTE [086] setupStudentSubjectsListener
+// Purpose: Initializes student subjects listener. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setupStudentSubjectsListener(uid) {
   if (typeof studentSubjectsUnsubscribe === 'function') studentSubjectsUnsubscribe();
   studentSubjectsUnsubscribe = null;
@@ -1500,34 +1758,16 @@ function setupStudentSubjectsListener(uid) {
       }
     }
     lastEnrollmentSignature = signature;
-    if (!rows.length) {
-      body.innerHTML = '<tr><td colspan="4" class="px-3 py-4 text-slate-500">No subject requests yet. Choose subjects in the Curriculum Prospectus.</td></tr>';
-      return;
-    }
-    const cls = {
-      approved: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-      pending: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-      rejected: 'bg-rose-500/15 text-rose-400 border-rose-500/30',
-      pending_drop: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-      dropped: 'bg-slate-700/40 text-slate-300 border-slate-600'
-    };
-    const actionBtn = (fn, label, tone) => `<button type="button" onclick="${fn}" class="px-2.5 py-1 rounded-lg border text-[11px] font-bold ${tone}">${label}</button>`;
-    body.innerHTML = rows.map((e) => {
-      const id = escapeHtml(e.__id || '');
-      let action = '';
-      if (e.status === 'approved') action = actionBtn(`requestSubjectDrop('${id}')`, 'Request drop', 'border-rose-500/30 bg-rose-500/10 text-rose-400');
-      else if (e.status === 'pending_drop') action = actionBtn(`cancelDropRequest('${id}')`, 'Cancel request', 'border-slate-600 bg-slate-800/60 text-slate-200');
-      return `
-      <tr>
-        <td class="px-3 py-2 font-bold text-white">${escapeHtml(e.subjectCode || '')}</td>
-        <td class="px-3 py-2 text-slate-400">${escapeHtml(e.section || '')}</td>
-        <td class="px-3 py-2"><span class="px-2 py-0.5 rounded-md border text-[10px] font-extrabold uppercase tracking-wider ${cls[e.status] || cls.pending}">${escapeHtml(enrollmentStatusLabel(e.status))}</span></td>
-        <td class="px-3 py-2 text-right">${action}</td>
-      </tr>`;
-    }).join('');
+    renderCategorizedStudentSubjects(rows, body).catch((err) => {
+      console.error('Subject grouping failed:', err);
+      body.innerHTML = '<div class="p-4">Unable to load subjects. Please refresh.</div>';
+    });
   }, (err) => console.error("My Subjects listener error:", err));
 }
 
+// DEFENSE NOTE [087] buildGradeDocId
+// Purpose: Constructs grade doc id. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function buildGradeDocId(subjectCode, studentId) {
   return `${subjectCode}_${String(studentId).trim()}`;
 }
@@ -1535,6 +1775,9 @@ function buildGradeDocId(subjectCode, studentId) {
 // RETAKES: the first attempt keeps the classic id (subject_studentId). A record from an EARLIER school year is history,
 // so a save in a later year goes to its own document (subject_studentId__2026-2027) instead of overwriting it.
 // Records without a school year (saved before years were stamped) and records of the same year update in place.
+// DEFENSE NOTE [088] gradeDocIdForYear
+// Purpose: Processes doc id for year. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function gradeDocIdForYear(subjectCode, studentId, existingById, schoolYear) {
   const baseId = buildGradeDocId(subjectCode, studentId);
   const base = existingById.get(baseId);
@@ -1542,9 +1785,15 @@ function gradeDocIdForYear(subjectCode, studentId, existingById, schoolYear) {
   return `${baseId}__${schoolYear}`;
 }
 
+// DEFENSE NOTE [089] schoolYearSortKey
+// Purpose: Processes year sort key. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function schoolYearSortKey(g) { return String((g && g.schoolYear) || ''); } // 'YYYY-YYYY' sorts correctly as text
 
 // Newest attempt wins: later school year, then 2nd semester over 1st, then the latest update.
+// DEFENSE NOTE [090] isNewerAttempt
+// Purpose: Determines whether newer attempt. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function isNewerAttempt(a, b) {
   const ya = schoolYearSortKey(a), yb = schoolYearSortKey(b);
   if (ya !== yb) return ya > yb;
@@ -1556,6 +1805,9 @@ function isNewerAttempt(a, b) {
 
 // One counted record per subject (per student when studentKey is given). Earlier attempts stay stored and visible
 // as history; only the newest attempt counts toward GWA, completed units and the admin risk lists.
+// DEFENSE NOTE [091] latestAttemptPerSubject
+// Purpose: Processes attempt per subject. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function latestAttemptPerSubject(grades, studentKey = null) {
   const best = new Map();
   grades.forEach((g) => {
@@ -1567,11 +1819,17 @@ function latestAttemptPerSubject(grades, studentKey = null) {
   return Array.from(best.values());
 }
 
+// DEFENSE NOTE [092] buildAssignmentDocId
+// Purpose: Constructs assignment doc id. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function buildAssignmentDocId(facultyUid, subjectCode, section = 'ALL') {
   const cleanSection = String(section || 'ALL').trim().toUpperCase();
   return `${facultyUid}_${subjectCode}_${cleanSection}`;
 }
 
+// DEFENSE NOTE [093] normalizeNameKey
+// Purpose: Normalizes name key. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function normalizeNameKey(fullName) {
   return String(fullName || '')
     .toLowerCase()
@@ -1580,6 +1838,9 @@ function normalizeNameKey(fullName) {
     .replace(/\s+/g, '_');
 }
 
+// DEFENSE NOTE [094] normalizeCodeKey
+// Purpose: Normalizes code key. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function normalizeCodeKey(code) {
   return String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
@@ -1593,12 +1854,18 @@ function normalizeCodeKey(code) {
 
 const COMPONENT_KEY_RE = /^([pmf])_(q|lab|ass|out|exam|att|latt|lasm)(\d*)$/i;
 
+// DEFENSE NOTE [095] toFiniteOrNull
+// Purpose: Processes finite or null. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function toFiniteOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   const n = typeof value === 'number' ? value : parseFloat(value);
   return Number.isFinite(n) ? n : null;
 }
 
+// DEFENSE NOTE [096] extractComponentFields
+// Purpose: Extracts component fields. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function extractComponentFields(headers, row) {
   const fields = {};
   headers.forEach((h, idx) => {
@@ -1609,6 +1876,9 @@ function extractComponentFields(headers, row) {
   return fields;
 }
 
+// DEFENSE NOTE [097] pickComponentFields
+// Purpose: Processes component fields. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function pickComponentFields(row) {
   const fields = {};
   Object.keys(row || {}).forEach((key) => {
@@ -1621,6 +1891,9 @@ function pickComponentFields(row) {
 // DYNAMIC DASHBOARD METRICS & LOG COUNTERS
 // ------------------------------------------------------------------
 
+// DEFENSE NOTE [098] updateStudentMetrics
+// Purpose: Updates student metrics. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function updateStudentMetrics(studentGradesList = [], totalCurriculumUnits = null) {
   let enrolledUnits = 0;
   let completedUnits = 0;
@@ -1690,6 +1963,9 @@ function updateStudentMetrics(studentGradesList = [], totalCurriculumUnits = nul
   if (window.lucide) lucide.createIcons();
 }
 
+// DEFENSE NOTE [099] updateLogsCounter
+// Purpose: Updates logs counter. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function updateLogsCounter(logsData = []) {
   const displayEl = document.getElementById('logsCountDisplay');
   if (!displayEl) return;
@@ -1720,6 +1996,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Pressing Enter in the email or password field signs in, exactly like clicking the button.
+// DEFENSE NOTE [100] setupLoginEnterKey
+// Purpose: Initializes login enter key. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setupLoginEnterKey() {
   ['loginEmail', 'loginPassword'].forEach((id) => {
     const input = document.getElementById(id);
@@ -1733,6 +2012,9 @@ function setupLoginEnterKey() {
   });
 }
 
+// DEFENSE NOTE [101] setupExcelDropzone
+// Purpose: Initializes excel dropzone. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setupExcelDropzone() {
   const dropzone = document.getElementById('excelDropzone');
   const fileInput = document.getElementById('excelFile');
@@ -1781,6 +2063,9 @@ function setupExcelDropzone() {
   });
 }
 
+// DEFENSE NOTE [102] setupLiveRecordInteractions
+// Purpose: Initializes live record interactions. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setupLiveRecordInteractions() {
   const tbody = document.getElementById('previewBody');
   const search = document.getElementById('searchStudentInput');
@@ -1870,6 +2155,9 @@ function setupLiveRecordInteractions() {
   });
 }
 
+// DEFENSE NOTE [103] switchAuthTab
+// Purpose: Switches auth tab. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function switchAuthTab(tab) {
   const formLogin = document.getElementById('formLogin');
   const formRegister = document.getElementById('formRegister');
@@ -1897,6 +2185,9 @@ function switchAuthTab(tab) {
 // SEMESTER SWITCHING
 // ------------------------------------------------------------------
 
+// DEFENSE NOTE [104] updateSemesterToggleUI
+// Purpose: Updates semester toggle ui. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function updateSemesterToggleUI() {
   const ACTIVE = "px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-[11px] font-extrabold transition-all";
   const INACTIVE = "px-3 py-1.5 rounded-lg text-slate-400 hover:text-white text-[11px] font-bold transition-all";
@@ -1907,6 +2198,9 @@ function updateSemesterToggleUI() {
   if (btn2) btn2.className = is1S ? INACTIVE : ACTIVE;
 }
 
+// DEFENSE NOTE [105] setSemester
+// Purpose: Sets semester. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setSemester(sem) {
   const next = normalizeSemester(sem);
   if (next === normalizeSemester(activeSemester)) return;
@@ -1930,6 +2224,9 @@ function setSemester(sem) {
 // EXCEL TEMPLATE GENERATOR
 // ------------------------------------------------------------------
 
+// DEFENSE NOTE [106] downloadExcelTemplate
+// Purpose: Processes excel template. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function downloadExcelTemplate() {
   if (typeof XLSX === 'undefined') {
     loadLib('xlsx').then(downloadExcelTemplate).catch(() => alert("Could not load the Excel library. Check your internet connection and try again."));
@@ -1971,6 +2268,9 @@ function downloadExcelTemplate() {
 // AUTHENTICATION & PASSWORD HELPERS
 // ------------------------------------------------------------------
 
+// DEFENSE NOTE [107] togglePasswordVisibility
+// Purpose: Toggles password visibility. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function togglePasswordVisibility(inputId, iconId) {
   const input = document.getElementById(inputId);
   const icon = document.getElementById(iconId);
@@ -1986,6 +2286,9 @@ function togglePasswordVisibility(inputId, iconId) {
   if (window.lucide) lucide.createIcons();
 }
 
+// DEFENSE NOTE [108] openSelfResetModal
+// Purpose: Opens self reset modal. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function openSelfResetModal() {
   const modal = document.getElementById('selfResetModal');
   const panel = document.getElementById('selfResetModalPanel');
@@ -2008,6 +2311,9 @@ function openSelfResetModal() {
   }
 }
 
+// DEFENSE NOTE [109] closeSelfResetModal
+// Purpose: Closes self reset modal. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function closeSelfResetModal() {
   const modal = document.getElementById('selfResetModal');
   const panel = document.getElementById('selfResetModalPanel');
@@ -2023,6 +2329,9 @@ function closeSelfResetModal() {
   }, 200);
 }
 
+// DEFENSE NOTE [110] handleSelfPasswordReset
+// Purpose: Handles self password reset. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function handleSelfPasswordReset() {
   const emailInput = document.getElementById('resetEmail');
   const currentPasswordInput = document.getElementById('resetCurrentPassword');
@@ -2066,6 +2375,9 @@ async function handleSelfPasswordReset() {
   }
 }
 
+// DEFENSE NOTE [111] handleForgotPassword
+// Purpose: Handles forgot password. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function handleForgotPassword() {
   const emailInput = document.getElementById('loginEmail');
   const email = emailInput ? emailInput.value.trim() : '';
@@ -2081,6 +2393,9 @@ async function handleForgotPassword() {
 
 const has_user_not_found = (err) => String((err && err.code) || '').includes('user-not-found');
 
+// DEFENSE NOTE [112] sendResetLink
+// Purpose: Sends reset link. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function sendResetLink(email) {
   try {
     await auth.sendPasswordResetEmail(email);
@@ -2102,6 +2417,9 @@ async function sendResetLink(email) {
 const BROWSER_SESSION_KEY = 'iteBrowserSession';
 let routedUid = ''; // the account this tab is currently showing
 
+// DEFENSE NOTE [113] readBrowserSession
+// Purpose: Reads browser session. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function readBrowserSession() {
   try {
     const raw = localStorage.getItem(BROWSER_SESSION_KEY);
@@ -2110,20 +2428,32 @@ function readBrowserSession() {
   } catch (e) { return null; } // storage blocked: behaves like one session per tab
 }
 
+// DEFENSE NOTE [114] writeBrowserSession
+// Purpose: Processes browser session. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function writeBrowserSession(uid, sid) {
   try { localStorage.setItem(BROWSER_SESSION_KEY, JSON.stringify({ uid, sid, ts: Date.now() })); } catch (e) { /* storage blocked */ }
 }
 
+// DEFENSE NOTE [115] clearBrowserSession
+// Purpose: Clears browser session. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function clearBrowserSession() {
   try { localStorage.removeItem(BROWSER_SESSION_KEY); } catch (e) { /* storage blocked */ }
 }
 
+// DEFENSE NOTE [116] newSessionId
+// Purpose: Processes session id. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function newSessionId() {
   return 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
 }
 
 // Reuses this browser's session for the same account (reload, extra tab); a fresh login claims the account.
 // Resolves once the claim is written, so the guard is attached only after it lands.
+// DEFENSE NOTE [117] establishBrowserSession
+// Purpose: Processes browser session. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function establishBrowserSession(uid, freshLogin) {
   const stored = readBrowserSession();
   if (!freshLogin && stored && stored.uid === uid) {
@@ -2140,12 +2470,18 @@ function establishBrowserSession(uid, freshLogin) {
   });
 }
 
+// DEFENSE NOTE [118] signOutThisTab
+// Purpose: Processes out this tab. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function signOutThisTab() {
   routedUid = '';
   clearBrowserSession();
   return auth.signOut();
 }
 
+// DEFENSE NOTE [119] reloadPage
+// Purpose: Processes page. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function reloadPage() { window.location.reload(); }
 
 // Another tab of this browser signed in as a DIFFERENT account: reload so this tab shows the right one
@@ -2156,6 +2492,9 @@ window.addEventListener('storage', (e) => {
   if (v && v.uid && v.uid !== routedUid) reloadPage();
 });
 
+// DEFENSE NOTE [120] setupSingleSessionGuard
+// Purpose: Initializes single session guard. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setupSingleSessionGuard(uid) {
   detachSingleSessionGuard();
   if (!uid) return;
@@ -2175,6 +2514,9 @@ function setupSingleSessionGuard(uid) {
   );
 }
 
+// DEFENSE NOTE [121] detachSingleSessionGuard
+// Purpose: Processes single session guard. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function detachSingleSessionGuard() {
   if (typeof singleSessionUnsubscribe === 'function') {
     singleSessionUnsubscribe();
@@ -2186,6 +2528,9 @@ function detachSingleSessionGuard() {
 // until Firebase has verified the persisted session and the role check is done.
 let authStateResolved = false;
 
+// DEFENSE NOTE [122] showAuthLoadingGate
+// Purpose: Displays auth loading gate. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function showAuthLoadingGate() {
   const authContainer = document.getElementById('authContainer');
   const mainDashboard = document.getElementById('mainDashboard');
@@ -2207,6 +2552,9 @@ setTimeout(() => {
   if (authContainer) authContainer.classList.remove('hidden');
 }, 8000);
 
+// DEFENSE NOTE [123] handleAuthStateChange
+// Purpose: Handles auth state change. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function handleAuthStateChange(user) {
   authStateResolved = true;
   const authContainer = document.getElementById('authContainer');
@@ -2299,6 +2647,9 @@ auth.onAuthStateChanged(handleAuthStateChange);
 
 // Turns Firebase auth errors (including raw JSON like INVALID_LOGIN_CREDENTIALS) into short, readable messages.
 // Wrong password and unknown email deliberately share one message so the form never reveals which emails exist.
+// DEFENSE NOTE [124] friendlyAuthError
+// Purpose: Processes auth error. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function friendlyAuthError(err) {
   const code = String((err && err.code) || '').toLowerCase();
   const raw = String((err && err.message) || '');
@@ -2321,6 +2672,9 @@ function friendlyAuthError(err) {
   return 'Something went wrong. Please try again.';
 }
 
+// DEFENSE NOTE [125] handleLogin
+// Purpose: Authenticates the user and proceeds through role-aware routing; the role must be verified from the account record, not chosen in the UI.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function handleLogin() {
   const emailInput = document.getElementById('loginEmail');
   const passwordInput = document.getElementById('loginPassword');
@@ -2356,9 +2710,18 @@ async function handleLogin() {
 const STUDENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{1,39}$/;
 const STUDENT_ID_FORMAT_HINT = 'Use letters, numbers, dashes, dots or underscores only (2 to 40 characters, no spaces).';
 
+// DEFENSE NOTE [126] isValidStudentId
+// Purpose: Determines whether valid student id. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function isValidStudentId(id) { return STUDENT_ID_PATTERN.test(String(id || '')); }
+// DEFENSE NOTE [127] studentIdKey
+// Purpose: Processes id key. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function studentIdKey(id) { return String(id || '').trim().toUpperCase(); }
 
+// DEFENSE NOTE [128] makeStudentIdTakenError
+// Purpose: Processes student id taken error. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function makeStudentIdTakenError(studentId) {
   const e = new Error(`Student ID ${studentId} is already registered`);
   e.code = 'app/student-id-taken';
@@ -2366,6 +2729,9 @@ function makeStudentIdTakenError(studentId) {
 }
 
 // Small modal used for messages that must not disappear on their own (toasts fade after a few seconds)
+// DEFENSE NOTE [129] showInfoDialog
+// Purpose: Displays info dialog. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function showInfoDialog(title, message) {
   const modal = document.getElementById('appDialogModal');
   if (!modal) { alert(`${title}\n\n${message}`); return; }
@@ -2376,6 +2742,9 @@ function showInfoDialog(title, message) {
   if (panel) requestAnimationFrame(() => panel.classList.remove('opacity-0', 'scale-95'));
 }
 
+// DEFENSE NOTE [130] closeInfoDialog
+// Purpose: Closes info dialog. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function closeInfoDialog() {
   const modal = document.getElementById('appDialogModal');
   const panel = document.getElementById('appDialogPanel');
@@ -2383,6 +2752,9 @@ function closeInfoDialog() {
   if (modal) modal.classList.add('hidden');
 }
 
+// DEFENSE NOTE [131] handleStudentRegister
+// Purpose: Registers a student account and required profile/Student ID claim data; duplicate ID and failure handling are important defense topics.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function handleStudentRegister() {
   if (registrationInProgress) return; // double-click guard
   const fullName = document.getElementById('regFullName').value.trim();
@@ -2455,6 +2827,9 @@ async function handleStudentRegister() {
   }
 }
 
+// DEFENSE NOTE [132] routeUserRole
+// Purpose: Displays the correct Admin, Instructor, or Student workspace based on the authenticated account role.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function routeUserRole(role, userData) {
   currentUserRole = role;
   const adminView = document.getElementById('adminView');
@@ -2508,6 +2883,9 @@ function routeUserRole(role, userData) {
 // INSTRUCTOR WORKSPACE & FORMULA CONFIGURATOR
 // ------------------------------------------------------------------
 
+// DEFENSE NOTE [133] saveInstructorGradingFormula
+// Purpose: Persists instructor grading formula. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function saveInstructorGradingFormula() {
   if (!activeSubjectCode) return alert("Select an active subject first.");
   const f = readTermFormulaFromForm();
@@ -2536,6 +2914,9 @@ async function saveInstructorGradingFormula() {
 const CLASS_CARD_ACTIVE = 'relative p-4 rounded-xl border border-emerald-500/50 bg-emerald-500/5 hover:bg-emerald-500/10 cursor-pointer transition-all space-y-1';
 const CLASS_CARD_INACTIVE = 'relative p-4 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-800 cursor-pointer transition-all space-y-1';
 
+// DEFENSE NOTE [134] setClassCardActive
+// Purpose: Sets class card active. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setClassCardActive(card, isActive) {
   if (!card) return;
   card.className = isActive ? CLASS_CARD_ACTIVE : CLASS_CARD_INACTIVE;
@@ -2543,6 +2924,9 @@ function setClassCardActive(card, isActive) {
   if (dot) dot.classList.toggle('hidden', !isActive);
 }
 
+// DEFENSE NOTE [135] updateClassHeader
+// Purpose: Updates class header. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function updateClassHeader() {
   if (!activeSubjectCode) return;
   const titleEl = document.getElementById('currentClassTitle');
@@ -2553,6 +2937,9 @@ function updateClassHeader() {
   }
 }
 
+// DEFENSE NOTE [136] setFacultySyncState
+// Purpose: Sets faculty sync state. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setFacultySyncState(state) {
   const dot = document.getElementById('facultySyncDot');
   const text = document.getElementById('facultySyncText');
@@ -2566,6 +2953,9 @@ function setFacultySyncState(state) {
   if (text) text.textContent = config.text;
 }
 
+// DEFENSE NOTE [137] loadInstructorAssignedSubjects
+// Purpose: Retrieves and presents instructor assigned subjects. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function loadInstructorAssignedSubjects() {
   const container = document.getElementById('assignedClassesList');
   if (!container) return;
@@ -2662,6 +3052,9 @@ async function loadInstructorAssignedSubjects() {
   }
 }
 
+// DEFENSE NOTE [138] selectSubject
+// Purpose: Selects subject. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function selectSubject(code, title, section = 'ALL', cardElement = null) {
   activeSubjectCode = code;
   activeSubjectTitle = title;
@@ -2745,9 +3138,18 @@ const DEFAULT_TERM_FORMULA = { lectureWeight: 60, labWeight: 40, weights: { att:
 let activeTermFormula = JSON.parse(JSON.stringify(DEFAULT_TERM_FORMULA));
 let collapsedCategories = new Set(); // categories whose item columns are folded away (view state only)
 
+// DEFENSE NOTE [139] categoryOfKey
+// Purpose: Processes of key. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function categoryOfKey(key) { const m = COMPONENT_KEY_RE.exec(String(key || '')); return m ? m[2].toLowerCase() : null; }
+// DEFENSE NOTE [140] categoryLabelOf
+// Purpose: Processes label of. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function categoryLabelOf(key) { const c = COLUMN_CATEGORIES.find((x) => x.key === categoryOfKey(key)); return c ? c.label : String(key); }
 
+// DEFENSE NOTE [141] normalizeTermFormula
+// Purpose: Normalizes term formula. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function normalizeTermFormula(raw) {
   const d = DEFAULT_TERM_FORMULA;
   const r = raw && typeof raw === 'object' ? raw : {};
@@ -2757,6 +3159,9 @@ function normalizeTermFormula(raw) {
   return { lectureWeight: num(r.lectureWeight, d.lectureWeight), labWeight: num(r.labWeight, d.labWeight), weights };
 }
 
+// DEFENSE NOTE [142] validateTermFormula
+// Purpose: Checks term formula. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function validateTermFormula(f) {
   if (Math.abs(f.lectureWeight + f.labWeight - 100) > 0.001) return `Lecture + Laboratory must total 100% (now ${f.lectureWeight + f.labWeight}%).`;
   for (const g of Object.keys(GRADE_GROUPS)) {
@@ -2768,6 +3173,9 @@ function validateTermFormula(f) {
 
 // Computes one student's term grade from the SAVED columns of that period (columns that only exist because of an
 // Excel import have no defined maximum, so they are shown but never counted).
+// DEFENSE NOTE [143] computeTermBreakdown
+// Purpose: Calculates term breakdown. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function computeTermBreakdown(row, periodName, formula = activeTermFormula) {
   const cols = getPeriodColumns(periodName).filter((c) => !c.auto);
   const byCat = {};
@@ -2799,6 +3207,9 @@ function computeTermBreakdown(row, periodName, formula = activeTermFormula) {
 }
 
 // Writes the computed term grades into the row. Released rows are never touched (they are locked).
+// DEFENSE NOTE [144] recomputeRowTerms
+// Purpose: Processes row terms. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function recomputeRowTerms(row) {
   if (!row || row.isReleased) return;
   if (!row.__base) row.__base = {};
@@ -2816,6 +3227,9 @@ function recomputeRowTerms(row) {
     }
   });
 }
+// DEFENSE NOTE [145] recomputeAllRows
+// Purpose: Processes all rows. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function recomputeAllRows() { parsedGradeData.forEach(recomputeRowTerms); }
 
 let activePeriod = 'prelim';       // 'prelim' | 'midterm' | 'finals' | 'all' (= Summary)
@@ -2823,12 +3237,21 @@ let assessmentColumnsStore = {};   // storeKey -> [{ key, label, max }]
 let columnsDirty = false;
 let columnManagerOpen = false;
 
+// DEFENSE NOTE [146] semesterCode
+// Purpose: Processes code. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function semesterCode(sem) { return normalizeSemester(sem) === '2nd Semester' ? '2S' : '1S'; }
 
+// DEFENSE NOTE [147] columnStoreKey
+// Purpose: Processes store key. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function columnStoreKey(periodName) {
   return `${CURRENT_SCHOOL_YEAR}_${activeInstructorSectionFilter}_${semesterCode(activeSemester)}_${periodName}`;
 }
 
+// DEFENSE NOTE [148] autoColumnLabel
+// Purpose: Processes column label. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function autoColumnLabel(key) {
   const m = COMPONENT_KEY_RE.exec(key);
   if (!m) return key;
@@ -2837,6 +3260,9 @@ function autoColumnLabel(key) {
   return `${cat ? cat.label : m[2]}${num}`;
 }
 
+// DEFENSE NOTE [149] componentOrderValue
+// Purpose: Processes order value. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function componentOrderValue(key) {
   const m = COMPONENT_KEY_RE.exec(key);
   if (!m) return [99, 0];
@@ -2844,6 +3270,9 @@ function componentOrderValue(key) {
 }
 
 // Saved columns first (in saved order), then columns that exist on the rows (e.g. from an Excel import) but have no definition yet
+// DEFENSE NOTE [150] getPeriodColumns
+// Purpose: Returns period columns. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function getPeriodColumns(periodName) {
   const period = PERIODS[periodName];
   if (!period) return [];
@@ -2865,10 +3294,16 @@ function getPeriodColumns(periodName) {
   return saved.concat(extra);
 }
 
+// DEFENSE NOTE [151] allKnownColumns
+// Purpose: Processes known columns. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function allKnownColumns() {
   return Object.keys(PERIODS).reduce((acc, p) => acc.concat(getPeriodColumns(p)), []);
 }
 
+// DEFENSE NOTE [152] nextColumnKey
+// Purpose: Processes column key. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function nextColumnKey(periodName, categoryKey) {
   const period = PERIODS[periodName];
   let maxNum = 0;
@@ -2879,15 +3314,24 @@ function nextColumnKey(periodName, categoryKey) {
   return `${period.code}_${categoryKey}${maxNum + 1}`;
 }
 
+// DEFENSE NOTE [153] columnHasScores
+// Purpose: Processes has scores. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function columnHasScores(key) {
   return parsedGradeData.some((row) => toFiniteOrNull(row[key]) !== null);
 }
 
+// DEFENSE NOTE [154] columnsAllLocked
+// Purpose: Processes all locked. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function columnsAllLocked() {
   return parsedGradeData.length > 0 && parsedGradeData.every((r) => r.isReleased);
 }
 
 // Applies one change to the active period's column list. fn gets a plain copy and returns the new list, or null to reject.
+// DEFENSE NOTE [155] mutateColumns
+// Purpose: Processes columns. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function mutateColumns(periodName, fn) {
   if (!PERIODS[periodName]) return;
   if (!activeSubjectCode) return showToast('Select an active class first.', 'error');
@@ -2901,6 +3345,9 @@ function mutateColumns(periodName, fn) {
   renderLiveClassRecord();
 }
 
+// DEFENSE NOTE [156] addAssessmentColumn
+// Purpose: Processes assessment column. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function addAssessmentColumn() {
   const val = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
   const category = val('colAddCategory') || 'q';
@@ -2917,12 +3364,18 @@ function addAssessmentColumn() {
   if (labelEl) labelEl.value = '';
 }
 
+// DEFENSE NOTE [157] renameColumn
+// Purpose: Processes column. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renameColumn(key, value) {
   const label = String(value || '').trim();
   if (!label || label.length > 40) { showToast('Column name must be 1 to 40 characters.', 'error'); renderColumnManager(); return; }
   mutateColumns(activePeriod, (cols) => { const c = cols.find((x) => x.key === key); if (c) c.label = label; return cols; });
 }
 
+// DEFENSE NOTE [158] setColumnMax
+// Purpose: Sets column max. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setColumnMax(key, value) {
   const max = parseFloat(value);
   if (!Number.isFinite(max) || max <= 0 || max > 1000) { showToast('Maximum points must be a number from 1 to 1000.', 'error'); renderColumnManager(); return; }
@@ -2931,6 +3384,9 @@ function setColumnMax(key, value) {
   mutateColumns(activePeriod, (cols) => { const c = cols.find((x) => x.key === key); if (c) c.max = max; return cols; });
 }
 
+// DEFENSE NOTE [159] moveColumn
+// Purpose: Processes column. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function moveColumn(key, dir) {
   mutateColumns(activePeriod, (cols) => {
     const i = cols.findIndex((x) => x.key === key);
@@ -2941,12 +3397,18 @@ function moveColumn(key, dir) {
   });
 }
 
+// DEFENSE NOTE [160] removeColumn
+// Purpose: Removes column. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function removeColumn(key) {
   if (columnHasScores(key)) { showToast('This column already contains scores, so it cannot be removed.', 'error'); return; }
   mutateColumns(activePeriod, (cols) => cols.filter((x) => x.key !== key));
 }
 
 // Saves the column definitions. Called by the Save columns button and automatically before grades are saved.
+// DEFENSE NOTE [161] persistColumns
+// Purpose: Processes columns. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function persistColumns(silent) {
   if (!activeSubjectCode || !currentUserId) return;
   await db.collection('instructorFormulas').doc(`${currentUserId}_${activeSubjectCode}`).set({
@@ -2962,23 +3424,35 @@ async function persistColumns(silent) {
   }
 }
 
+// DEFENSE NOTE [162] saveColumnsClick
+// Purpose: Persists columns click. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function saveColumnsClick() {
   try { await persistColumns(false); }
   catch (err) { alert('Could not save the columns: ' + (err.message || err)); }
 }
 
 // Highest allowed score per column key, saved with every grade so the Assessment Breakdown can show "score / max"
+// DEFENSE NOTE [163] buildMaxScores
+// Purpose: Constructs max scores. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function buildMaxScores() {
   const out = {};
   allKnownColumns().forEach((c) => { out[c.key] = c.max; });
   return out;
 }
 
+// DEFENSE NOTE [164] toggleColumnManager
+// Purpose: Toggles column manager. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function toggleColumnManager() {
   columnManagerOpen = !columnManagerOpen;
   renderColumnManager();
 }
 
+// DEFENSE NOTE [165] renderColumnManager
+// Purpose: Builds or refreshes the visible column manager. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderColumnManager() {
   const box = document.getElementById('columnManagerBox');
   if (!box) return;
@@ -3018,6 +3492,9 @@ function renderColumnManager() {
     </div>`;
 }
 
+// DEFENSE NOTE [166] updatePeriodTabsUI
+// Purpose: Updates period tabs ui. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function updatePeriodTabsUI() {
   const ACTIVE = "px-3.5 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-[11px] font-extrabold transition-all";
   const INACTIVE = "px-3.5 py-1.5 rounded-lg text-slate-400 hover:text-white text-[11px] font-bold transition-all";
@@ -3030,6 +3507,9 @@ function updatePeriodTabsUI() {
 }
 
 // Switching tabs only changes the VIEW of the same in-memory rows: it never writes or clears another period's grades.
+// DEFENSE NOTE [167] setPeriod
+// Purpose: Sets period. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setPeriod(name) {
   if (name !== 'all' && !PERIODS[name]) return;
   activePeriod = name;
@@ -3046,6 +3526,9 @@ const LIVE_INPUT_CLASS = "w-16 px-2 py-1.5 rounded-md bg-slate-950 border border
 const GRID_HEAD_ROW_CLASS = "bg-slate-950/50 border-b border-slate-800 text-[10px] font-extrabold uppercase tracking-widest text-slate-500";
 const GRID_TH = "py-3 px-4 whitespace-nowrap";
 
+// DEFENSE NOTE [168] emptyLiveRow
+// Purpose: Processes live row. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function emptyLiveRow(messageHtml) {
   return `
     <tr>
@@ -3054,12 +3537,18 @@ function emptyLiveRow(messageHtml) {
   `;
 }
 
+// DEFENSE NOTE [169] liveRowStateLabel
+// Purpose: Processes row state label. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function liveRowStateLabel(row) {
   if (row.isReleased) return 'Released \u{1F512} locked';
   if (row.__edited || row.__staged) return 'Unsaved';
   return 'Draft';
 }
 
+// DEFENSE NOTE [170] liveStandingHtml
+// Purpose: Processes standing html. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function liveStandingHtml(row, stats) {
   if (isNotGradedRow(row)) {
     return `<span class="inline-flex items-center justify-center px-2.5 py-1 rounded-md text-[10px] font-extrabold uppercase tracking-wider leading-none bg-slate-800 text-slate-400 border border-slate-700">NOT GRADED</span>`;
@@ -3074,6 +3563,9 @@ function liveStandingHtml(row, stats) {
 }
 
 // Groups the active period's columns as LECTURE / LABORATORY > category > item columns
+// DEFENSE NOTE [171] periodLayout
+// Purpose: Processes layout. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function periodLayout(periodName) {
   const cols = getPeriodColumns(periodName);
   const groups = [];
@@ -3088,12 +3580,18 @@ function periodLayout(periodName) {
   return groups;
 }
 
+// DEFENSE NOTE [172] toggleCategory
+// Purpose: Toggles category. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function toggleCategory(key) {
   if (collapsedCategories.has(key)) collapsedCategories.delete(key);
   else collapsedCategories.add(key);
   renderLiveClassRecord();
 }
 
+// DEFENSE NOTE [173] gridHeadHtml
+// Purpose: Processes head html. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function gridHeadHtml(periodName) {
   const th = (t) => `<th class="${GRID_TH}">${t}</th>`;
   if (!PERIODS[periodName]) {
@@ -3129,6 +3627,9 @@ function gridHeadHtml(periodName) {
   return tr(row1) + tr(row2) + tr(row3);
 }
 
+// DEFENSE NOTE [174] renderLiveClassRecord
+// Purpose: Builds or refreshes the visible live class record. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderLiveClassRecord() {
   const tbody = document.getElementById('previewBody');
   if (!tbody) return;
@@ -3220,6 +3721,9 @@ function renderLiveClassRecord() {
   tbody.appendChild(fragment);
 }
 
+// DEFENSE NOTE [175] loadInstructorGradesFromFirestore
+// Purpose: Retrieves and presents instructor grades from firestore. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function loadInstructorGradesFromFirestore(subjectCode, section = activeInstructorSectionFilter) {
   const tbody = document.getElementById('previewBody');
   if (!tbody) return;
@@ -3344,6 +3848,9 @@ async function loadInstructorGradesFromFirestore(subjectCode, section = activeIn
 // ANALYTICS & CHARTS ENGINE
 // ------------------------------------------------------------------
 
+// DEFENSE NOTE [176] destroyChartSafely
+// Purpose: Processes chart safely. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function destroyChartSafely(chartInstance) {
   if (chartInstance) {
     try {
@@ -3355,6 +3862,9 @@ function destroyChartSafely(chartInstance) {
   return null;
 }
 
+// DEFENSE NOTE [177] renderInstructorAnalytics
+// Purpose: Builds or refreshes the visible instructor analytics. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderInstructorAnalytics(grades) {
   grades = (grades || []).filter((r) => !isNotGradedRow(r));
   const gradeCanvas = document.getElementById('instructorGradeDistributionChart');
@@ -3426,6 +3936,9 @@ function renderInstructorAnalytics(grades) {
   });
 }
 
+// DEFENSE NOTE [178] renderAdminAnalytics
+// Purpose: Builds or refreshes the visible admin analytics. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderAdminAnalytics(allReleasedGrades) {
   const gradeCanvas = document.getElementById('adminGradeDistributionChart');
   const passFailCanvas = document.getElementById('adminPassFailChart');
@@ -3500,6 +4013,9 @@ function renderAdminAnalytics(allReleasedGrades) {
 // EXCEL PARSER (SheetJS)
 // ------------------------------------------------------------------
 
+// DEFENSE NOTE [179] processExcel
+// Purpose: Processes excel. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function processExcel() {
   const fileInput = document.getElementById('excelFile');
   if (!fileInput || !fileInput.files.length) return alert("Select an Excel file.");
@@ -3543,6 +4059,9 @@ function processExcel() {
 
 // Header detection shared by both parsers. Accepts "Names", "Name", "Student Name", "Full Name" ... and
 // "Student ID", "ID No.", "Student No." ... (the previous, narrower rules still work as a fallback).
+// DEFENSE NOTE [180] findNameColumn
+// Purpose: Processes name column. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function findNameColumn(headers) {
   const h = headers.map((x) => String(x || '').toLowerCase().trim());
   for (const e of ['student name', 'student names', 'full name', 'fullname', 'name', 'names', 'student', 'students']) {
@@ -3552,6 +4071,9 @@ function findNameColumn(headers) {
   return h.findIndex((x) => x.includes('student name') || x.includes('full name'));
 }
 
+// DEFENSE NOTE [181] findIdColumn
+// Purpose: Processes id column. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function findIdColumn(headers, legacyNo) {
   const h = headers.map((x) => String(x || '').toLowerCase().trim());
   for (const e of ['student id', 'student id no', 'student id no.', 'student no', 'student no.', 'student number', 'id', 'id no', 'id no.', 'idno', 'idno.', 'id number']) {
@@ -3563,6 +4085,9 @@ function findIdColumn(headers, legacyNo) {
 }
 
 // Reads "SUBJECT: COMP 1" and "COURSE/YEAR: BSIT 1A" style lines from the top of the summary sheet
+// DEFENSE NOTE [182] detectSheetContext
+// Purpose: Processes sheet context. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function detectSheetContext(matrix) {
   const found = {};
   (matrix || []).slice(0, 12).forEach((row) => row.forEach((cell) => {
@@ -3574,6 +4099,9 @@ function detectSheetContext(matrix) {
   return found;
 }
 
+// DEFENSE NOTE [183] processMultiTabExcel
+// Purpose: Processes multi tab excel. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function processMultiTabExcel(workbook) {
   const summarySheetName = workbook.SheetNames.find(s => s.toUpperCase().includes("FINAL GRADE")) ||
                            workbook.SheetNames.find(s => s.toUpperCase().includes("AVERAGE")) ||
@@ -3640,6 +4168,9 @@ function processMultiTabExcel(workbook) {
     : `No student rows were found (app build ${APP_BUILD}). Check that the sheet has a "Names" or "Student Name" column and the Prelim / Midterm / Final headers, with students listed below them.`);
 }
 
+// DEFENSE NOTE [184] processSingleTabExcel
+// Purpose: Processes single tab excel. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function processSingleTabExcel(workbook) {
   let targetSheetName =
     workbook.SheetNames.find(s => s.toUpperCase().includes("FINAL GRADE")) ||
@@ -3714,6 +4245,9 @@ function processSingleTabExcel(workbook) {
 const NAME_SUFFIXES = new Set(['jr', 'sr', 'ii', 'iii', 'iv']);
 const NAME_PARTICLES = new Set(['de', 'del', 'dela', 'delas', 'delos', 'la', 'las', 'los', 'di', 'da', 'van', 'von', 'der', 'den']);
 
+// DEFENSE NOTE [185] nameTokens
+// Purpose: Processes tokens. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function nameTokens(fullName) {
   return String(fullName || '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // accents: Pena = Peña
@@ -3725,12 +4259,18 @@ function nameTokens(fullName) {
 }
 
 // Order-insensitive key: "Cruz, Juan M." and "Juan Cruz" give the same key
+// DEFENSE NOTE [186] nameMatchKey
+// Purpose: Processes match key. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function nameMatchKey(fullName, dropParticles = false) {
   return nameTokens(fullName).filter((t) => !dropParticles || !NAME_PARTICLES.has(t)).sort().join(' ');
 }
 
 // Roster students that fit a name. 0 = none, 1 = a safe match, 2+ = ambiguous (never auto-bound).
 // Exact key first; only when nothing fits is the looser "Dela Cruz = De la Cruz" key tried.
+// DEFENSE NOTE [187] findRosterMatchesByName
+// Purpose: Processes roster matches by name. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function findRosterMatchesByName(fullName, roster) {
   const k1 = nameMatchKey(fullName);
   if (!k1) return [];
@@ -3753,6 +4293,9 @@ function findRosterMatchesByName(fullName, roster) {
 }
 
 // Mutates rows (binds IDs / names) and returns report lines: level error | warn | info
+// DEFENSE NOTE [188] matchImportedRows
+// Purpose: Processes imported rows. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function matchImportedRows(rows, roster) {
   const issues = [];
   if (!roster || !roster.length) return issues; // roster not loaded: nothing to match against
@@ -3796,6 +4339,9 @@ function matchImportedRows(rows, roster) {
   return issues;
 }
 
+// DEFENSE NOTE [189] validateImportedRows
+// Purpose: Checks imported rows. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function validateImportedRows(extraIssues = []) {
   const issues = extraIssues.slice();
   const seen = new Map();
@@ -3823,11 +4369,17 @@ function validateImportedRows(extraIssues = []) {
   renderImportReport(issues);
 }
 
+// DEFENSE NOTE [190] dismissImportReport
+// Purpose: Processes import report. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function dismissImportReport() {
   const el = document.getElementById('importReport');
   if (el) { el.classList.add('hidden'); el.innerHTML = ''; }
 }
 
+// DEFENSE NOTE [191] renderImportReport
+// Purpose: Builds or refreshes the visible import report. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderImportReport(issues) {
   const el = document.getElementById('importReport');
   if (!el) return;
@@ -3848,6 +4400,9 @@ function renderImportReport(issues) {
     ${issues.length > 12 ? `<div class="text-slate-500">+ ${issues.length - 12} more</div>` : ''}`;
 }
 
+// DEFENSE NOTE [192] renderParsedGradesToTable
+// Purpose: Builds or refreshes the visible parsed grades to table. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderParsedGradesToTable() {
   parsedGradeData.forEach((row) => { row.__staged = true; });
   const matchIssues = matchImportedRows(parsedGradeData, rosterData);
@@ -3897,6 +4452,9 @@ function renderParsedGradesToTable() {
   renderLiveClassRecord();
 }
 
+// DEFENSE NOTE [193] buildRegisteredStudentIndex
+// Purpose: Constructs registered student index. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function buildRegisteredStudentIndex(subjectCode, rows = [], prefetchedEnroll = null) {
   const index = new Map();
   const knownIds = new Set();
@@ -3949,6 +4507,9 @@ async function buildRegisteredStudentIndex(subjectCode, rows = [], prefetchedEnr
   return index;
 }
 
+// DEFENSE NOTE [194] resolveEffectiveStudentId
+// Purpose: Processes effective student id. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function resolveEffectiveStudentId(row, subjectCode, registeredIndex, batch) {
   const isNameFallbackKey = row.studentId === normalizeNameKey(row.fullName);
   if (!isNameFallbackKey) return row.studentId;
@@ -3962,6 +4523,9 @@ function resolveEffectiveStudentId(row, subjectCode, registeredIndex, batch) {
 }
 
 // Shared reads for saving/releasing: ONE enrollments read, ONE grades read, targeted student lookups only if needed
+// DEFENSE NOTE [195] gatherGradeWriteContext
+// Purpose: Processes grade write context. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function gatherGradeWriteContext() {
   const [enrollSnap, existingSnap] = await Promise.all([
     db.collection('enrollments').where('subjectCode', '==', activeSubjectCode).get(),
@@ -3984,6 +4548,9 @@ async function gatherGradeWriteContext() {
 // so nothing is written or announced twice. Records are written in place (id = subject + student), never duplicated.
 let gradeCommitInFlight = false;
 
+// DEFENSE NOTE [196] setGradeButtonsBusy
+// Purpose: Sets grade buttons busy. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setGradeButtonsBusy(busy) {
   document.querySelectorAll('button[onclick="releaseGrades()"], button[onclick="saveDraftGrades()"]').forEach((b) => {
     b.disabled = busy;
@@ -3992,6 +4559,9 @@ function setGradeButtonsBusy(busy) {
   });
 }
 
+// DEFENSE NOTE [197] commitGrades
+// Purpose: Coordinates saving drafts or releasing official grades. Validates the active class and student records, respects permanent locks, and writes permitted grade records to Firestore. Release is an irreversible academic action; test with sample accounts.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function commitGrades(mode) {
   if (gradeCommitInFlight) { showToast('A save is already in progress. Please wait a moment.', 'info'); return; }
   gradeCommitInFlight = true;
@@ -4004,6 +4574,9 @@ async function commitGrades(mode) {
   }
 }
 
+// DEFENSE NOTE [198] commitGradesInner
+// Purpose: Processes grades inner. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function commitGradesInner(mode) {
   const release = mode === 'release';
   if (!activeSubjectCode) return alert("Select an active subject first.");
@@ -4063,7 +4636,7 @@ async function commitGradesInner(mode) {
       ? `\n\n${retakeCount} student(s) already have a record from an EARLIER school year (a retake). Their earlier record is kept as history and a new attempt for ${CURRENT_SCHOOL_YEAR} is created.`
       : '';
     const lockedNote = lockedSkipped.length ? `\n\n${lockedSkipped.length} row(s) are already released and locked; they are left untouched.` : '';
-    if (release && !confirm(`Release official grades for ${plan.length} student(s) in ${activeSubjectCode} [${activeInstructorSectionFilter}]?\n\nThis is PERMANENT: released grades can no longer be edited, overwritten, deleted or released again.\n\nStudents will be able to see these grades and will be notified.${retakeNote}${skippedNote}${lockedNote}`)) return;
+    if (release && !(await confirmOfficialGradeRelease({ count: plan.length, subject: activeSubjectCode, section: activeInstructorSectionFilter, schoolYear: CURRENT_SCHOOL_YEAR, semester: activeSemester, retakeCount, skippedCount: skipped.length, lockedCount: lockedSkipped.length }))) return;
 
     if (columnsDirty) await persistColumns(true); // column definitions travel with the grades
 
@@ -4145,10 +4718,16 @@ async function commitGradesInner(mode) {
   }
 }
 
+// DEFENSE NOTE [199] saveDraftGrades
+// Purpose: Persists draft grades. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function saveDraftGrades() {
   return commitGrades('draft');
 }
 
+// DEFENSE NOTE [200] releaseGrades
+// Purpose: Starts the official-grade-release pathway through commitGrades, reusing its validation and lock checks.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function releaseGrades() {
   return commitGrades('release');
 }
@@ -4157,6 +4736,9 @@ async function releaseGrades() {
 // ADMIN CONSOLE MANAGEMENT & ACTIVE ASSIGNMENTS
 // ------------------------------------------------------------------
 
+// DEFENSE NOTE [201] classifyAtRiskRecord
+// Purpose: Processes at risk record. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function classifyAtRiskRecord(g) {
   const finalsVal = g.finals !== undefined ? g.finals : g.final;
   const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
@@ -4175,6 +4757,9 @@ function classifyAtRiskRecord(g) {
   return null;
 }
 
+// DEFENSE NOTE [202] renderAdminKpis
+// Purpose: Builds or refreshes the visible admin kpis. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderAdminKpis({ facultyList, assignments, todayLogCount }) {
   const total = facultyList.length;
   const disabled = facultyList.filter((f) => f.status === 'disabled').length;
@@ -4207,6 +4792,9 @@ function renderAdminKpis({ facultyList, assignments, todayLogCount }) {
   if (logsSub) logsSub.textContent = 'Actions logged today';
 }
 
+// DEFENSE NOTE [203] renderFacultyRoster
+// Purpose: Builds or refreshes the visible faculty roster. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderFacultyRoster(facultyDocs, loadByUid) {
   const facultyTable = document.getElementById('facultyTableBody');
   const assignFacultySelect = document.getElementById('assignFacultySelect');
@@ -4266,6 +4854,9 @@ function renderFacultyRoster(facultyDocs, loadByUid) {
   if (assignFacultySelect && previouslySelected) assignFacultySelect.value = previouslySelected; // keep the choice after a refresh
 }
 
+// DEFENSE NOTE [204] renderAtRiskTracker
+// Purpose: Builds or refreshes the visible at risk tracker. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderAtRiskTracker(releasedGrades) {
   const atRiskTable = document.getElementById('atRiskTableBody');
   const badge = document.getElementById('atRiskBadge');
@@ -4328,6 +4919,9 @@ function renderAtRiskTracker(releasedGrades) {
 // ------------------------------------------------------------------
 // ADMIN EXPORT (CSV). Built in the browser: no Cloud Functions, no paid tools. Each export reads its collection once.
 // ------------------------------------------------------------------
+// DEFENSE NOTE [205] csvEscape
+// Purpose: Processes escape. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function csvEscape(value) {
   if (value === null || value === undefined) return '';
   let s = typeof value === 'number' ? String(value) : String(value);
@@ -4336,12 +4930,18 @@ function csvEscape(value) {
   return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
+// DEFENSE NOTE [206] buildCsv
+// Purpose: Constructs csv. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function buildCsv(columns, rows) {
   const head = columns.map((c) => csvEscape(c.label)).join(',');
   const body = rows.map((r) => columns.map((c) => csvEscape(c.get ? c.get(r) : r[c.key])).join(','));
   return '\ufeff' + [head, ...body].join('\r\n') + '\r\n'; // BOM so Excel reads UTF-8 names correctly
 }
 
+// DEFENSE NOTE [207] downloadCsv
+// Purpose: Processes csv. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function downloadCsv(filename, text) {
   const blob = new Blob([text], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -4351,13 +4951,22 @@ function downloadCsv(filename, text) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// DEFENSE NOTE [208] isoOf
+// Purpose: Processes of. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function isoOf(ts) {
   if (ts && typeof ts.toDate === 'function') return ts.toDate().toISOString();
   return '';
 }
 
+// DEFENSE NOTE [209] exportStamp
+// Purpose: Exports stamp. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function exportStamp() { return new Date().toISOString().slice(0, 10); }
 
+// DEFENSE NOTE [210] exportGradesCsv
+// Purpose: Exports grades csv. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function exportGradesCsv() {
   const yearFilter = String((document.getElementById('exportSchoolYear') || {}).value || '').trim();
   try {
@@ -4389,6 +4998,9 @@ async function exportGradesCsv() {
   } catch (err) { setExportStatus('Could not export grades: ' + (err.message || err)); }
 }
 
+// DEFENSE NOTE [211] exportEnrollmentsCsv
+// Purpose: Exports enrollments csv. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function exportEnrollmentsCsv() {
   try {
     const snap = await db.collection('enrollments').get();
@@ -4407,6 +5019,9 @@ async function exportEnrollmentsCsv() {
   } catch (err) { setExportStatus('Could not export enrollments: ' + (err.message || err)); }
 }
 
+// DEFENSE NOTE [212] exportStudentsCsv
+// Purpose: Exports students csv. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function exportStudentsCsv() {
   try {
     const snap = await db.collection('users').where('role', '==', 'student').get();
@@ -4426,12 +5041,18 @@ async function exportStudentsCsv() {
   } catch (err) { setExportStatus('Could not export students: ' + (err.message || err)); }
 }
 
+// DEFENSE NOTE [213] setExportStatus
+// Purpose: Sets export status. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setExportStatus(text) {
   const el = document.getElementById('exportStatus');
   if (el) el.textContent = text;
 }
 
 // Grades of students who dropped the subject stay stored but do not count in at-risk lists or analytics
+// DEFENSE NOTE [214] excludeDroppedGrades
+// Purpose: Processes dropped grades. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function excludeDroppedGrades(grades, enrollments) {
   const norm = (c) => String(c || '').trim().toUpperCase();
   const dropped = new Set();
@@ -4449,6 +5070,9 @@ function excludeDroppedGrades(grades, enrollments) {
   });
 }
 
+// DEFENSE NOTE [215] loadAdminDashboardData
+// Purpose: Retrieves and presents admin dashboard data. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function loadAdminDashboardData() {
   try {
     const startOfToday = new Date();
@@ -4547,6 +5171,9 @@ async function loadAdminDashboardData() {
   }
 }
 
+// DEFENSE NOTE [216] loadActiveAssignmentsList
+// Purpose: Retrieves and presents active assignments list. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function loadActiveAssignmentsList(pre) {
   const container = document.getElementById('activeAssignmentsContainer');
   if (!container) return;
@@ -4657,6 +5284,9 @@ async function loadActiveAssignmentsList(pre) {
   }
 }
 
+// DEFENSE NOTE [217] unassignSubjectFromFaculty
+// Purpose: Processes subject from faculty. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function unassignSubjectFromFaculty(assignmentDocId, subjectCode, facultyName) {
   if (!confirm(`Are you sure you want to unassign ${subjectCode} from ${facultyName}?`)) return;
 
@@ -4685,6 +5315,9 @@ async function unassignSubjectFromFaculty(assignmentDocId, subjectCode, facultyN
   }
 }
 
+// DEFENSE NOTE [218] migrateLegacyAssignmentIDs
+// Purpose: Processes legacy assignment ids. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function migrateLegacyAssignmentIDs() {
   if (!confirm("Run migration to upgrade legacy assignment document IDs to key-based format?")) return;
 
@@ -4714,6 +5347,9 @@ async function migrateLegacyAssignmentIDs() {
   }
 }
 
+// DEFENSE NOTE [219] toggleFacultyStatus
+// Purpose: Toggles faculty status. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function toggleFacultyStatus(uid, currentStatus) {
   const newStatus = currentStatus === 'disabled' ? 'active' : 'disabled';
   try {
@@ -4731,6 +5367,9 @@ async function toggleFacultyStatus(uid, currentStatus) {
 // the profile (name, title, email, role, status) and never the password.
 let facultyCreateInFlight = false;
 
+// DEFENSE NOTE [220] createFacultyAccount
+// Purpose: Creates faculty account. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function createFacultyAccount() {
   if (facultyCreateInFlight) return;
   const fullName = document.getElementById('adminFacultyName').value.trim();
@@ -4773,6 +5412,9 @@ async function createFacultyAccount() {
   }
 }
 
+// DEFENSE NOTE [221] addNewSubjectCode
+// Purpose: Processes new subject code. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function addNewSubjectCode() {
   const val = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
   const subjectCode = val('adminSubCode').trim().toUpperCase().replace(/\s+/g, ' ');
@@ -4826,12 +5468,18 @@ async function addNewSubjectCode() {
 }
 
 // Any section code is accepted (BSIT-1A, BSIT-2D, ALL, ...); only the format is checked, never a fixed list.
+// DEFENSE NOTE [222] normalizeSectionCode
+// Purpose: Normalizes section code. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function normalizeSectionCode(input) {
   const v = String(input || '').trim().toUpperCase().replace(/\s+/g, '-');
   return /^[A-Z0-9][A-Z0-9_-]{0,29}$/.test(v) ? v : null;
 }
 
 // subjectAccess/{facultyUid}_{subjectCode} lets Firestore rules authorize an instructor for ANY section of a subject
+// DEFENSE NOTE [223] ensureSubjectAccessMarker
+// Purpose: Processes subject access marker. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function ensureSubjectAccessMarker(facultyUid, subjectCode) {
   try {
     await db.collection('subjectAccess').doc(`${facultyUid}_${subjectCode}`).set({
@@ -4844,6 +5492,9 @@ async function ensureSubjectAccessMarker(facultyUid, subjectCode) {
   }
 }
 
+// DEFENSE NOTE [224] backfillSubjectAccessMarkers
+// Purpose: Processes subject access markers. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function backfillSubjectAccessMarkers(assignmentsSnap) {
   try {
     const have = new Set();
@@ -4877,16 +5528,25 @@ const assignSelection = new Map();    // subject code -> year-section text typed
 let assignInFlight = false;
 let assignItOnly = false;             // same IT-subjects-only idea as the prospectus modal filter
 
+// DEFENSE NOTE [225] setAssignableSubjects
+// Purpose: Sets assignable subjects. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setAssignableSubjects(list) {
   assignableSubjects = (list || []).slice().sort((a, b) => String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
   renderAssignSubjectList();
 }
 
+// DEFENSE NOTE [226] updateAssignSelectionCount
+// Purpose: Updates assign selection count. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function updateAssignSelectionCount() {
   const el = document.getElementById('assignSelectionCount');
   if (el) el.textContent = `${assignSelection.size} selected`;
 }
 
+// DEFENSE NOTE [227] renderAssignSubjectList
+// Purpose: Builds or refreshes the visible assign subject list. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderAssignSubjectList() {
   const box = document.getElementById('assignSubjectList');
   if (!box) return;
@@ -4917,6 +5577,9 @@ function renderAssignSubjectList() {
   updateAssignSelectionCount();
 }
 
+// DEFENSE NOTE [228] setAssignItFilter
+// Purpose: Sets assign it filter. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setAssignItFilter(mode) {
   assignItOnly = (mode === 'it');
   const btnAll = document.getElementById('assignBtnFilterAll');
@@ -4928,6 +5591,9 @@ function setAssignItFilter(mode) {
   renderAssignSubjectList();
 }
 
+// DEFENSE NOTE [229] toggleAssignSubject
+// Purpose: Toggles assign subject. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function toggleAssignSubject(input) {
   const code = input.dataset.code;
   const row = input.closest('[data-assign-row]');
@@ -4948,15 +5614,24 @@ function toggleAssignSubject(input) {
   updateAssignSelectionCount();
 }
 
+// DEFENSE NOTE [230] setAssignSection
+// Purpose: Sets assign section. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setAssignSection(input) {
   assignSelection.set(input.dataset.code, input.value);
 }
 
+// DEFENSE NOTE [231] clearAssignSelection
+// Purpose: Clears assign selection. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function clearAssignSelection() {
   assignSelection.clear();
   renderAssignSubjectList();
 }
 
+// DEFENSE NOTE [232] setAssignBusy
+// Purpose: Sets assign busy. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setAssignBusy(busy) {
   const btn = document.getElementById('assignSubjectsBtn');
   if (!btn) return;
@@ -4965,6 +5640,9 @@ function setAssignBusy(busy) {
   btn.classList.toggle('pointer-events-none', busy);
 }
 
+// DEFENSE NOTE [233] assignSubjectToFaculty
+// Purpose: Assigns subject to faculty. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function assignSubjectToFaculty() {
   if (assignInFlight) return;
   const facultySelect = document.getElementById('assignFacultySelect');
@@ -5042,6 +5720,9 @@ async function assignSubjectToFaculty() {
 // ADMIN CONSOLE MODALS & CURRICULUM PROSPECTUS ENGINE
 // ------------------------------------------------------------------
 
+// DEFENSE NOTE [234] openCreateFacultyModal
+// Purpose: Opens create faculty modal. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function openCreateFacultyModal() {
   const modal = document.getElementById('createFacultyModal');
   const panel = document.getElementById('createFacultyModalPanel');
@@ -5054,6 +5735,9 @@ function openCreateFacultyModal() {
   }
 }
 
+// DEFENSE NOTE [235] closeCreateFacultyModal
+// Purpose: Closes create faculty modal. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function closeCreateFacultyModal() {
   const modal = document.getElementById('createFacultyModal');
   const panel = document.getElementById('createFacultyModalPanel');
@@ -5076,6 +5760,9 @@ function closeCreateFacultyModal() {
 }
 
 // The Curriculum Prospectus modal now toggles subjects in the SAME multi-selection as the assignment list
+// DEFENSE NOTE [236] openAdminProspectusModal
+// Purpose: Opens admin prospectus modal. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function openAdminProspectusModal() {
   const modal = document.getElementById('adminProspectusModal');
   const panel = document.getElementById('adminProspectusModalPanel');
@@ -5183,6 +5870,9 @@ async function openAdminProspectusModal() {
   }
 }
 
+// DEFENSE NOTE [237] closeAdminProspectusModal
+// Purpose: Closes admin prospectus modal. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function closeAdminProspectusModal() {
   const modal = document.getElementById('adminProspectusModal');
   const panel = document.getElementById('adminProspectusModalPanel');
@@ -5196,6 +5886,9 @@ function closeAdminProspectusModal() {
   }
 }
 
+// DEFENSE NOTE [238] updateAdminFilterToggleUI
+// Purpose: Updates admin filter toggle ui. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function updateAdminFilterToggleUI() {
   const btnAll = document.getElementById('adminBtnFilterAll');
   const btnIT = document.getElementById('adminBtnFilterIT');
@@ -5207,17 +5900,26 @@ function updateAdminFilterToggleUI() {
   if (btnIT) btnIT.className = isAdminProspectusItOnly ? ACTIVE : INACTIVE;
 }
 
+// DEFENSE NOTE [239] toggleAdminProspectusFilter
+// Purpose: Toggles admin prospectus filter. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function toggleAdminProspectusFilter(mode) {
   isAdminProspectusItOnly = (mode === 'it');
   updateAdminFilterToggleUI();
   openAdminProspectusModal();
 }
 
+// DEFENSE NOTE [240] filterAdminProspectus
+// Purpose: Filters admin prospectus. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function filterAdminProspectus(filterType) {
   toggleAdminProspectusFilter(filterType === 'it' ? 'it' : 'all');
 }
 
 // Toggles one subject in the shared selection (used by the prospectus modal) and refreshes the assignment list behind it
+// DEFENSE NOTE [241] toggleAssignSubjectByCode
+// Purpose: Toggles assign subject by code. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function toggleAssignSubjectByCode(subjectCode, subjectName, isIt, repaint) {
   if (!assignableSubjects.some((s) => s.code === subjectCode)) assignableSubjects.push({ code: subjectCode, name: subjectName || '', it: !!isIt });
   if (assignSelection.has(subjectCode)) assignSelection.delete(subjectCode);
@@ -5233,6 +5935,9 @@ function toggleAssignSubjectByCode(subjectCode, subjectName, isIt, repaint) {
 const PROGRESSION_YEAR_NAMES = { 1: '1st Year', 2: '2nd Year', 3: '3rd Year', 4: '4th Year' };
 
 // IT (major) subject codes of every year/semester block of the prospectus: Map('2|1S' -> ['IT 201', ...])
+// DEFENSE NOTE [242] buildItBlocks
+// Purpose: Groups eligible IT curriculum subjects into progression blocks using catalog metadata.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function buildItBlocks(catalog) {
   const blocks = new Map();
   (catalog || []).forEach((s) => {
@@ -5255,6 +5960,9 @@ function buildItBlocks(catalog) {
  * Credited subjects are already part of passedSet. A block with no IT subjects in the catalogue stops the walk
  * (it is never treated as "nothing to pass"), so an unfinished prospectus cannot promote anybody by accident.
  */
+// DEFENSE NOTE [243] walkItProgression
+// Purpose: Determines curriculum progression from completed IT subject requirements and the student entry year.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function walkItProgression(blocks, passedSet, entryYear) {
   let year = Math.min(4, Math.max(1, parseInt(entryYear, 10) || 1));
   let sem = '1S';
@@ -5277,6 +5985,9 @@ function walkItProgression(blocks, passedSet, entryYear) {
  * non-overlapping slots:  badgeText (regularity + academic year), headline (where the student stands), subtext.
  * Standing comes from the IT subjects (see walkItProgression); units are informational only.
  */
+// DEFENSE NOTE [244] evaluateAcademicProgression
+// Purpose: Evaluates IT/ITE-only academic progression using curriculum subjects, released grade results, and credited subjects. General Education must not trigger the department-specific irregular classification.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap = {}, creditedCodes = currentStudentCredited) {
   const yearNames = PROGRESSION_YEAR_NAMES;
   const academicYearText = `Academic year ${CURRENT_SCHOOL_YEAR.replace('-', '–')}`;
@@ -5293,12 +6004,13 @@ function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap =
     if (!code) return;
     const finalsVal = g.finals !== undefined ? g.finals : g.final;
     const stats = computeGradeStats(g.prelim, g.midterm, finalsVal);
+    if (!subjectMap[code] || !isItSubject(subjectMap[code])) return;
     if (stats.isPassing) passedSet.add(code); else failedCodes.add(code);
   });
-  (creditedCodes || []).forEach((c) => { const code = String(c || '').toUpperCase().trim(); if (code) passedSet.add(code); });
+  (creditedCodes || []).forEach((c) => { const code = String(c || '').toUpperCase().trim(); if (code && subjectMap[code] && isItSubject(subjectMap[code])) passedSet.add(code); });
 
   let unitsCompleted = 0;
-  passedSet.forEach((code) => { unitsCompleted += subjectMap[code] ? Number(subjectMap[code].units) || 3 : 3; });
+  passedSet.forEach((code) => { const subject = subjectMap[code]; if (subject && isItSubject(subject)) unitsCompleted += Number(subject.units) || 0; });
 
   const blocks = buildItBlocks(Object.values(subjectMap));
   const walk = walkItProgression(blocks, passedSet, entryYearLevel);
@@ -5330,6 +6042,9 @@ function evaluateAcademicProgression(allGrades, entryYearLevel = 1, subjectMap =
   return build({ ...common, subtext, badgeText: `Regular • ${academicYearText}`, badgeClass: REGULAR_CLASS, subtextClass: 'text-emerald-400' });
 }
 
+// DEFENSE NOTE [245] renderYearLevelProgressionBanner
+// Purpose: Displays the year-level headline, academic standing, and progression badge derived from the evaluator.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderYearLevelProgressionBanner(allGrades, subjectMap = {}) {
   const banner = document.getElementById('studentProgressionBanner');
   const badge = document.getElementById('studentProgressionBadge');
@@ -5357,6 +6072,9 @@ function renderYearLevelProgressionBanner(allGrades, subjectMap = {}) {
 const STUDENT_DATA_TTL_MS = 5 * 60 * 1000;
 let studentDataCache = null;
 
+// DEFENSE NOTE [246] invalidateStudentData
+// Purpose: Processes student data. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function invalidateStudentData() {
   studentDataCache = null;
   swrClear('student:');
@@ -5365,16 +6083,25 @@ function invalidateStudentData() {
 const SWR_PREFIX = 'iteSWR:v2:';
 const SWR_TTL_MS = 30 * 60 * 1000;
 
+// DEFENSE NOTE [247] swrReplacer
+// Purpose: Processes replacer. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function swrReplacer(key, value) {
   if (value && typeof value === 'object' && typeof value.seconds === 'number' && typeof value.nanoseconds === 'number') {
     return { __ts: value.seconds * 1000 + Math.floor(value.nanoseconds / 1e6) };
   }
   return value;
 }
+// DEFENSE NOTE [248] swrReviver
+// Purpose: Processes reviver. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function swrReviver(key, value) {
   if (value && typeof value === 'object' && typeof value.__ts === 'number') return firebase.firestore.Timestamp.fromMillis(value.__ts);
   return value;
 }
+// DEFENSE NOTE [249] swrRead
+// Purpose: Processes read. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function swrRead(key) {
   try {
     const raw = sessionStorage.getItem(SWR_PREFIX + key);
@@ -5383,9 +6110,15 @@ function swrRead(key) {
     return obj && Date.now() - obj.ts < SWR_TTL_MS ? obj.data : null;
   } catch (e) { return null; }
 }
+// DEFENSE NOTE [250] swrWrite
+// Purpose: Processes write. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function swrWrite(key, data) {
   try { sessionStorage.setItem(SWR_PREFIX + key, JSON.stringify({ ts: Date.now(), data }, swrReplacer)); } catch (e) { /* storage full or unavailable */ }
 }
+// DEFENSE NOTE [251] swrClear
+// Purpose: Processes clear. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function swrClear(prefix) {
   try {
     Object.keys(sessionStorage).filter((k) => k.startsWith(SWR_PREFIX + (prefix || ''))).forEach((k) => sessionStorage.removeItem(k));
@@ -5393,6 +6126,9 @@ function swrClear(prefix) {
 }
 const swrSignature = (raw) => JSON.stringify(raw, swrReplacer);
 
+// DEFENSE NOTE [252] inflateStudentData
+// Purpose: Processes student data. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function inflateStudentData(raw) {
   const list = raw.subjects || [];
   return {
@@ -5404,11 +6140,17 @@ function inflateStudentData(raw) {
   };
 }
 
+// DEFENSE NOTE [253] refreshStudentViews
+// Purpose: Refreshes student views. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function refreshStudentViews() {
   loadStudentDashboard(currentStudentSchoolId, currentStudentFullName);
   loadAvailableSubjectsForStudent();
 }
 
+// DEFENSE NOTE [254] fetchStudentDataRaw
+// Purpose: Retrieves student data raw. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function fetchStudentDataRaw() {
   const uid = currentUserId;
   let studentId = String(currentStudentSchoolId || '').trim();
@@ -5443,6 +6185,9 @@ async function fetchStudentDataRaw() {
   return { subjects, grades: filterVisibleGrades(Array.from(gradeDocsMap.values()), uid, enrollments), enrollments, studentId, fullName };
 }
 
+// DEFENSE NOTE [255] getStudentData
+// Purpose: Returns student data. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function getStudentData() {
   const uid = currentUserId;
   if (studentDataCache && studentDataCache.uid === uid && Date.now() - studentDataCache.ts < STUDENT_DATA_TTL_MS) {
@@ -5477,6 +6222,9 @@ function getStudentData() {
   return promise;
 }
 
+// DEFENSE NOTE [256] computeStatusByCode
+// Purpose: Calculates status by code. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function computeStatusByCode(enrollments) {
   const statusByCode = {};
   enrollments.forEach((e) => {
@@ -5493,6 +6241,9 @@ function computeStatusByCode(enrollments) {
 
 const PROSPECTUS_SKELETON = Array.from({ length: 5 }, () => '<div class="h-14 rounded-lg bg-slate-800/50 animate-pulse"></div>').join('');
 
+// DEFENSE NOTE [257] loadStudentDashboard
+// Purpose: Fetches student data and updates the academic overview, GWA, enrollment units, and IT curriculum completion cards.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function loadStudentDashboard(studentId, fullName, userData = null) {
   const nameEl = document.getElementById('profileStudentName');
 
@@ -5537,7 +6288,7 @@ async function loadStudentDashboard(studentId, fullName, userData = null) {
       const data = doc.data();
       if (data.subjectCode) {
         subjectMap[data.subjectCode.toUpperCase().trim()] = data;
-        totalCurriculumUnits += Number(data.units) || 3;
+        if (isItSubject(data)) totalCurriculumUnits += Number(data.units) || 3;
       }
     });
 
@@ -5548,7 +6299,10 @@ async function loadStudentDashboard(studentId, fullName, userData = null) {
       const finalsValue = g.finals !== undefined ? g.finals : g.final;
       const stats = computeGradeStats(g.prelim, g.midterm, finalsValue);
       const codeKey = (g.classId || g.subjectCode || '').toUpperCase().trim();
-      const units = subjectMap[codeKey] ? Number(subjectMap[codeKey].units) || 3 : 3;
+      // Academic progression metrics are strictly IT/ITE-subject based.
+      // Unknown or General Education subjects are excluded, not guessed.
+      if (!subjectMap[codeKey] || !isItSubject(subjectMap[codeKey])) return;
+      const units = Number(subjectMap[codeKey].units) || 3;
 
       studentRecordsList.push({
         units,
@@ -5560,13 +6314,15 @@ async function loadStudentDashboard(studentId, fullName, userData = null) {
     const gradedPassed = new Set(matchedGrades.filter((g) => computeGradeStats(g.prelim, g.midterm, g.finals !== undefined ? g.finals : g.final).isPassing).map((g) => String(g.classId || g.subjectCode || '').toUpperCase().trim()));
     currentStudentCredited.forEach((code) => {
       if (gradedPassed.has(code)) return; // never count a subject twice
-      studentRecordsList.push({ units: subjectMap[code] ? Number(subjectMap[code].units) || 3 : 3, status: 'passed' });
+      if (!subjectMap[code] || !isItSubject(subjectMap[code])) return;
+      studentRecordsList.push({ units: Number(subjectMap[code].units) || 3, status: 'passed' });
     });
 
     if (sd.enrollments.length) {
       sd.enrollments.forEach((e) => {
         const codeKey = (e.subjectCode || '').toUpperCase().trim();
-        const units = subjectMap[codeKey] ? Number(subjectMap[codeKey].units) || 3 : 3;
+        if (!subjectMap[codeKey] || !isItSubject(subjectMap[codeKey])) return;
+        const units = Number(subjectMap[codeKey].units) || 3;
         if (e.status === 'approved' || e.status === 'pending' || e.status === 'pending_drop') {
           studentRecordsList.push({ units, status: 'enrolled' });
         }
@@ -5658,6 +6414,9 @@ const COMPONENT_CATEGORIES = [
 
 // Groups every recorded component score as { period: { category: [{key, num, value}] } }.
 // Empty / non-numeric values are skipped; a real 0 is kept.
+// DEFENSE NOTE [258] collectComponentEntries
+// Purpose: Collects component entries. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function collectComponentEntries(g) {
   const grouped = {};
   Object.keys(g || {}).forEach((key) => {
@@ -5683,6 +6442,9 @@ function collectComponentEntries(g) {
   return grouped;
 }
 
+// DEFENSE NOTE [259] formatComponentScore
+// Purpose: Formats component score. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function formatComponentScore(entry, categoryKey, maxScores) {
   const max = maxScores ? toFiniteOrNull(maxScores[entry.key]) : null;
   if (max !== null && max > 0) return `${entry.value} / ${max}`;
@@ -5695,6 +6457,9 @@ function formatComponentScore(entry, categoryKey, maxScores) {
 // ------------------------------------------------------------------
 const assessmentWeightsCache = new Map();
 
+// DEFENSE NOTE [260] fetchAssessmentWeights
+// Purpose: Retrieves assessment weights. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function fetchAssessmentWeights(subjectCode) {
   const key = String(subjectCode || '').trim();
   if (!key) return null;
@@ -5713,6 +6478,9 @@ async function fetchAssessmentWeights(subjectCode) {
   return result;
 }
 
+// DEFENSE NOTE [261] renderWeightsCard
+// Purpose: Builds or refreshes the visible weights card. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderWeightsCard(el, f, stats) {
   const head = '<div class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400">How your grade is computed</div>';
   const bar = (label, pct) => `
@@ -5728,6 +6496,9 @@ function renderWeightsCard(el, f, stats) {
      <div class="text-[10px] text-slate-500 italic">Each term grade comes from the scores your instructor recorded: category score = (points &divide; maximum) &times; 50 + 50, then weighted. Categories with no scores recorded are skipped.</div>`;
 }
 
+// DEFENSE NOTE [262] openStudentGradeBreakdownModal
+// Purpose: Opens student grade breakdown modal. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function openStudentGradeBreakdownModal(g) {
   const modal = document.getElementById('studentGradeBreakdownModal');
   const panel = document.getElementById('studentGradeBreakdownModalPanel');
@@ -5845,6 +6616,9 @@ async function openStudentGradeBreakdownModal(g) {
   }
 }
 
+// DEFENSE NOTE [263] closeStudentGradeBreakdownModal
+// Purpose: Closes student grade breakdown modal. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function closeStudentGradeBreakdownModal() {
   const modal = document.getElementById('studentGradeBreakdownModal');
   const panel = document.getElementById('studentGradeBreakdownModalPanel');
@@ -5870,6 +6644,9 @@ const IT_SUBJECT_PREFIXES = ['COMP', 'PROG', 'IT', 'SIA', 'DBMS', 'CAPSTONE', 'N
 // A subject document may carry an explicit isItMajor flag (set in Add Subject). Without it the code prefix decides,
 // exactly as before, so existing subjects keep their current classification.
 // Credited subjects are stored as an array of subject codes on the student's user document
+// DEFENSE NOTE [264] normalizeCreditedList
+// Purpose: Normalizes credited list. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function normalizeCreditedList(list) {
   const out = [];
   (Array.isArray(list) ? list : []).forEach((c) => {
@@ -5879,20 +6656,32 @@ function normalizeCreditedList(list) {
   return out;
 }
 
+// DEFENSE NOTE [265] isItSubject
+// Purpose: Checks whether a catalog subject is classified as IT-related. Classification accuracy depends on maintained subject metadata.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function isItSubject(subject) {
   if (subject && typeof subject.isItMajor === 'boolean') return subject.isItMajor;
   return isItSubjectCode(subject && subject.subjectCode);
 }
 
+// DEFENSE NOTE [266] isItSubjectCode
+// Purpose: Fallback classifier for IT-related subject codes; review department naming conventions before using it as the only source.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function isItSubjectCode(subjectCode) {
   const code = normalizeCodeKey(subjectCode);
   return IT_SUBJECT_PREFIXES.some((prefix) => code.startsWith(prefix));
 }
 
+// DEFENSE NOTE [267] prospectusGroupKey
+// Purpose: Processes group key. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function prospectusGroupKey(yearLevel, semester) {
   return `${yearLevel || ''}_${semester || ''}`;
 }
 
+// DEFENSE NOTE [268] groupSubjectsForProspectus
+// Purpose: Processes subjects for prospectus. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function groupSubjectsForProspectus(subjectsSnapshot, itOnly = false) {
   const buckets = new Map();
   subjectsSnapshot.forEach((doc) => {
@@ -5919,6 +6708,9 @@ function groupSubjectsForProspectus(subjectsSnapshot, itOnly = false) {
 // IT SUBJECT TOGGLE FILTER METHOD (STUDENT DASHBOARD)
 // ------------------------------------------------------------------
 
+// DEFENSE NOTE [269] toggleITSubjectFilter
+// Purpose: Toggles itsubject filter. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function toggleITSubjectFilter(mode) {
   isItOnlyFilterActive = (mode === 'it');
 
@@ -5934,6 +6726,9 @@ function toggleITSubjectFilter(mode) {
   loadAvailableSubjectsForStudent();
 }
 
+// DEFENSE NOTE [270] isITPrerequisiteMet
+// Purpose: Determines whether itprerequisite met. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function isITPrerequisiteMet(prereqCode, passedSubjectsSet) {
   if (!prereqCode || String(prereqCode).toUpperCase() === 'NONE' || !String(prereqCode).trim()) {
     return true;
@@ -5950,6 +6745,9 @@ function isITPrerequisiteMet(prereqCode, passedSubjectsSet) {
   });
 }
 
+// DEFENSE NOTE [271] loadAvailableSubjectsForStudent
+// Purpose: Loads the course catalog and determines which subjects can be requested based on enrollment and prerequisites.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function loadAvailableSubjectsForStudent() {
   const container = document.getElementById('prospectusContainer');
   if (!container || !currentUserId) return;
@@ -6096,6 +6894,9 @@ async function loadAvailableSubjectsForStudent() {
 // ENROLLMENT & NOTIFICATIONS
 // ------------------------------------------------------------------
 
+// DEFENSE NOTE [272] applySelectedSubjects
+// Purpose: Submits the student-selected enrollment requests to Firestore while enforcing available-subject rules.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function applySelectedSubjects() {
   if (!currentUserId) return;
 
@@ -6155,6 +6956,9 @@ async function applySelectedSubjects() {
 // ------------------------------------------------------------------
 const dropInFlight = new Set(); // enrollment ids with a write in progress (double-click guard)
 
+// DEFENSE NOTE [273] requestSubjectDrop
+// Purpose: Submits subject drop. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function requestSubjectDrop(enrollmentId) {
   if (!enrollmentId || dropInFlight.has(enrollmentId)) return;
   if (!confirm('Request to drop this subject?\n\nYour instructor must approve it. Until then you stay enrolled. If the drop is approved, your grades for this subject stop counting.')) return;
@@ -6182,6 +6986,9 @@ async function requestSubjectDrop(enrollmentId) {
   }
 }
 
+// DEFENSE NOTE [274] cancelDropRequest
+// Purpose: Processes drop request. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function cancelDropRequest(enrollmentId) {
   if (!enrollmentId || dropInFlight.has(enrollmentId)) return;
   dropInFlight.add(enrollmentId);
@@ -6205,6 +7012,9 @@ async function cancelDropRequest(enrollmentId) {
 }
 
 // Instructor or admin decides a student's drop request: approve (-> dropped) or keep the student enrolled (-> approved)
+// DEFENSE NOTE [275] decideDropRequest
+// Purpose: Processes drop request. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function decideDropRequest(enrollmentId, approve) {
   if (!enrollmentId || dropInFlight.has(enrollmentId)) return;
   dropInFlight.add(enrollmentId);
@@ -6240,6 +7050,9 @@ async function decideDropRequest(enrollmentId, approve) {
 }
 
 // Instructor removes a student from the roster directly (no request needed)
+// DEFENSE NOTE [276] dropStudentFromRoster
+// Purpose: Processes student from roster. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function dropStudentFromRoster(enrollmentId) {
   if (!enrollmentId || dropInFlight.has(enrollmentId)) return;
   const entry = rosterData.find((r) => r.enrollmentId === enrollmentId);
@@ -6273,6 +7086,9 @@ async function dropStudentFromRoster(enrollmentId) {
   }
 }
 
+// DEFENSE NOTE [277] refreshAfterDropDecision
+// Purpose: Refreshes after drop decision. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function refreshAfterDropDecision(subjectCode) {
   if (currentUserRole === 'admin' && typeof loadAdminDropRequests === 'function' && document.getElementById('adminDropRequestsList')) {
     // an admin deciding from the admin screen
@@ -6284,6 +7100,9 @@ async function refreshAfterDropDecision(subjectCode) {
   }
 }
 
+// DEFENSE NOTE [278] buildDropRequestRow
+// Purpose: Constructs drop request row. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function buildDropRequestRow(e, docId, showSubject) {
   const row = document.createElement('div');
   row.className = 'flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950';
@@ -6315,6 +7134,9 @@ function buildDropRequestRow(e, docId, showSubject) {
   return row;
 }
 
+// DEFENSE NOTE [279] loadDropRequests
+// Purpose: Retrieves and presents drop requests. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function loadDropRequests(subjectCode) {
   const container = document.getElementById('dropRequestsList');
   if (!container) return;
@@ -6340,6 +7162,9 @@ async function loadDropRequests(subjectCode) {
 }
 
 // Admin: every pending drop request across all subjects
+// DEFENSE NOTE [280] renderAdminDropRequests
+// Purpose: Builds or refreshes the visible admin drop requests. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderAdminDropRequests(docs) {
   const box = document.getElementById('adminDropRequestsList');
   const badge = document.getElementById('adminDropCount');
@@ -6353,6 +7178,9 @@ function renderAdminDropRequests(docs) {
   docs.forEach((e) => box.appendChild(buildDropRequestRow(e, e.id, true)));
 }
 
+// DEFENSE NOTE [281] loadAdminDropRequests
+// Purpose: Retrieves and presents admin drop requests. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function loadAdminDropRequests() {
   try {
     const snap = await db.collection('enrollments').where('status', '==', 'pending_drop').get();
@@ -6364,6 +7192,9 @@ async function loadAdminDropRequests() {
   }
 }
 
+// DEFENSE NOTE [282] loadPendingEnrollments
+// Purpose: Retrieves and presents pending enrollments. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function loadPendingEnrollments(subjectCode) {
   const container = document.getElementById('pendingEnrollmentsList');
   if (!container) return;
@@ -6440,6 +7271,9 @@ async function loadPendingEnrollments(subjectCode) {
   }
 }
 
+// DEFENSE NOTE [283] updateEnrollmentStatus
+// Purpose: Processes approval/rejection of enrollment requests and refreshes the affected records.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function updateEnrollmentStatus(enrollmentId, newStatus, subjectCode) {
   try {
     const enrollRef = db.collection('enrollments').doc(enrollmentId);
@@ -6466,6 +7300,9 @@ async function updateEnrollmentStatus(enrollmentId, newStatus, subjectCode) {
   }
 }
 
+// DEFENSE NOTE [284] setupNotificationsListener
+// Purpose: Subscribes to current-user notifications so the interface can reflect Firestore updates.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function setupNotificationsListener(uid) {
   detachNotificationsListener();
   if (!uid) return;
@@ -6479,6 +7316,9 @@ function setupNotificationsListener(uid) {
     );
 }
 
+// DEFENSE NOTE [285] detachNotificationsListener
+// Purpose: Processes notifications listener. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function detachNotificationsListener() {
   if (typeof notificationsUnsubscribe === 'function') {
     notificationsUnsubscribe();
@@ -6494,6 +7334,9 @@ function detachNotificationsListener() {
 let notificationDocs = [];
 let latestProgression = null;
 
+// DEFENSE NOTE [286] toggleNotificationDrawer
+// Purpose: Toggles notification drawer. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function toggleNotificationDrawer(open) {
   const drawer = document.getElementById('notificationDrawer');
   const overlay = document.getElementById('notificationOverlay');
@@ -6501,6 +7344,9 @@ function toggleNotificationDrawer(open) {
   if (overlay) overlay.classList.toggle('hidden', !open);
 }
 
+// DEFENSE NOTE [287] renderNotifications
+// Purpose: Builds or refreshes the visible notifications. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderNotifications(snapshot) {
   notificationDocs = [];
   snapshot.forEach((doc) => notificationDocs.push({ id: doc.id, ...doc.data() }));
@@ -6512,6 +7358,9 @@ function renderNotifications(snapshot) {
   renderNotificationPanel();
 }
 
+// DEFENSE NOTE [288] renderNotificationPanel
+// Purpose: Builds or refreshes the visible notification panel. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 function renderNotificationPanel() {
   renderStudentHomeNotifs();
   const count = notificationDocs.length;
@@ -6565,6 +7414,9 @@ function renderNotificationPanel() {
   });
 }
 
+// DEFENSE NOTE [289] markNotificationRead
+// Purpose: Marks notification read. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function markNotificationRead(id) {
   try {
     await db.collection('notifications').doc(id).update({ isRead: true });
@@ -6573,6 +7425,9 @@ async function markNotificationRead(id) {
   }
 }
 
+// DEFENSE NOTE [290] markAllNotificationsRead
+// Purpose: Marks all notifications read. Review its callers, validation branches, and database operations when explaining this feature.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function markAllNotificationsRead() {
   if (!notificationDocs.length) return;
   try {
@@ -6585,6 +7440,9 @@ async function markAllNotificationsRead() {
 }
 
 // Notification writes never block the main action; failures are logged only.
+// DEFENSE NOTE [291] sendNotifications
+// Purpose: Creates notification records for relevant users after academic or enrollment events.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function sendNotifications(items) {
   if (!items.length) return;
   try {
@@ -6603,6 +7461,9 @@ async function sendNotifications(items) {
   }
 }
 
+// DEFENSE NOTE [292] logActivity
+// Purpose: Writes an audit entry for a meaningful user action; audit logs support traceability during review.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function logActivity(user, action) {
   try {
     await db.collection('logs').add({
@@ -6617,8 +7478,92 @@ async function logActivity(user, action) {
   }
 }
 
+// DEFENSE NOTE [293] handleLogout
+// Purpose: Ends the authenticated session and returns the user to the login experience.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
 async function handleLogout() {
   await logActivity(currentUserEmail, 'Signed out');
   swrClear();
   signOutThisTab();
 }
+
+// Capstone defense upgrade: use catalog placement for curriculum year/semester,
+// enrollment timestamps/metadata for the actual school year when available.
+let studentSubjectRenderToken = 0;
+// DEFENSE NOTE [294] renderCategorizedStudentSubjects
+// Purpose: Groups the student enrollment list by curriculum year and semester and renders readable category sections.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
+async function renderCategorizedStudentSubjects(rows, body) {
+  const token = ++studentSubjectRenderToken;
+  if (!rows.length) { body.innerHTML = '<p class="text-sm text-slate-400 p-4">No subject requests yet. Choose subjects in Curriculum Prospectus.</p>'; return; }
+  const snapshot = await db.collection('subjects').get();
+  if (token !== studentSubjectRenderToken || !body.isConnected) return;
+  const catalog = new Map();
+  snapshot.forEach(d => { const s = d.data(); catalog.set(normalizeCodeKey(s.subjectCode || d.id), s); });
+  const groups = new Map();
+  for (const e of rows) {
+    const s = catalog.get(normalizeCodeKey(e.subjectCode)) || {};
+    const year = Number.parseInt(s.yearLevel, 10);
+    const validYear = year >= 1 && year <= 4;
+    const sem = normalizeSemester(s.semester || e.semester);
+    const validSem = sem === '1st Semester' || sem === '2nd Semester';
+    const academicYear = e.schoolYear || e.academicYear || 'Not recorded';
+    const key = `${validYear ? year : 9}|${validSem ? (sem === '1st Semester' ? 1 : 2) : 9}|${academicYear}`;
+    if (!groups.has(key)) groups.set(key, { year: validYear ? year : null, sem: validSem ? sem : 'Semester not assigned', academicYear, items: [] });
+    groups.get(key).items.push({ e, s });
+  }
+  const statusClass = {approved:'status-approved',pending:'status-pending',rejected:'status-rejected',pending_drop:'status-pending',dropped:'status-dropped'};
+  const sorted = [...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0],undefined,{numeric:true}));
+  body.innerHTML = sorted.map(([,g]) => `<section class="subject-group"><div class="subject-group-heading"><h4>${g.year ? ['','1st','2nd','3rd','4th'][g.year] + ' Year' : 'Unassigned curriculum year'} · ${escapeHtml(g.sem)}</h4><span>Academic Year: ${escapeHtml(g.academicYear)}</span></div><div class="subject-card-list">${g.items.map(({e,s})=>{
+    const id = String(e.__id || '');
+    const action = e.status === 'approved' ? `<button type="button" class="subject-drop" data-drop-id="${escapeHtml(id)}">Request drop</button>` : e.status === 'pending_drop' ? `<button type="button" class="subject-drop" data-cancel-id="${escapeHtml(id)}">Cancel request</button>` : '';
+    return `<article class="subject-card"><div><strong>${escapeHtml(e.subjectCode || '')}</strong><p>${escapeHtml(s.subjectName || s.name || s.title || '')}</p><small>Section: ${escapeHtml(e.section || 'Not assigned')}</small></div><div class="subject-card-right"><span class="subject-status ${statusClass[e.status] || 'status-pending'}">${escapeHtml(enrollmentStatusLabel(e.status))}</span>${action}</div></article>`;
+  }).join('')}</div></section>`).join('');
+  body.querySelectorAll('[data-drop-id]').forEach(b=>b.addEventListener('click',()=>requestSubjectDrop(b.dataset.dropId)));
+  body.querySelectorAll('[data-cancel-id]').forEach(b=>b.addEventListener('click',()=>cancelDropRequest(b.dataset.cancelId)));
+}
+
+// DEFENSE NOTE [295] confirmOfficialGradeRelease
+// Purpose: Shows the final review dialog with class context and an explicit acknowledgement. Resolves only after the instructor confirms; cancellation must not write grades.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
+function confirmOfficialGradeRelease(info) {
+  return new Promise(resolve => {
+    const modal = document.getElementById('gradeReleaseConfirmModal');
+    if (!modal) { resolve(false); return; } // fail closed
+    const detail = document.getElementById('gradeReleaseDetails');
+    detail.textContent = `Subject: ${info.subject} | Section: ${info.section} | ${normalizeSemester(info.semester)} | A.Y. ${info.schoolYear} | Students to release: ${info.count} | Retakes: ${info.retakeCount} | Skipped: ${info.skippedCount} | Already locked: ${info.lockedCount}`;
+    const check = document.getElementById('gradeReleaseAcknowledge');
+    const yes = document.getElementById('gradeReleaseYes');
+    const no = document.getElementById('gradeReleaseNo');
+    check.checked = false; yes.disabled = true; modal.classList.remove('hidden');
+    const onCheck = () => { yes.disabled = !check.checked; };
+    const onKey = e => { if (e.key === 'Escape') finish(false); };
+    function finish(value) {
+      modal.classList.add('hidden'); check.removeEventListener('change',onCheck);
+      yes.removeEventListener('click',onYes); no.removeEventListener('click',onNo);
+      document.removeEventListener('keydown',onKey); resolve(value);
+    }
+    const onYes = () => { if (check.checked) finish(true); };
+    const onNo = () => finish(false);
+    check.addEventListener('change',onCheck); yes.addEventListener('click',onYes);
+    no.addEventListener('click',onNo); document.addEventListener('keydown',onKey);
+    no.focus();
+  });
+}
+
+// DEFENSE NOTE [296] setPortalTheme
+// Purpose: Applies the selected appearance to the page and stores the browser preference for later visits.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
+function setPortalTheme(theme) {
+  const dark = theme !== 'light';
+  document.documentElement.classList.toggle('dark', dark);
+  document.documentElement.classList.toggle('portal-light', !dark);
+  localStorage.setItem('itePortalTheme', dark ? 'dark' : 'light');
+  const button = document.getElementById('themeToggle');
+  if (button) { button.textContent = dark ? '☀ Light mode' : '☾ Dark mode'; button.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode'); }
+}
+// DEFENSE NOTE [297] togglePortalTheme
+// Purpose: Switches between light and dark themes through the shared theme setter.
+// Explain: user action -> validation/calculation -> UI or Firestore result.
+function togglePortalTheme() { setPortalTheme(document.documentElement.classList.contains('portal-light') ? 'dark' : 'light'); }
+document.addEventListener('DOMContentLoaded', () => setPortalTheme(localStorage.getItem('itePortalTheme') || 'dark'));

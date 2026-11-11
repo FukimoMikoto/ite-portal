@@ -136,6 +136,7 @@
     class="h-full flex flex-col font-sans antialiased selection:bg-emerald-500 selection:text-slate-950"
   >
     <!-- ========================================================= -->
+    <!-- DEFENSE NOTE: This page section groups the related interface controls. app.js provides the behavior; CSS provides presentation. -->
     <!-- 1. AUTHENTICATION CONTAINER (SPLIT-SCREEN LAYOUT)        -->
     <!-- ========================================================= -->
     <div
@@ -413,6 +414,7 @@
     </div>
 
     <!-- ========================================================= -->
+    <!-- DEFENSE NOTE: This page section groups the related interface controls. app.js provides the behavior; CSS provides presentation. -->
     <!-- 2. MAIN APPLICATION DASHBOARD VIEW                        -->
     <!-- ========================================================= -->
     <div
@@ -446,6 +448,7 @@
           </div>
 
           <div class="flex items-center gap-3">
+            <button id="themeToggle" type="button" onclick="togglePortalTheme()" class="theme-toggle" aria-label="Switch theme">☀ Light mode</button>
             <button
               id="notificationBell"
               type="button"
@@ -571,7 +574,7 @@
           <!-- Academic Progression Banner (all text filled by JS) -->
           <div
             id="studentProgressionBanner" data-page="overview"
-            class="glass-panel p-6 rounded-2xl border border-slate-800 relative overflow-hidden"
+            class="glass-panel progression-feature p-6 rounded-2xl border border-slate-800 relative overflow-hidden"
           >
             <div
               class="flex flex-col md:flex-row md:items-center justify-between gap-6"
@@ -606,7 +609,7 @@
 
               <!-- Progress Bar Section -->
               <div
-                class="w-full md:w-80 space-y-2 bg-slate-950/60 p-4 rounded-xl border border-slate-800/80"
+                class="progression-meter w-full md:w-80 space-y-2 bg-slate-950/60 p-4 rounded-xl border border-slate-800/80"
               >
                 <div class="flex items-center justify-between text-xs">
                   <span class="font-bold text-slate-400"
@@ -642,7 +645,7 @@
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" data-page="overview">
             <!-- Card 1: GWA -->
             <div
-              class="p-5 rounded-2xl border border-slate-800 bg-slate-950/80 space-y-2"
+              class="student-stat-card p-5 rounded-2xl border border-slate-800 bg-slate-950/80 space-y-2"
             >
               <div class="flex items-center justify-between">
                 <span
@@ -667,7 +670,7 @@
 
             <!-- Card 2: Enrolled Units -->
             <div
-              class="p-5 rounded-2xl border border-slate-800 bg-slate-950/80 space-y-2"
+              class="student-stat-card p-5 rounded-2xl border border-slate-800 bg-slate-950/80 space-y-2"
             >
               <div class="flex items-center justify-between">
                 <span
@@ -692,12 +695,12 @@
 
             <!-- Card 3: Completed Units -->
             <div
-              class="p-5 rounded-2xl border border-slate-800 bg-slate-950/80 space-y-2"
+              class="student-stat-card p-5 rounded-2xl border border-slate-800 bg-slate-950/80 space-y-2"
             >
               <div class="flex items-center justify-between">
                 <span
                   class="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider"
-                  >COMPLETED UNITS</span
+                  >IT UNITS COMPLETED</span
                 >
                 <i data-lucide="layers" class="w-4 h-4 text-emerald-400"></i>
               </div>
@@ -717,12 +720,12 @@
 
             <!-- Card 4: Program Completion -->
             <div
-              class="p-5 rounded-2xl border border-slate-800 bg-slate-950/80 space-y-2"
+              class="student-stat-card p-5 rounded-2xl border border-slate-800 bg-slate-950/80 space-y-2"
             >
               <div class="flex items-center justify-between">
                 <span
                   class="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider"
-                  >PROGRAM COMPLETION</span
+                  >IT CURRICULUM COMPLETION</span
                 >
                 <i
                   data-lucide="check-circle-2"
@@ -746,14 +749,14 @@
 
           <!-- Student Home: subjects + notifications at a glance -->
           <div data-page="overview" class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <div class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3">
+            <div class="student-overview-panel p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3">
               <div class="flex items-center justify-between">
                 <h3 class="text-sm font-black text-white uppercase tracking-wider">My subjects</h3>
                 <button type="button" onclick="goToSidebarPage('subjects')" class="text-[11px] font-bold text-emerald-400 hover:underline">View all</button>
               </div>
               <div id="studentHomeSubjects" class="space-y-2 text-xs text-slate-500"><div class="h-4 rounded bg-slate-800/70 animate-pulse"></div><div class="h-4 rounded bg-slate-800/70 animate-pulse"></div><div class="h-4 rounded bg-slate-800/70 animate-pulse"></div></div>
             </div>
-            <div class="p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3">
+            <div class="student-overview-panel p-5 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3">
               <div class="flex items-center justify-between">
                 <h3 class="text-sm font-black text-white uppercase tracking-wider">Latest notifications</h3>
                 <button type="button" onclick="toggleNotificationDrawer(true)" class="text-[11px] font-bold text-emerald-400 hover:underline">Open all</button>
@@ -768,21 +771,7 @@
               <h3 class="text-base font-bold text-white">My Subjects</h3>
               <p class="text-xs text-slate-400">Your enrollment requests and their status.</p>
             </div>
-            <div class="overflow-x-auto">
-              <table class="w-full text-left border-collapse">
-                <thead>
-                  <tr class="border-b border-slate-800 text-[10px] font-extrabold uppercase tracking-widest text-slate-500">
-                    <th class="py-2 px-3">SUBJECT</th>
-                    <th class="py-2 px-3">SECTION</th>
-                    <th class="py-2 px-3">STATUS</th>
-                    <th class="py-2 px-3 text-right">ACTION</th>
-                  </tr>
-                </thead>
-                <tbody id="studentSubjectsBody" class="divide-y divide-slate-800/60 text-xs">
-                  <tr><td colspan="4" class="px-3 py-4 text-slate-500">Loading your subjects...</td></tr>
-                </tbody>
-              </table>
-            </div>
+            <div id="studentSubjectsBody" class="subject-groups" aria-live="polite"><p class="p-4 text-sm">Loading your subjects...</p></div>
           </div>
 
           <!-- Academic Records Table -->
@@ -2185,6 +2174,15 @@
       }
     </script>
 
+    <div id="gradeReleaseConfirmModal" class="hidden release-modal" role="dialog" aria-modal="true" aria-labelledby="gradeReleaseTitle">
+      <div class="release-panel"><h2 id="gradeReleaseTitle">⚠ Confirm Official Grade Release</h2>
+        <p>Review this operation carefully. Released grades are permanently locked and become visible to students.</p>
+        <div id="gradeReleaseDetails" class="release-details"></div>
+        <label class="release-check"><input id="gradeReleaseAcknowledge" type="checkbox"> I have verified the grades and understand that this action is permanent.</label>
+        <div class="release-actions"><button id="gradeReleaseNo" type="button">Cancel</button><button id="gradeReleaseYes" type="button" disabled>Release official grades</button></div>
+      </div>
+    </div>
+    <link rel="stylesheet" href="style.css">
     <script src="app.js"></script>
     <div id="printRoot" aria-hidden="true"></div>
   </body>

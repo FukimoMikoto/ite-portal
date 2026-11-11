@@ -1,26 +1,32 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400&display=swap');
 
+/* DEFENSE STYLE [001]: Visual presentation for body; changes here affect appearance, not academic calculations. */
 body {
   font-family: 'Poppins', sans-serif;
 }
 
 /* Custom Scrollbar */
+/* DEFENSE STYLE [002]: Visual presentation for ::-webkit-scrollbar; changes here affect appearance, not academic calculations. */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
+/* DEFENSE STYLE [003]: Visual presentation for ::-webkit-scrollbar-track; changes here affect appearance, not academic calculations. */
 ::-webkit-scrollbar-track {
   background: #020617;
 }
+/* DEFENSE STYLE [004]: Visual presentation for ::-webkit-scrollbar-thumb; changes here affect appearance, not academic calculations. */
 ::-webkit-scrollbar-thumb {
   background: #1e293b;
   border-radius: 4px;
 }
+/* DEFENSE STYLE [005]: Visual presentation for ::-webkit-scrollbar-thumb:hover; changes here affect appearance, not academic calculations. */
 ::-webkit-scrollbar-thumb:hover {
   background: #22c55e;
 }
 
 /* Unstretched Responsive Banner */
+/* DEFENSE STYLE [006]: Visual presentation for .banner-aspect-container; changes here affect appearance, not academic calculations. */
 .banner-aspect-container {
   width: 100%;
   max-width: 100%;
@@ -30,10 +36,170 @@ body {
   align-items: center;
 }
 
+/* DEFENSE STYLE [007]: Visual presentation for .responsive-full-img; changes here affect appearance, not academic calculations. */
 .responsive-full-img {
   width: 100%;
   height: auto;
   max-height: 80vh;
   object-fit: contain;
   display: block;
+}
+/* Defense-ready enhancements */
+/* DEFENSE STYLE [008]: Visual presentation for .theme-toggle; changes here affect appearance, not academic calculations. */
+.theme-toggle {border:1px solid #334155;border-radius:10px;padding:8px 10px;font-size:11px;font-weight:700;color:#e2e8f0;background:#0f172a;white-space:nowrap}
+/* DEFENSE STYLE [009]: Visual presentation for .subject-groups; changes here affect appearance, not academic calculations. */
+.subject-groups {display:grid;gap:14px}.subject-group {border:1px solid #263247;border-radius:14px;overflow:hidden}.subject-group-heading{padding:12px 14px;background:rgba(16,185,129,.09);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}.subject-group-heading h4{font-size:13px;font-weight:800;color:#f8fafc}.subject-group-heading span{font-size:11px;color:#94a3b8}.subject-card-list{display:grid;gap:1px}.subject-card{padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid #1e293b}.subject-card strong{font-size:12px;color:#f8fafc}.subject-card p,.subject-card small{display:block;font-size:11px;color:#94a3b8}.subject-card-right{display:flex;flex-wrap:wrap;align-items:end;flex-direction:column;gap:7px}.subject-status{font-size:10px;font-weight:800;text-transform:uppercase;border-radius:7px;padding:4px 8px}.status-approved{background:#064e3b;color:#6ee7b7}.status-pending{background:#422006;color:#fcd34d}.status-rejected{background:#4c0519;color:#fda4af}.status-dropped{background:#334155;color:#cbd5e1}.subject-drop{font-size:11px;color:#fb7185;border:1px solid #9f1239;border-radius:7px;padding:5px 8px}
+/* DEFENSE STYLE [010]: Visual presentation for .release-modal; changes here affect appearance, not academic calculations. */
+.release-modal{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:16px}.release-modal.hidden{display:none}.release-panel{background:#0f172a;color:#f8fafc;border:1px solid #475569;border-radius:18px;padding:24px;max-width:520px;width:100%;box-shadow:0 25px 80px #0009}.release-panel h2{font-size:19px;font-weight:800;margin-bottom:12px}.release-panel p{font-size:13px;color:#cbd5e1}.release-details{margin:16px 0;padding:14px;background:#020617;border-radius:10px;font-size:13px;line-height:1.8}.release-check{display:flex;align-items:flex-start;gap:10px;font-size:13px;line-height:1.5}.release-check input{margin-top:4px}.release-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}.release-actions button{border-radius:9px;padding:10px 14px;font-size:12px;font-weight:800;background:#334155}.release-actions #gradeReleaseYes{background:#e11d48;color:white}.release-actions #gradeReleaseYes:disabled{opacity:.4;cursor:not-allowed}
+/* Light palette: overrides existing dark-first Tailwind utilities without changing functional markup */
+/* DEFENSE STYLE [011]: Visual presentation for html.portal-light,html.portal-light body,html.portal-light #mainDashboard,html.portal-light #au; changes here affect appearance, not academic calculations. */
+html.portal-light,html.portal-light body,html.portal-light #mainDashboard,html.portal-light #authContainer{background:#f3f6fb!important;color:#172033!important}
+/* DEFENSE STYLE [012]: Visual presentation for html.portal-light .bg-\[\#090d16\],html.portal-light .bg-slate-950,html.portal-light .bg-slate-; changes here affect appearance, not academic calculations. */
+html.portal-light .bg-\[\#090d16\],html.portal-light .bg-slate-950,html.portal-light .bg-slate-950\/60,html.portal-light .bg-slate-900,html.portal-light .glass-panel{background:#fff!important}
+/* DEFENSE STYLE [013]: Visual presentation for html.portal-light .text-white,html.portal-light .text-slate-100,html.portal-light .text-slate-2; changes here affect appearance, not academic calculations. */
+html.portal-light .text-white,html.portal-light .text-slate-100,html.portal-light .text-slate-200,html.portal-light .text-slate-300{color:#172033!important}
+/* DEFENSE STYLE [014]: Visual presentation for html.portal-light .text-slate-400,html.portal-light .text-slate-500; changes here affect appearance, not academic calculations. */
+html.portal-light .text-slate-400,html.portal-light .text-slate-500{color:#52627a!important}
+/* DEFENSE STYLE [015]: Visual presentation for html.portal-light .border-slate-800,html.portal-light .border-slate-800\/60,html.portal-light .; changes here affect appearance, not academic calculations. */
+html.portal-light .border-slate-800,html.portal-light .border-slate-800\/60,html.portal-light .border-slate-800\/80{border-color:#dce3ee!important}
+/* DEFENSE STYLE [016]: Visual presentation for html.portal-light header,html.portal-light #roleSidebar; changes here affect appearance, not academic calculations. */
+html.portal-light header,html.portal-light #roleSidebar{background:#fff!important;color:#172033!important}
+/* DEFENSE STYLE [017]: Visual presentation for html.portal-light input,html.portal-light select,html.portal-light textarea; changes here affect appearance, not academic calculations. */
+html.portal-light input,html.portal-light select,html.portal-light textarea{color:#172033;background:#fff}
+/* DEFENSE STYLE [018]: Visual presentation for html.portal-light .subject-group-heading; changes here affect appearance, not academic calculations. */
+html.portal-light .subject-group-heading{background:#e8f8f1}html.portal-light .subject-group-heading h4,html.portal-light .subject-card strong{color:#172033}html.portal-light .subject-card{border-color:#e2e8f0}html.portal-light .subject-group{border-color:#dce3ee}html.portal-light .theme-toggle{background:#e2e8f0;color:#172033}html.portal-light .release-panel{background:#fff;color:#172033}html.portal-light .release-panel p{color:#475569}html.portal-light .release-details{background:#f1f5f9}html.portal-light .subject-card p,html.portal-light .subject-card small{color:#52627a}
+@media(max-width:640px){.subject-card{align-items:flex-start}.subject-group-heading{flex-direction:column}.theme-toggle{padding:7px;font-size:10px}.release-panel{padding:18px}.release-actions{flex-wrap:wrap}}
+@media print{.release-modal,.theme-toggle{display:none!important}}
+
+/* Light mode contrast correction: override Tailwind's dark-first translucent cards. */
+html.portal-light #mainDashboard .bg-slate-950\/80,
+html.portal-light #mainDashboard .bg-slate-950\/60,
+html.portal-light #mainDashboard .bg-slate-950\/70,
+html.portal-light #mainDashboard .bg-slate-900\/80,
+html.portal-light #mainDashboard .bg-slate-900\/60,
+html.portal-light #mainDashboard .bg-slate-900\/50,
+html.portal-light #mainDashboard .bg-slate-800\/70,
+html.portal-light #mainDashboard .bg-slate-800\/50,
+/* DEFENSE STYLE [019]: Visual presentation for html.portal-light #mainDashboard .bg-slate-800; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard .bg-slate-800 { background-color:#ffffff!important; }
+/* DEFENSE STYLE [020]: Visual presentation for html.portal-light #mainDashboard [id^="studentKpi"]; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard [id^="studentKpi"] {color:#14243a!important}
+html.portal-light #mainDashboard #studentKpiGwaSubtext,
+/* DEFENSE STYLE [021]: Visual presentation for html.portal-light #mainDashboard #studentKpiStandingSubtext; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard #studentKpiStandingSubtext {color:#047857!important}
+/* DEFENSE STYLE [022]: Visual presentation for html.portal-light #mainDashboard .text-emerald-400; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard .text-emerald-400 {color:#047857!important}
+/* DEFENSE STYLE [023]: Visual presentation for html.portal-light #mainDashboard .text-amber-400; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard .text-amber-400 {color:#92400e!important}
+/* DEFENSE STYLE [024]: Visual presentation for html.portal-light #mainDashboard .text-rose-400; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard .text-rose-400 {color:#be123c!important}
+/* DEFENSE STYLE [025]: Visual presentation for html.portal-light #mainDashboard .text-slate-600; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard .text-slate-600 {color:#52627a!important}
+/* DEFENSE STYLE [026]: Visual presentation for html.portal-light #mainDashboard .bg-emerald-500\/20; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard .bg-emerald-500\/20 {background-color:#d1fae5!important}
+/* DEFENSE STYLE [027]: Visual presentation for html.portal-light #mainDashboard .bg-amber-500\/20; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard .bg-amber-500\/20 {background-color:#fef3c7!important}
+html.portal-light #mainDashboard .border-slate-700,
+/* DEFENSE STYLE [028]: Visual presentation for html.portal-light #mainDashboard .border-slate-700\/50; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard .border-slate-700\/50 {border-color:#dce3ee!important}
+/* DEFENSE STYLE [029]: Visual presentation for html.portal-light #mainDashboard .bg-\[\#090d16\]; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard .bg-\[\#090d16\] {background-color:#f3f6fb!important}
+/* DEFENSE STYLE [030]: Visual presentation for html.portal-light .status-approved; changes here affect appearance, not academic calculations. */
+html.portal-light .status-approved {background:#d1fae5;color:#065f46}
+/* DEFENSE STYLE [031]: Visual presentation for html.portal-light .status-pending; changes here affect appearance, not academic calculations. */
+html.portal-light .status-pending {background:#fef3c7;color:#92400e}
+/* DEFENSE STYLE [032]: Visual presentation for html.portal-light .status-rejected; changes here affect appearance, not academic calculations. */
+html.portal-light .status-rejected {background:#ffe4e6;color:#9f1239}
+/* DEFENSE STYLE [033]: Visual presentation for html.portal-light .status-dropped; changes here affect appearance, not academic calculations. */
+html.portal-light .status-dropped {background:#e2e8f0;color:#334155}
+/* DEFENSE STYLE [034]: Visual presentation for html.portal-light .subject-drop; changes here affect appearance, not academic calculations. */
+html.portal-light .subject-drop {color:#be123c;border-color:#fda4af}
+/* DEFENSE STYLE [035]: Visual presentation for html.portal-light .release-actions button; changes here affect appearance, not academic calculations. */
+html.portal-light .release-actions button {background:#e2e8f0;color:#172033}
+/* DEFENSE STYLE [036]: Visual presentation for html.portal-light .release-actions #gradeReleaseYes; changes here affect appearance, not academic calculations. */
+html.portal-light .release-actions #gradeReleaseYes {background:#be123c;color:white}
+
+
+/* ================================================================
+   Student overview visual refinement — strong contrast in both themes
+   Scoped classes avoid changing faculty/admin screens or application logic.
+   ================================================================ */
+#studentProgressionBanner.progression-feature,
+#mainDashboard .student-stat-card,
+/* DEFENSE STYLE [037]: Visual presentation for #mainDashboard .student-overview-panel; changes here affect appearance, not academic calculations. */
+#mainDashboard .student-overview-panel {
+  border: 1.5px solid #334155;
+  box-shadow: 0 3px 12px rgba(0,0,0,.12);
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+/* DEFENSE STYLE [038]: Visual presentation for #mainDashboard .student-stat-card; changes here affect appearance, not academic calculations. */
+#mainDashboard .student-stat-card { min-height: 145px; border-top: 3px solid #10b981; }
+#mainDashboard .student-stat-card:hover,
+/* DEFENSE STYLE [039]: Visual presentation for #mainDashboard .student-overview-panel:hover; changes here affect appearance, not academic calculations. */
+#mainDashboard .student-overview-panel:hover { border-color:#10b981; box-shadow:0 8px 22px rgba(0,0,0,.13); }
+/* DEFENSE STYLE [040]: Visual presentation for #mainDashboard .student-stat-card > div:first-child span; changes here affect appearance, not academic calculations. */
+#mainDashboard .student-stat-card > div:first-child span { font-size:11px; letter-spacing:.055em; }
+/* DEFENSE STYLE [041]: Visual presentation for #mainDashboard .student-stat-card > div[id^="studentKpi"]; changes here affect appearance, not academic calculations. */
+#mainDashboard .student-stat-card > div[id^="studentKpi"] { font-size:32px; line-height:1.15; }
+/* DEFENSE STYLE [042]: Visual presentation for #mainDashboard .student-overview-panel; changes here affect appearance, not academic calculations. */
+#mainDashboard .student-overview-panel { min-height:200px; }
+/* DEFENSE STYLE [043]: Visual presentation for #mainDashboard .student-overview-panel h3; changes here affect appearance, not academic calculations. */
+#mainDashboard .student-overview-panel h3 { font-size:13px; letter-spacing:.035em; }
+#mainDashboard .student-overview-panel #studentHomeSubjects > *,
+/* DEFENSE STYLE [044]: Visual presentation for #mainDashboard .student-overview-panel #studentHomeNotifs > *; changes here affect appearance, not academic calculations. */
+#mainDashboard .student-overview-panel #studentHomeNotifs > * { padding-block:7px; }
+/* DEFENSE STYLE [045]: Visual presentation for #studentProgressionBanner .progression-meter; changes here affect appearance, not academic calculations. */
+#studentProgressionBanner .progression-meter { border-width:1.5px; }
+
+/* Light theme: contrast-forward academic dashboard. */
+html.portal-light #studentProgressionBanner.progression-feature,
+html.portal-light #mainDashboard .student-stat-card,
+/* DEFENSE STYLE [046]: Visual presentation for html.portal-light #mainDashboard .student-overview-panel; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard .student-overview-panel {
+  background:#fff !important;
+  border-color:#c5d2e3 !important;
+  box-shadow:0 2px 7px rgba(22,42,70,.07), 0 8px 24px rgba(22,42,70,.035);
+}
+/* DEFENSE STYLE [047]: Visual presentation for html.portal-light #mainDashboard .student-stat-card; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard .student-stat-card { border-top:3px solid #059669 !important; }
+html.portal-light #mainDashboard .student-stat-card:hover,
+/* DEFENSE STYLE [048]: Visual presentation for html.portal-light #mainDashboard .student-overview-panel:hover; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard .student-overview-panel:hover {
+  border-color:#059669 !important;
+  box-shadow:0 7px 22px rgba(5,150,105,.12);
+}
+html.portal-light #mainDashboard .student-stat-card > div:first-child span,
+html.portal-light #mainDashboard .student-overview-panel .text-slate-400,
+html.portal-light #mainDashboard .student-overview-panel .text-slate-500,
+html.portal-light #studentProgressionBanner .text-slate-500,
+/* DEFENSE STYLE [049]: Visual presentation for html.portal-light #studentProgressionBanner .text-slate-400; changes here affect appearance, not academic calculations. */
+html.portal-light #studentProgressionBanner .text-slate-400 { color:#42526b !important; }
+html.portal-light #mainDashboard .student-stat-card > div[id^="studentKpi"],
+html.portal-light #mainDashboard .student-overview-panel h3,
+/* DEFENSE STYLE [050]: Visual presentation for html.portal-light #studentProgressionTitle; changes here affect appearance, not academic calculations. */
+html.portal-light #studentProgressionTitle { color:#0f1f35 !important; }
+html.portal-light #mainDashboard .student-stat-card #studentKpiGwaSubtext,
+html.portal-light #mainDashboard .student-stat-card #studentKpiStandingSubtext,
+/* DEFENSE STYLE [051]: Visual presentation for html.portal-light #studentStandingText; changes here affect appearance, not academic calculations. */
+html.portal-light #studentStandingText { color:#047857 !important; }
+html.portal-light #mainDashboard .student-overview-panel #studentHomeSubjects,
+/* DEFENSE STYLE [052]: Visual presentation for html.portal-light #mainDashboard .student-overview-panel #studentHomeNotifs; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard .student-overview-panel #studentHomeNotifs { color:#334155 !important; }
+html.portal-light #mainDashboard .student-overview-panel #studentHomeSubjects strong,
+/* DEFENSE STYLE [053]: Visual presentation for html.portal-light #mainDashboard .student-overview-panel #studentHomeNotifs strong; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard .student-overview-panel #studentHomeNotifs strong { color:#0f1f35 !important; }
+html.portal-light #mainDashboard .student-overview-panel #studentHomeSubjects > * + *,
+/* DEFENSE STYLE [054]: Visual presentation for html.portal-light #mainDashboard .student-overview-panel #studentHomeNotifs > * + *; changes here affect appearance, not academic calculations. */
+html.portal-light #mainDashboard .student-overview-panel #studentHomeNotifs > * + * { border-color:#dce5f0 !important; }
+/* DEFENSE STYLE [055]: Visual presentation for html.portal-light #studentProgressionBanner .progression-meter; changes here affect appearance, not academic calculations. */
+html.portal-light #studentProgressionBanner .progression-meter { background:#f4f8fc !important; border-color:#c5d2e3 !important; }
+/* DEFENSE STYLE [056]: Visual presentation for html.portal-light #studentProgressionBanner .progression-meter .bg-slate-900; changes here affect appearance, not academic calculations. */
+html.portal-light #studentProgressionBanner .progression-meter .bg-slate-900 { background:#dce7ef !important; }
+/* DEFENSE STYLE [057]: Visual presentation for html.portal-light #studentProgressionBanner #studentUnitsProgressRatio; changes here affect appearance, not academic calculations. */
+html.portal-light #studentProgressionBanner #studentUnitsProgressRatio { color:#047857 !important; }
+/* DEFENSE STYLE [058]: Visual presentation for html.portal-light #studentProgressionBadge; changes here affect appearance, not academic calculations. */
+html.portal-light #studentProgressionBadge { color:#065f46 !important; background:#d1fae5 !important; border-color:#6ee7b7 !important; }
+@media (max-width:640px) {
+  #mainDashboard .student-stat-card { min-height:125px; }
+  #studentProgressionBanner.progression-feature { padding:18px; }
 }
